@@ -26,14 +26,6 @@ The goal is to learn how music recommendation systems work and build a clean pro
 - implicit
 - Jupyter Notebook
 
-## How It Works
-
-1. Load user-artist listening data
-2. Convert the data into a sparse user-item matrix
-3. Train an ALS model
-4. Generate artist recommendations for each user
-5. Evaluate the results using recommendation metrics
-
 ## Project Structure
 
 ```text
