@@ -17,15 +17,6 @@ The goal is to learn how music recommendation systems work and build a clean pro
 - Train an ALS collaborative filtering model
 - Evaluate recommendation quality
 
-## Tech Stack
-
-- Python
-- Pandas
-- NumPy
-- Scipy
-- implicit
-- Jupyter Notebook
-
 ## Project Structure
 
 ```text
