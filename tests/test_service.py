@@ -1,0 +1,77 @@
+from pathlib import Path
+
+import pandas as pd
+
+from music_recommender.artifacts import build_recommender_artifact, save_artifact
+from music_recommender.model import train_als_model
+from music_recommender.preprocessing import build_user_item_matrix, create_id_mappings
+from music_recommender.service import RecommenderService
+
+
+def service_dataframe() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "user_id": ["user_1", "user_1", "user_2", "user_2", "user_3", "user_3"],
+            "artist_id": [
+                "artist_1",
+                "artist_2",
+                "artist_2",
+                "artist_3",
+                "artist_3",
+                "artist_4",
+            ],
+            "artist_name": ["A", "B", "B", "C", "C", "D"],
+            "play_count": [10, 8, 9, 7, 8, 6],
+        }
+    )
+
+
+def create_service(tmp_path: Path) -> RecommenderService:
+    df = service_dataframe()
+    mappings = create_id_mappings(df)
+    matrix = build_user_item_matrix(
+        df,
+        mappings["user_id_to_index"],
+        mappings["artist_id_to_index"],
+    )
+    model = train_als_model(matrix, 4, 0.01, 1, 10.0, use_gpu=False)
+    artifact = build_recommender_artifact(
+        model=model,
+        mappings=mappings,
+        user_item_matrix=matrix,
+        filtered_df=df,
+        raw_data_path=tmp_path / "missing.csv",
+        training_config={"factors": 4},
+    )
+    artifact_path = tmp_path / "artifact.joblib"
+    save_artifact(artifact, artifact_path)
+    return RecommenderService.from_artifacts(artifact_path)
+
+
+def test_known_user_returns_als_strategy(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    response = service.recommend_user("user_1", top_k=2)
+
+    assert response["strategy"] == "als_personalized"
+    assert response["recommendations"]
+
+
+def test_unknown_user_returns_popular_fallback(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    response = service.recommend_user("missing_user", top_k=2)
+
+    assert response["strategy"] == "popular_fallback"
+    assert "Unknown user_id" in response["message"]
+    assert response["recommendations"][0]["popularity_rank"] == 1
+
+
+def test_service_metadata_is_available(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    metadata = service.metadata()
+
+    assert metadata["version"] == "2.0"
+    assert metadata["metadata"]["num_users"] == 3
+    assert metadata["training_config"]["factors"] == 4
