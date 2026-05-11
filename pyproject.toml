@@ -16,6 +16,11 @@ dependencies = [
     "uvicorn>=0.46.0",
 ]
 
+[project.optional-dependencies]
+gpu = [
+    "implicit[gpu]>=0.7.3",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
