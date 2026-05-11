@@ -2,13 +2,30 @@
 
 from fastapi import FastAPI, HTTPException
 
-from music_recommender.recommend import (
-    get_similar_artists,
-    load_recommender_artifacts,
-    recommend_artists_for_user,
-)
+from music_recommender.service import RecommenderService
 
 app = FastAPI(title="Music Recommendation System API")
+service: RecommenderService | None = None
+
+
+@app.on_event("startup")
+def load_service() -> None:
+    """Load model artifacts once at API startup when available."""
+    global service
+    try:
+        service = RecommenderService.from_artifacts()
+    except FileNotFoundError:
+        service = None
+
+
+def get_service() -> RecommenderService:
+    """Return the loaded service or a clear training error."""
+    if service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Model artifacts not found. Train the model first.",
+        )
+    return service
 
 
 @app.get("/")
@@ -17,46 +34,31 @@ def root() -> dict[str, str]:
     return {"message": "Music Recommendation System API"}
 
 
+@app.get("/health")
+def health() -> dict[str, object]:
+    """Return service health and artifact availability."""
+    return get_service().health()
+
+
+@app.get("/metadata")
+def metadata() -> dict[str, object]:
+    """Return loaded artifact metadata."""
+    return get_service().metadata()
+
+
 @app.get("/recommend/user/{user_id}")
 def recommend_user(user_id: str, top_k: int = 10) -> dict[str, object]:
     """Return artist recommendations for a user."""
     try:
-        model, user_item_matrix, mappings = load_recommender_artifacts()
-        recommendations = recommend_artists_for_user(
-            model=model,
-            user_id=user_id,
-            user_item_matrix=user_item_matrix,
-            mappings=mappings,
-            top_k=top_k,
-        )
-    except FileNotFoundError as error:
-        raise HTTPException(
-            status_code=503,
-            detail="Model artifacts not found. Train the model first.",
-        ) from error
+        return get_service().recommend_user(user_id=user_id, top_k=top_k)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-
-    return {"user_id": user_id, "recommendations": recommendations}
 
 
 @app.get("/similar-artists/{artist_id}")
 def similar_artists(artist_id: str, top_k: int = 10) -> dict[str, object]:
     """Return artists similar to a selected artist."""
     try:
-        model, _, mappings = load_recommender_artifacts()
-        recommendations = get_similar_artists(
-            model=model,
-            artist_id=artist_id,
-            mappings=mappings,
-            top_k=top_k,
-        )
-    except FileNotFoundError as error:
-        raise HTTPException(
-            status_code=503,
-            detail="Model artifacts not found. Train the model first.",
-        ) from error
+        return get_service().similar_artists(artist_id=artist_id, top_k=top_k)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-
-    return {"artist_id": artist_id, "similar_artists": recommendations}
