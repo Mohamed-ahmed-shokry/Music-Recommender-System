@@ -7,10 +7,10 @@ from music_recommender.config import (
     DEFAULT_ALS_FACTORS,
     DEFAULT_ALS_ITERATIONS,
     DEFAULT_ALS_REGULARIZATION,
-    DEFAULT_USE_GPU,
     DEFAULT_MIN_ARTIST_INTERACTIONS,
     DEFAULT_MIN_USER_INTERACTIONS,
     DEFAULT_TOP_K,
+    DEFAULT_USE_GPU,
     MAPPINGS_PATH,
     MODEL_PATH,
     RAW_DATA_PATH,
@@ -101,7 +101,9 @@ def recommend_user(
 
 @app.command()
 def similar_artists(
-    artist_id: str = typer.Option(..., help="Original artist ID, for example artist_2."),
+    artist_id: str = typer.Option(
+        ..., help="Original artist ID, for example artist_2."
+    ),
     top_k: int = DEFAULT_TOP_K,
 ) -> None:
     """Find artists similar to a selected artist."""
