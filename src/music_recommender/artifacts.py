@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import warnings
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -132,4 +133,11 @@ def load_artifact(path: str | Path = ARTIFACT_BUNDLE_PATH) -> RecommenderArtifac
     artifact_path = Path(path)
     if not artifact_path.exists():
         raise FileNotFoundError("Recommender artifact not found. Train the model first.")
-    return joblib.load(artifact_path)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Disabling GPU support because.*",
+            category=UserWarning,
+            module="implicit.gpu",
+        )
+        return joblib.load(artifact_path)
