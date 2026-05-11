@@ -199,8 +199,12 @@ def format_recommendations(recommendations: list[dict[str, Any]]) -> str:
 
     lines = []
     for index, recommendation in enumerate(recommendations, start=1):
+        popularity = ""
+        if "popularity_rank" in recommendation:
+            popularity = f" | popularity rank: {recommendation['popularity_rank']}"
         lines.append(
             f"{index}. {recommendation['artist_name']} "
             f"({recommendation['artist_id']}) - score: {recommendation['score']:.4f}"
+            f"{popularity}"
         )
     return "\n".join(lines)
