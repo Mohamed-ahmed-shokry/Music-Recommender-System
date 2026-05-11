@@ -5,6 +5,20 @@ import warnings
 
 import joblib
 import numpy as np
+
+warnings.filterwarnings(
+    "ignore",
+    message="Disabling GPU support because.*",
+    category=UserWarning,
+    module="implicit.gpu",
+)
+warnings.filterwarnings(
+    "ignore",
+    message="OpenBLAS is configured.*",
+    category=RuntimeWarning,
+    module="implicit.cpu.als",
+)
+
 from implicit.als import AlternatingLeastSquares
 from scipy.sparse import csr_matrix
 
