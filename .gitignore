@@ -8,6 +8,7 @@ artifacts/models/*.pkl
 artifacts/models/*.joblib
 artifacts/mappings/*.pkl
 artifacts/mappings/*.joblib
+artifacts/*.joblib
 data/processed/*
 !data/processed/.gitkeep
 .env
