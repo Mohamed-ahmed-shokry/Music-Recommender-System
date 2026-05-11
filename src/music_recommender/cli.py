@@ -57,7 +57,7 @@ def train(
     use_gpu: bool = DEFAULT_USE_GPU,
 ) -> None:
     """Train and save the ALS model."""
-    _, user_item_matrix, mappings = train_and_save_model(
+    model, user_item_matrix, mappings = train_and_save_model(
         factors=factors,
         regularization=regularization,
         iterations=iterations,
@@ -65,8 +65,8 @@ def train(
         use_gpu=use_gpu,
     )
     typer.echo("Model trained successfully.")
-    typer.echo(f"Training device: {getattr(_, 'training_device', 'unknown')}")
-    fallback_reason = getattr(_, "gpu_fallback_reason", None)
+    typer.echo(f"Training device: {getattr(model, 'training_device', 'unknown')}")
+    fallback_reason = getattr(model, "gpu_fallback_reason", None)
     if fallback_reason:
         typer.echo(f"GPU fallback reason: {fallback_reason}")
     typer.echo(f"Saved model to: {MODEL_PATH}")
