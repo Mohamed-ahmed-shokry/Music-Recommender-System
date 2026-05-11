@@ -430,8 +430,6 @@ def _average_metric_dicts(metric_dicts: list[dict[str, float]]) -> dict[str, flo
 
     metric_names = metric_dicts[0].keys()
     return {
-        metric_name: float(
-            np.mean([metrics[metric_name] for metrics in metric_dicts])
-        )
+        metric_name: float(np.mean([metrics[metric_name] for metrics in metric_dicts]))
         for metric_name in metric_names
     }

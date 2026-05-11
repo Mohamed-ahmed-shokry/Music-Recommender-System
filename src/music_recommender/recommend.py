@@ -188,7 +188,9 @@ def _build_recommendation(
         "score": score,
     }
     if artist_stats and artist_id in artist_stats:
-        recommendation["popularity_rank"] = int(artist_stats[artist_id]["popularity_rank"])
+        recommendation["popularity_rank"] = int(
+            artist_stats[artist_id]["popularity_rank"]
+        )
     return recommendation
 
 

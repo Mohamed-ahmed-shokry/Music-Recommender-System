@@ -33,9 +33,9 @@ def apply_popularity_penalty(
 
     adjusted_scores = scores.astype(float).copy()
     max_rank = max(len(artist_stats), 1)
-    score_scale = float(np.ptp(scores))
+    score_scale = float(np.max(np.abs(scores)))
     if score_scale == 0:
-        score_scale = max(float(np.max(np.abs(scores))), 1.0)
+        score_scale = 1.0
 
     for artist_index, artist_id in index_to_artist_id.items():
         stats = artist_stats.get(artist_id)

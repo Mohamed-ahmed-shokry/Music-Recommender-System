@@ -132,7 +132,9 @@ def load_artifact(path: str | Path = ARTIFACT_BUNDLE_PATH) -> RecommenderArtifac
     """Load a recommender artifact bundle."""
     artifact_path = Path(path)
     if not artifact_path.exists():
-        raise FileNotFoundError("Recommender artifact not found. Train the model first.")
+        raise FileNotFoundError(
+            "Recommender artifact not found. Train the model first."
+        )
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
