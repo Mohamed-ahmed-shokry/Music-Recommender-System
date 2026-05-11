@@ -1,7 +1,7 @@
 [project]
 name = "music-recommender-system"
 version = "0.1.0"
-description = "Add your description here"
+description = "Artist-level music recommendation system using ALS collaborative filtering."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11,<3.12"
 dependencies = []
