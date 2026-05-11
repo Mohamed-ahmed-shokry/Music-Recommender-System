@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from music_recommender.artifacts import RecommenderArtifact, load_artifact
+from music_recommender.baselines import popular_artists
 from music_recommender.config import ARTIFACT_BUNDLE_PATH
 from music_recommender.recommend import (
     get_similar_artists,
@@ -49,19 +50,42 @@ class RecommenderService:
         self,
         user_id: str,
         top_k: int,
+        include_listened: bool = False,
+        popularity_penalty: float = 0.0,
+        diversity: float = 0.0,
     ) -> dict[str, Any]:
-        """Recommend artists for a known user."""
-        recommendations = recommend_artists_for_user(
-            model=self.artifact.model,
-            user_id=user_id,
-            user_item_matrix=self.artifact.user_item_matrix,
-            mappings=self.artifact.mappings,
-            top_k=top_k,
-        )
+        """Recommend artists for a user, with a popularity fallback if unknown."""
+        if user_id in self.artifact.mappings["user_id_to_index"]:
+            recommendations = recommend_artists_for_user(
+                model=self.artifact.model,
+                user_id=user_id,
+                user_item_matrix=self.artifact.user_item_matrix,
+                mappings=self.artifact.mappings,
+                top_k=top_k,
+                include_listened=include_listened,
+                artist_stats=self.artifact.artist_stats,
+                popularity_penalty=popularity_penalty,
+                diversity=diversity,
+            )
+            return {
+                "user_id": user_id,
+                "strategy": "als_personalized",
+                "recommendations": recommendations,
+            }
+
+        recommendations = popular_artists(self.artifact.artist_stats, top_k=top_k)
         return {
             "user_id": user_id,
-            "strategy": "als_personalized",
+            "strategy": "popular_fallback",
+            "message": f"Unknown user_id '{user_id}'. Returning popular artists.",
             "recommendations": recommendations,
+        }
+
+    def popular_artists(self, top_k: int) -> dict[str, Any]:
+        """Return globally popular artists from the training data."""
+        return {
+            "strategy": "popular_baseline",
+            "recommendations": popular_artists(self.artifact.artist_stats, top_k=top_k),
         }
 
     def similar_artists(
@@ -75,6 +99,7 @@ class RecommenderService:
             artist_id=artist_id,
             mappings=self.artifact.mappings,
             top_k=top_k,
+            artist_stats=self.artifact.artist_stats,
         )
         return {
             "artist_id": artist_id,
