@@ -35,9 +35,7 @@ def test_negative_play_count_raises_value_error() -> None:
 
 
 def test_empty_dataframe_raises_value_error() -> None:
-    df = pd.DataFrame(
-        columns=["user_id", "artist_id", "artist_name", "play_count"]
-    )
+    df = pd.DataFrame(columns=["user_id", "artist_id", "artist_name", "play_count"])
 
     with pytest.raises(ValueError, match="empty"):
         validate_interactions(df)

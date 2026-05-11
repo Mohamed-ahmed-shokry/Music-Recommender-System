@@ -42,7 +42,9 @@ def create_id_mappings(df: pd.DataFrame) -> Mappings:
 
     user_id_to_index = {user_id: index for index, user_id in enumerate(user_ids)}
     index_to_user_id = {index: user_id for user_id, index in user_id_to_index.items()}
-    artist_id_to_index = {artist_id: index for index, artist_id in enumerate(artist_ids)}
+    artist_id_to_index = {
+        artist_id: index for index, artist_id in enumerate(artist_ids)
+    }
     index_to_artist_id = {
         index: artist_id for artist_id, index in artist_id_to_index.items()
     }

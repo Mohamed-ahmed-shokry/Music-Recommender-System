@@ -1,25 +1,13 @@
 """ALS model training and persistence."""
 
-from pathlib import Path
+from __future__ import annotations
+
 import warnings
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import joblib
 import numpy as np
-
-warnings.filterwarnings(
-    "ignore",
-    message="Disabling GPU support because.*",
-    category=UserWarning,
-    module="implicit.gpu",
-)
-warnings.filterwarnings(
-    "ignore",
-    message="OpenBLAS is configured.*",
-    category=RuntimeWarning,
-    module="implicit.cpu.als",
-)
-
-from implicit.als import AlternatingLeastSquares
 from scipy.sparse import csr_matrix
 
 from music_recommender.config import (
@@ -27,14 +15,48 @@ from music_recommender.config import (
     DEFAULT_ALS_FACTORS,
     DEFAULT_ALS_ITERATIONS,
     DEFAULT_ALS_REGULARIZATION,
-    DEFAULT_USE_GPU,
     DEFAULT_MIN_ARTIST_INTERACTIONS,
     DEFAULT_MIN_USER_INTERACTIONS,
+    DEFAULT_USE_GPU,
     MAPPINGS_PATH,
     MODEL_PATH,
     RAW_DATA_PATH,
 )
 from music_recommender.preprocessing import Mappings, prepare_training_data
+
+if TYPE_CHECKING:
+    from implicit.als import AlternatingLeastSquares
+
+
+def _create_als_model(
+    factors: int,
+    regularization: float,
+    iterations: int,
+    use_gpu: bool,
+) -> AlternatingLeastSquares:
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Disabling GPU support because.*",
+            category=UserWarning,
+            module="implicit.gpu",
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message="OpenBLAS is configured.*",
+            category=RuntimeWarning,
+            module="implicit.cpu.als",
+        )
+        from implicit.als import AlternatingLeastSquares
+
+        return AlternatingLeastSquares(
+            factors=factors,
+            regularization=regularization,
+            iterations=iterations,
+            dtype=np.float32,
+            use_gpu=use_gpu,
+            random_state=42,
+        )
 
 
 def train_als_model(
@@ -48,54 +70,46 @@ def train_als_model(
     """Train an ALS model on a user-item interaction matrix."""
     item_user_matrix = (user_item_matrix * alpha).T.tocsr()
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            model = AlternatingLeastSquares(
-                factors=factors,
-                regularization=regularization,
-                iterations=iterations,
-                dtype=np.float32,
-                use_gpu=use_gpu,
-                random_state=42,
-            )
-    except (ImportError, ValueError, RuntimeError) as error:
-        if not use_gpu:
-            raise
-        model = AlternatingLeastSquares(
+        model = _create_als_model(
             factors=factors,
             regularization=regularization,
             iterations=iterations,
-            dtype=np.float32,
-            use_gpu=False,
-            random_state=42,
+            use_gpu=use_gpu,
         )
-        setattr(model, "training_device", "cpu")
-        setattr(model, "gpu_fallback_reason", str(error))
+    except (ImportError, ValueError, RuntimeError) as error:
+        if not use_gpu:
+            raise
+        model = _create_als_model(
+            factors=factors,
+            regularization=regularization,
+            iterations=iterations,
+            use_gpu=False,
+        )
+        model.training_device = "cpu"
+        model.gpu_fallback_reason = str(error)
     else:
-        setattr(model, "training_device", "gpu" if use_gpu else "cpu")
-        setattr(model, "gpu_fallback_reason", None)
+        model.training_device = "gpu" if use_gpu else "cpu"
+        model.gpu_fallback_reason = None
 
     try:
         model.fit(item_user_matrix, show_progress=False)
     except (ImportError, ValueError, RuntimeError) as error:
         if not use_gpu or getattr(model, "training_device", "cpu") != "gpu":
             raise
-        model = AlternatingLeastSquares(
+        model = _create_als_model(
             factors=factors,
             regularization=regularization,
             iterations=iterations,
-            dtype=np.float32,
             use_gpu=False,
-            random_state=42,
         )
-        setattr(model, "training_device", "cpu")
-        setattr(model, "gpu_fallback_reason", str(error))
+        model.training_device = "cpu"
+        model.gpu_fallback_reason = str(error)
         model.fit(item_user_matrix, show_progress=False)
 
     if getattr(model, "training_device", "cpu") == "gpu" and hasattr(model, "to_cpu"):
         model = model.to_cpu()
-        setattr(model, "training_device", "gpu")
-        setattr(model, "gpu_fallback_reason", None)
+        model.training_device = "gpu"
+        model.gpu_fallback_reason = None
     return model
 
 
