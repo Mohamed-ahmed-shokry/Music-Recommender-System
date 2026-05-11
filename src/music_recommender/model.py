@@ -10,7 +10,9 @@ import joblib
 import numpy as np
 from scipy.sparse import csr_matrix
 
+from music_recommender.artifacts import build_recommender_artifact, save_artifact
 from music_recommender.config import (
+    ARTIFACT_BUNDLE_PATH,
     DEFAULT_ALS_ALPHA,
     DEFAULT_ALS_FACTORS,
     DEFAULT_ALS_ITERATIONS,
@@ -129,6 +131,7 @@ def train_and_save_model(
     raw_data_path: str | Path = RAW_DATA_PATH,
     model_path: str | Path = MODEL_PATH,
     mappings_path: str | Path = MAPPINGS_PATH,
+    artifact_path: str | Path = ARTIFACT_BUNDLE_PATH,
     min_user_interactions: int = DEFAULT_MIN_USER_INTERACTIONS,
     min_artist_interactions: int = DEFAULT_MIN_ARTIST_INTERACTIONS,
     factors: int = DEFAULT_ALS_FACTORS,
@@ -138,7 +141,7 @@ def train_and_save_model(
     use_gpu: bool = DEFAULT_USE_GPU,
 ) -> tuple[AlternatingLeastSquares, csr_matrix, Mappings]:
     """Prepare data, train ALS, and save model artifacts."""
-    _, user_item_matrix, mappings = prepare_training_data(
+    filtered_df, user_item_matrix, mappings = prepare_training_data(
         raw_data_path=raw_data_path,
         mappings_path=mappings_path,
         min_user_interactions=min_user_interactions,
@@ -153,4 +156,23 @@ def train_and_save_model(
         use_gpu=use_gpu,
     )
     save_model(model, model_path)
+    training_config = {
+        "raw_data_path": str(raw_data_path),
+        "min_user_interactions": min_user_interactions,
+        "min_artist_interactions": min_artist_interactions,
+        "factors": factors,
+        "regularization": regularization,
+        "iterations": iterations,
+        "alpha": alpha,
+        "use_gpu": use_gpu,
+    }
+    artifact = build_recommender_artifact(
+        model=model,
+        mappings=mappings,
+        user_item_matrix=user_item_matrix,
+        filtered_df=filtered_df,
+        raw_data_path=raw_data_path,
+        training_config=training_config,
+    )
+    save_artifact(artifact, artifact_path)
     return model, user_item_matrix, mappings
