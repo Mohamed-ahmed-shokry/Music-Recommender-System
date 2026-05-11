@@ -10,6 +10,7 @@ from music_recommender.config import (
     DEFAULT_ALS_FACTORS,
     DEFAULT_ALS_ITERATIONS,
     DEFAULT_ALS_REGULARIZATION,
+    DEFAULT_USE_GPU,
 )
 from music_recommender.model import train_als_model
 from music_recommender.preprocessing import build_user_item_matrix, create_id_mappings
@@ -134,7 +135,11 @@ def train_test_split_by_user(
     return train_df, test_df
 
 
-def evaluate_model(df: pd.DataFrame, top_k: int) -> dict[str, float]:
+def evaluate_model(
+    df: pd.DataFrame,
+    top_k: int,
+    use_gpu: bool = DEFAULT_USE_GPU,
+) -> dict[str, float]:
     """Train and evaluate ALS using a simple per-user holdout split."""
     train_df, test_df = train_test_split_by_user(df)
     mappings = create_id_mappings(train_df)
@@ -149,6 +154,7 @@ def evaluate_model(df: pd.DataFrame, top_k: int) -> dict[str, float]:
         regularization=DEFAULT_ALS_REGULARIZATION,
         iterations=DEFAULT_ALS_ITERATIONS,
         alpha=DEFAULT_ALS_ALPHA,
+        use_gpu=use_gpu,
     )
 
     all_recommended_items: list[list[str]] = []
