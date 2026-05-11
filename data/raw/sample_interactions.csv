@@ -1,0 +1,97 @@
+user_id,artist_id,artist_name,play_count
+user_1,artist_1,The Weeknd,42
+user_1,artist_2,Drake,38
+user_1,artist_3,Travis Scott,31
+user_1,artist_4,Kendrick Lamar,25
+user_1,artist_5,J. Cole,18
+user_1,artist_17,SZA,16
+user_1,artist_6,Dua Lipa,9
+user_1,artist_14,Daft Punk,7
+user_2,artist_2,Drake,52
+user_2,artist_4,Kendrick Lamar,37
+user_2,artist_5,J. Cole,33
+user_2,artist_3,Travis Scott,26
+user_2,artist_1,The Weeknd,20
+user_2,artist_17,SZA,15
+user_2,artist_9,Billie Eilish,8
+user_2,artist_7,Taylor Swift,6
+user_3,artist_4,Kendrick Lamar,46
+user_3,artist_5,J. Cole,41
+user_3,artist_2,Drake,27
+user_3,artist_3,Travis Scott,23
+user_3,artist_17,SZA,18
+user_3,artist_1,The Weeknd,13
+user_3,artist_10,Coldplay,7
+user_3,artist_18,Radiohead,5
+user_4,artist_7,Taylor Swift,45
+user_4,artist_6,Dua Lipa,40
+user_4,artist_8,Ariana Grande,36
+user_4,artist_9,Billie Eilish,28
+user_4,artist_17,SZA,19
+user_4,artist_1,The Weeknd,14
+user_4,artist_15,Calvin Harris,9
+user_4,artist_2,Drake,6
+user_5,artist_6,Dua Lipa,39
+user_5,artist_8,Ariana Grande,35
+user_5,artist_7,Taylor Swift,30
+user_5,artist_9,Billie Eilish,24
+user_5,artist_15,Calvin Harris,18
+user_5,artist_14,Daft Punk,12
+user_5,artist_17,SZA,10
+user_5,artist_1,The Weeknd,8
+user_6,artist_10,Coldplay,44
+user_6,artist_11,Foo Fighters,39
+user_6,artist_12,Arctic Monkeys,34
+user_6,artist_13,The Strokes,27
+user_6,artist_18,Radiohead,22
+user_6,artist_9,Billie Eilish,10
+user_6,artist_14,Daft Punk,7
+user_6,artist_4,Kendrick Lamar,5
+user_7,artist_12,Arctic Monkeys,43
+user_7,artist_13,The Strokes,36
+user_7,artist_18,Radiohead,31
+user_7,artist_10,Coldplay,24
+user_7,artist_11,Foo Fighters,20
+user_7,artist_9,Billie Eilish,13
+user_7,artist_16,ODESZA,8
+user_7,artist_6,Dua Lipa,5
+user_8,artist_14,Daft Punk,48
+user_8,artist_15,Calvin Harris,41
+user_8,artist_16,ODESZA,33
+user_8,artist_6,Dua Lipa,22
+user_8,artist_8,Ariana Grande,15
+user_8,artist_1,The Weeknd,11
+user_8,artist_10,Coldplay,8
+user_8,artist_13,The Strokes,5
+user_9,artist_15,Calvin Harris,46
+user_9,artist_16,ODESZA,38
+user_9,artist_14,Daft Punk,35
+user_9,artist_6,Dua Lipa,27
+user_9,artist_7,Taylor Swift,19
+user_9,artist_8,Ariana Grande,12
+user_9,artist_1,The Weeknd,9
+user_9,artist_9,Billie Eilish,6
+user_10,artist_1,The Weeknd,37
+user_10,artist_17,SZA,31
+user_10,artist_7,Taylor Swift,25
+user_10,artist_2,Drake,22
+user_10,artist_6,Dua Lipa,18
+user_10,artist_4,Kendrick Lamar,14
+user_10,artist_9,Billie Eilish,10
+user_10,artist_15,Calvin Harris,7
+user_11,artist_18,Radiohead,36
+user_11,artist_14,Daft Punk,32
+user_11,artist_16,ODESZA,27
+user_11,artist_10,Coldplay,22
+user_11,artist_13,The Strokes,16
+user_11,artist_11,Foo Fighters,12
+user_11,artist_6,Dua Lipa,9
+user_11,artist_3,Travis Scott,5
+user_12,artist_2,Drake,29
+user_12,artist_7,Taylor Swift,27
+user_12,artist_10,Coldplay,24
+user_12,artist_14,Daft Punk,22
+user_12,artist_17,SZA,18
+user_12,artist_12,Arctic Monkeys,15
+user_12,artist_8,Ariana Grande,11
+user_12,artist_5,J. Cole,8
