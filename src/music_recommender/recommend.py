@@ -1,10 +1,11 @@
 """Recommendation helpers for users and artists."""
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from implicit.als import AlternatingLeastSquares
 from scipy.sparse import csr_matrix
 
 from music_recommender.config import (
@@ -22,6 +23,9 @@ from music_recommender.preprocessing import (
     filter_interactions,
     load_mappings,
 )
+
+if TYPE_CHECKING:
+    from implicit.als import AlternatingLeastSquares
 
 Recommendation = dict[str, str | float]
 
