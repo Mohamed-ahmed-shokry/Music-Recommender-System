@@ -11,6 +11,7 @@ PROCESSED_DATA_DIR = DATA_DIR / "processed"
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 MODEL_DIR = ARTIFACTS_DIR / "models"
 MAPPINGS_DIR = ARTIFACTS_DIR / "mappings"
+ARTIFACT_BUNDLE_PATH = ARTIFACTS_DIR / "recommender_artifact.joblib"
 MODEL_PATH = MODEL_DIR / "als_model.joblib"
 MAPPINGS_PATH = MAPPINGS_DIR / "id_mappings.joblib"
 
