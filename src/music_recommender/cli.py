@@ -122,16 +122,46 @@ def artifact_info() -> None:
 def recommend_user(
     user_id: str = typer.Option(..., help="Original user ID, for example user_1."),
     top_k: int = DEFAULT_TOP_K,
+    include_listened: bool = typer.Option(
+        False,
+        "--include-listened/--exclude-listened",
+        help="Include or exclude artists the user already listened to.",
+    ),
+    popularity_penalty: float = 0.0,
+    diversity: float = 0.0,
 ) -> None:
     """Recommend artists for a user."""
     try:
         service = RecommenderService.from_artifacts()
-        response = service.recommend_user(user_id=user_id, top_k=top_k)
+        response = service.recommend_user(
+            user_id=user_id,
+            top_k=top_k,
+            include_listened=include_listened,
+            popularity_penalty=popularity_penalty,
+            diversity=diversity,
+        )
     except (FileNotFoundError, ValueError) as error:
         typer.echo(f"Error: {error}")
         raise typer.Exit(code=1) from error
 
     typer.echo(f"Recommendations for {user_id}:")
+    typer.echo(f"Strategy: {response['strategy']}")
+    if response.get("message"):
+        typer.echo(response["message"])
+    typer.echo(format_recommendations(response["recommendations"]))
+
+
+@app.command()
+def popular_artists(top_k: int = DEFAULT_TOP_K) -> None:
+    """Show globally popular artists from the training data."""
+    try:
+        service = RecommenderService.from_artifacts()
+        response = service.popular_artists(top_k=top_k)
+    except (FileNotFoundError, ValueError) as error:
+        typer.echo(f"Error: {error}")
+        raise typer.Exit(code=1) from error
+
+    typer.echo("Popular artists:")
     typer.echo(f"Strategy: {response['strategy']}")
     typer.echo(format_recommendations(response["recommendations"]))
 
