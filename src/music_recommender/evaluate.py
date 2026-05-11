@@ -118,7 +118,9 @@ def catalog_coverage(
         return 0.0
 
     recommended_catalog_items = {
-        item for recommended_items in list_of_recommended_items for item in recommended_items
+        item
+        for recommended_items in list_of_recommended_items
+        for item in recommended_items
     }
     return len(recommended_catalog_items & catalog_items) / len(catalog_items)
 
@@ -143,7 +145,11 @@ def intra_list_diversity(
     artist_id_to_index: dict[str, int],
 ) -> float:
     """Calculate average pairwise dissimilarity inside one recommendation list."""
-    indices = [artist_id_to_index[item] for item in recommended_items if item in artist_id_to_index]
+    indices = [
+        artist_id_to_index[item]
+        for item in recommended_items
+        if item in artist_id_to_index
+    ]
     if len(indices) < 2:
         return 0.0
 
@@ -297,7 +303,9 @@ def _evaluate_single_fold(
         all_relevant_items.append(relevant_items)
 
         if compare_baseline:
-            train_artist_ids = set(train_df.loc[train_df["user_id"] == user_id, "artist_id"])
+            train_artist_ids = set(
+                train_df.loc[train_df["user_id"] == user_id, "artist_id"]
+            )
             baseline_recommendations = popular_artists(
                 artist_stats,
                 top_k=top_k,
@@ -360,8 +368,8 @@ def _summarize_recommendations(
                 [
                     precision_at_k(recommended_items, relevant_items, top_k)
                     for recommended_items, relevant_items in zip(
-                        all_recommended_items,
-                        all_relevant_items,
+                        list_of_recommended_items,
+                        list_of_relevant_items,
                         strict=False,
                     )
                 ]
@@ -372,21 +380,25 @@ def _summarize_recommendations(
                 [
                     recall_at_k(recommended_items, relevant_items, top_k)
                     for recommended_items, relevant_items in zip(
-                        all_recommended_items,
-                        all_relevant_items,
+                        list_of_recommended_items,
+                        list_of_relevant_items,
                         strict=False,
                     )
                 ]
             )
         ),
-        "map_at_k": map_at_k(all_recommended_items, all_relevant_items, top_k),
+        "map_at_k": map_at_k(
+            list_of_recommended_items,
+            list_of_relevant_items,
+            top_k,
+        ),
         "ndcg_at_k": float(
             np.mean(
                 [
                     ndcg_at_k(recommended_items, relevant_items, top_k)
                     for recommended_items, relevant_items in zip(
-                        all_recommended_items,
-                        all_relevant_items,
+                        list_of_recommended_items,
+                        list_of_relevant_items,
                         strict=False,
                     )
                 ]
