@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from implicit.als import AlternatingLeastSquares
 from scipy.sparse import csr_matrix
 
@@ -41,23 +42,29 @@ def recommend_artists_for_user(
         raise ValueError(f"Unknown user_id: {user_id}")
 
     user_index = user_id_to_index[user_id]
-    artist_indices, scores = model.recommend(
-        user_index,
-        user_item_matrix[user_index],
-        N=top_k,
-        filter_already_liked_items=True,
-    )
+    user_factors = model.item_factors
+    artist_factors = model.user_factors
+    scores = artist_factors @ user_factors[user_index]
+    listened_artist_indices = set(user_item_matrix[user_index].indices)
+    ranked_artist_indices = np.argsort(scores)[::-1]
 
     recommendations: list[Recommendation] = []
-    for artist_index, score in zip(artist_indices, scores, strict=False):
+    for artist_index in ranked_artist_indices:
+        artist_index = int(artist_index)
+        if artist_index in listened_artist_indices:
+            continue
+
         artist_id = index_to_artist_id[int(artist_index)]
         recommendations.append(
             {
                 "artist_id": artist_id,
                 "artist_name": artist_id_to_name[artist_id],
-                "score": float(score),
+                "score": float(scores[artist_index]),
             }
         )
+        if len(recommendations) == top_k:
+            break
+
     return recommendations
 
 
@@ -76,10 +83,25 @@ def get_similar_artists(
         raise ValueError(f"Unknown artist_id: {artist_id}")
 
     artist_index = artist_id_to_index[artist_id]
-    artist_indices, scores = model.similar_items(artist_index, N=top_k + 1)
+    artist_factors = model.user_factors
+    query_vector = artist_factors[artist_index]
+    query_norm = np.linalg.norm(query_vector)
+    if query_norm == 0:
+        return []
+
+    norms = np.linalg.norm(artist_factors, axis=1)
+    denominator = norms * query_norm
+    scores = np.divide(
+        artist_factors @ query_vector,
+        denominator,
+        out=np.zeros_like(norms),
+        where=denominator != 0,
+    )
+    ranked_artist_indices = np.argsort(scores)[::-1]
 
     similar_artists: list[Recommendation] = []
-    for similar_index, score in zip(artist_indices, scores, strict=False):
+    for similar_index in ranked_artist_indices:
+        similar_index = int(similar_index)
         similar_artist_id = index_to_artist_id[int(similar_index)]
         if similar_artist_id == artist_id:
             continue
@@ -87,7 +109,7 @@ def get_similar_artists(
             {
                 "artist_id": similar_artist_id,
                 "artist_name": artist_id_to_name[similar_artist_id],
-                "score": float(score),
+                "score": float(scores[similar_index]),
             }
         )
         if len(similar_artists) == top_k:
