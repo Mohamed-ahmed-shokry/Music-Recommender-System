@@ -20,7 +20,7 @@ from music_recommender.config import (
     RAW_DATA_PATH,
 )
 from music_recommender.data import load_and_validate_interactions
-from music_recommender.evaluate import evaluate_model
+from music_recommender.evaluate import evaluate_repeated_holdout
 from music_recommender.model import train_and_save_model
 from music_recommender.preprocessing import prepare_training_data
 from music_recommender.recommend import format_recommendations
@@ -186,14 +186,44 @@ def similar_artists(
 
 
 @app.command()
-def evaluate(top_k: int = DEFAULT_TOP_K, use_gpu: bool = DEFAULT_USE_GPU) -> None:
+def evaluate(
+    top_k: int = DEFAULT_TOP_K,
+    folds: int = 1,
+    compare_baseline: bool = False,
+    use_gpu: bool = DEFAULT_USE_GPU,
+) -> None:
     """Evaluate recommendations with ranking metrics."""
-    df = load_and_validate_interactions(RAW_DATA_PATH)
-    metrics = evaluate_model(df, top_k=top_k, use_gpu=use_gpu)
-    typer.echo(f"Precision@{top_k}: {metrics['precision_at_k']:.4f}")
-    typer.echo(f"Recall@{top_k}: {metrics['recall_at_k']:.4f}")
-    typer.echo(f"MAP@{top_k}: {metrics['map_at_k']:.4f}")
-    typer.echo(f"NDCG@{top_k}: {metrics['ndcg_at_k']:.4f}")
+    try:
+        df = load_and_validate_interactions(RAW_DATA_PATH)
+        metrics = evaluate_repeated_holdout(
+            df,
+            top_k=top_k,
+            folds=folds,
+            compare_baseline=compare_baseline,
+            use_gpu=use_gpu,
+        )
+    except ValueError as error:
+        typer.echo(f"Error: {error}")
+        raise typer.Exit(code=1) from error
+
+    if compare_baseline:
+        typer.echo(f"Evaluation over {folds} fold(s):")
+        _print_metric_row("ALS", metrics["als"], top_k)
+        _print_metric_row("Popularity", metrics["popularity"], top_k)
+        return
+
+    _print_metric_row("ALS", metrics, top_k)
+
+
+def _print_metric_row(name: str, metrics: dict[str, float], top_k: int) -> None:
+    typer.echo(f"{name}:")
+    typer.echo(f"  Precision@{top_k}: {metrics['precision_at_k']:.4f}")
+    typer.echo(f"  Recall@{top_k}: {metrics['recall_at_k']:.4f}")
+    typer.echo(f"  MAP@{top_k}: {metrics['map_at_k']:.4f}")
+    typer.echo(f"  NDCG@{top_k}: {metrics['ndcg_at_k']:.4f}")
+    typer.echo(f"  Catalog coverage: {metrics['catalog_coverage']:.4f}")
+    typer.echo(f"  Average popularity: {metrics['average_popularity']:.4f}")
+    typer.echo(f"  Intra-list diversity: {metrics['intra_list_diversity']:.4f}")
 
 
 @app.command()
