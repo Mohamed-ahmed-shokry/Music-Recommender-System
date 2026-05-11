@@ -1,165 +1,165 @@
 # Music Recommender System
 
-A production-style, artist-level music recommendation project built with Python,
-`uv`, FastAPI, and Alternating Least Squares collaborative filtering from the
-`implicit` library.
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB)](https://www.python.org/)
+[![uv](https://img.shields.io/badge/package%20manager-uv-4B32C3)](https://docs.astral.sh/uv/)
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688)](https://fastapi.tiangolo.com/)
+[![ALS](https://img.shields.io/badge/recommender-implicit%20ALS-111827)](https://github.com/benfred/implicit)
+[![Tests](https://img.shields.io/badge/tests-pytest-0A9EDC)](https://docs.pytest.org/)
+[![Lint](https://img.shields.io/badge/lint-ruff-D7FF64)](https://docs.astral.sh/ruff/)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-The project turns implicit listening behavior, such as play counts, into artist
-recommendations. It includes a reusable package, versioned model artifact bundle,
-cold-start fallback strategy, configurable ranking controls, a Typer CLI, a
-FastAPI API, evaluation against a popularity baseline, tests, Ruff linting, and a
-clean portfolio-ready structure.
+A production-style artist recommendation system that turns implicit listening
+signals into personalized music recommendations.
 
-## Why This Project Matters
+This project uses collaborative filtering with Alternating Least Squares, ALS,
+from the `implicit` library. It includes a reusable Python package, versioned
+serving artifacts, cold-start handling, ranking controls, baseline comparison,
+a Typer CLI, a FastAPI API, tests, linting, and a portfolio-ready architecture.
 
-Real music recommendation systems rarely depend on explicit ratings. They infer
-preference from behavior: plays, saves, skips, repeats, and follows. This project
-models that idea with collaborative filtering and keeps the implementation small
-enough to study while still including the engineering pieces expected in a real
-ML service:
+## Contents
 
-- repeatable training;
-- saved serving artifacts;
-- fast API startup and request handling;
-- cold-start behavior;
-- baseline comparison;
-- ranking quality metrics;
-- clear CLI workflows.
+- [Overview](#overview)
+- [What This Project Demonstrates](#what-this-project-demonstrates)
+- [System Architecture](#system-architecture)
+- [Recommendation Strategies](#recommendation-strategies)
+- [Project Structure](#project-structure)
+- [Quickstart](#quickstart)
+- [CLI Reference](#cli-reference)
+- [API Reference](#api-reference)
+- [Evaluation](#evaluation)
+- [Artifact Bundle](#artifact-bundle)
+- [Model Card](#model-card)
+- [Development](#development)
+- [Roadmap](#roadmap)
+- [License](#license)
 
-The current version recommends artists, not individual tracks.
+## Overview
 
-## Features
+Music platforms usually do not wait for users to rate songs. They infer taste
+from behavior: plays, repeats, skips, saves, follows, and listening frequency.
+This project models that idea with artist-level play counts.
 
-- Validate user-artist interaction data.
-- Build a sparse user-item matrix from play counts.
-- Train ALS with the production-ready `implicit` package.
-- Prefer GPU training when supported, with graceful CPU fallback.
-- Save a versioned artifact bundle for serving.
-- Recommend artists for known users.
-- Return popular fallback recommendations for unknown users.
-- Find artists similar to a selected artist.
-- Apply optional popularity penalty and diversity reranking.
-- Compare ALS against a popularity baseline.
-- Serve recommendations with FastAPI.
-- Run all workflows through `uv`.
+The current system:
 
-## Tech Stack
+- trains an ALS model from implicit feedback;
+- recommends unseen artists for known users;
+- serves popular fallback recommendations for unknown users;
+- finds similar artists from learned latent factors;
+- stores everything needed for serving in a versioned artifact bundle;
+- compares ALS against a popularity baseline;
+- exposes both CLI and API workflows.
 
-- Python 3.11
-- uv
-- pandas
-- numpy
-- scipy
-- implicit
-- scikit-learn
-- typer
-- joblib
-- fastapi
-- uvicorn
-- pytest
-- ruff
+The included dataset is intentionally small so the whole project can run quickly
+on a laptop. The same pipeline can be pointed at a larger Last.fm-style dataset
+with the same columns.
 
-## How It Works
+## What This Project Demonstrates
 
-1. Load `data/raw/sample_interactions.csv`.
-2. Validate `user_id`, `artist_id`, `artist_name`, and `play_count`.
-3. Filter users and artists with too few interactions.
-4. Build stable user and artist ID mappings.
-5. Build a sparse user-artist matrix.
-6. Train ALS on the item-user matrix expected by `implicit`.
-7. Save a versioned artifact bundle containing:
-   - trained model;
-   - ID mappings;
-   - filtered user-item matrix;
-   - artist popularity stats;
-   - training config;
-   - dataset fingerprint;
-   - training timestamp.
-8. Load the artifact once through `RecommenderService`.
-9. Serve personalized, similar-artist, and popularity fallback recommendations.
-10. Evaluate ALS against a popularity baseline.
+| Area | Implementation |
+| --- | --- |
+| Recommendation modeling | ALS collaborative filtering with implicit play-count feedback |
+| Production structure | `src/` package layout, CLI, API, tests, docs, ignored artifacts |
+| Serving design | `RecommenderService` loads artifacts once for CLI/API use |
+| Cold start | Unknown users receive popular artist fallback recommendations |
+| Ranking controls | Optional listened-item inclusion, popularity penalty, diversity reranking |
+| Evaluation | ALS vs popularity baseline with ranking and catalog metrics |
+| Reproducibility | `uv`, `pyproject.toml`, `uv.lock`, deterministic sample data |
+| Portfolio polish | README, MIT license, clean commands, model card, roadmap |
 
-## Architecture
+## System Architecture
 
 ```text
-Raw CSV
-  -> validation
-  -> filtering
-  -> ID mappings
-  -> sparse matrix
-  -> ALS training
-  -> artifact bundle
-  -> RecommenderService
-  -> CLI / FastAPI
+data/raw/sample_interactions.csv
+        |
+        v
+Data validation
+        |
+        v
+User and artist filtering
+        |
+        v
+ID mappings + sparse user-item matrix
+        |
+        v
+ALS model training with implicit
+        |
+        v
+Versioned recommender artifact bundle
+        |
+        v
+RecommenderService
+        |
+        +--> Typer CLI
+        |
+        +--> FastAPI API
 ```
 
-`RecommenderService` is the main serving layer. The API uses it so requests do
-not rebuild matrices or reload raw data every time.
+The API uses `RecommenderService`, so model artifacts are loaded once instead of
+rebuilding matrices or reloading raw CSV data for every request.
+
+## Recommendation Strategies
+
+| Strategy | When it is used | Behavior |
+| --- | --- | --- |
+| `als_personalized` | Known user ID | Scores artists using ALS user and artist factors |
+| `popular_fallback` | Unknown user ID | Returns globally popular artists from training data |
+| `popular_baseline` | Evaluation and CLI baseline | Ranks artists by total plays and listener count |
+| Similar artists | Known artist ID | Uses cosine similarity between artist factor vectors |
+
+Ranking controls are optional and beginner-friendly by default:
+
+- listened artists are excluded by default;
+- popularity penalty is `0.0` by default;
+- diversity reranking is `0.0` by default.
 
 ## Project Structure
 
 ```text
 music-recommender-system/
-├── api/
-│   ├── __init__.py
-│   └── main.py
-├── artifacts/
-│   ├── mappings/
-│   └── models/
-├── data/
-│   ├── raw/
-│   │   └── sample_interactions.csv
-│   ├── processed/
-│   └── README.md
-├── notebooks/
-│   └── 01_exploration.ipynb
-├── src/
-│   └── music_recommender/
-│       ├── artifacts.py
-│       ├── baselines.py
-│       ├── cli.py
-│       ├── config.py
-│       ├── data.py
-│       ├── evaluate.py
-│       ├── model.py
-│       ├── preprocessing.py
-│       ├── ranking.py
-│       ├── recommend.py
-│       ├── service.py
-│       └── utils.py
-├── tests/
-├── LICENSE
-├── README.md
-├── pyproject.toml
-└── uv.lock
+|-- api/
+|   |-- __init__.py
+|   `-- main.py
+|-- artifacts/
+|   |-- mappings/
+|   `-- models/
+|-- data/
+|   |-- raw/
+|   |   `-- sample_interactions.csv
+|   |-- processed/
+|   `-- README.md
+|-- notebooks/
+|   `-- 01_exploration.ipynb
+|-- src/
+|   `-- music_recommender/
+|       |-- artifacts.py
+|       |-- baselines.py
+|       |-- cli.py
+|       |-- config.py
+|       |-- data.py
+|       |-- evaluate.py
+|       |-- model.py
+|       |-- preprocessing.py
+|       |-- ranking.py
+|       |-- recommend.py
+|       |-- service.py
+|       `-- utils.py
+|-- tests/
+|-- LICENSE
+|-- README.md
+|-- pyproject.toml
+`-- uv.lock
 ```
 
 Generated model artifacts are ignored by Git.
 
-## Installation
+## Quickstart
+
+Clone and install with `uv`:
 
 ```bash
 git clone https://github.com/Mohamed-ahmed-shokry/music-recommender-system.git
 cd music-recommender-system
 uv sync
-```
-
-Optional GPU dependencies:
-
-```bash
-uv sync --extra gpu
-```
-
-GPU training still requires compatible NVIDIA CUDA runtime libraries. If GPU
-training is unavailable, the project falls back to CPU training and prints the
-reason.
-
-## CLI Usage
-
-Prepare data:
-
-```bash
-uv run python -m music_recommender.cli prepare-data
 ```
 
 Train the model:
@@ -168,31 +168,75 @@ Train the model:
 uv run python -m music_recommender.cli train
 ```
 
-Train from a specific data path:
+Run the demo:
 
 ```bash
-uv run python -m music_recommender.cli train --data-path data/raw/sample_interactions.csv
+uv run python -m music_recommender.cli demo
 ```
 
-Train on CPU only:
+Start the API:
+
+```bash
+uv run uvicorn api.main:app --reload
+```
+
+Open the interactive API docs:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+## GPU Support
+
+Optional GPU dependencies can be installed with:
+
+```bash
+uv sync --extra gpu
+```
+
+GPU training also requires compatible NVIDIA CUDA runtime libraries. If the GPU
+path is unavailable, training falls back to CPU and records the reason in the
+artifact metadata.
+
+CPU-only training:
 
 ```bash
 uv run python -m music_recommender.cli train --no-use-gpu
 ```
 
-Inspect saved artifacts:
+## CLI Reference
+
+Prepare data:
+
+```bash
+uv run python -m music_recommender.cli prepare-data
+```
+
+Train with the default sample dataset:
+
+```bash
+uv run python -m music_recommender.cli train
+```
+
+Train from a specific CSV:
+
+```bash
+uv run python -m music_recommender.cli train --data-path data/raw/sample_interactions.csv
+```
+
+Inspect the saved artifact bundle:
 
 ```bash
 uv run python -m music_recommender.cli artifact-info
 ```
 
-Recommend artists for a user:
+Recommend artists:
 
 ```bash
 uv run python -m music_recommender.cli recommend-user --user-id user_1 --top-k 10
 ```
 
-Recommend with ranking controls:
+Recommend with reranking controls:
 
 ```bash
 uv run python -m music_recommender.cli recommend-user --user-id user_1 --top-k 10 --diversity 0.2 --popularity-penalty 0.1
@@ -204,7 +248,7 @@ Include artists the user already listened to:
 uv run python -m music_recommender.cli recommend-user --user-id user_1 --include-listened
 ```
 
-Show popular fallback recommendations:
+Show popular artists:
 
 ```bash
 uv run python -m music_recommender.cli popular-artists --top-k 10
@@ -222,77 +266,47 @@ Evaluate ALS:
 uv run python -m music_recommender.cli evaluate --top-k 10
 ```
 
-Compare ALS with a popularity baseline over repeated holdout folds:
+Compare ALS with a popularity baseline:
 
 ```bash
 uv run python -m music_recommender.cli evaluate --top-k 10 --folds 5 --compare-baseline
 ```
 
-Run a full demo:
+## API Reference
 
-```bash
-uv run python -m music_recommender.cli demo
-```
-
-## API Usage
-
-Train first:
+Train before starting the API:
 
 ```bash
 uv run python -m music_recommender.cli train
 ```
 
-Start the API:
+Run FastAPI:
 
 ```bash
 uv run uvicorn api.main:app --reload
 ```
 
-Base endpoint:
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/` | Basic API message |
+| `GET` | `/health` | Artifact and service health |
+| `GET` | `/metadata` | Training config, dataset fingerprint, artifact metadata |
+| `GET` | `/popular-artists?top_k=10` | Popular artist recommendations |
+| `GET` | `/recommend/user/{user_id}?top_k=10` | Personalized or fallback recommendations |
+| `GET` | `/similar-artists/{artist_id}?top_k=10` | Similar artists |
 
-```bash
-curl http://127.0.0.1:8000/
-```
-
-Health:
+Example requests:
 
 ```bash
 curl http://127.0.0.1:8000/health
-```
-
-Metadata:
-
-```bash
 curl http://127.0.0.1:8000/metadata
-```
-
-Recommend artists:
-
-```bash
-curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10"
-```
-
-Recommend with ranking controls:
-
-```bash
-curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10&diversity=0.2&popularity_penalty=0.1"
-```
-
-Popular artists:
-
-```bash
 curl "http://127.0.0.1:8000/popular-artists?top_k=10"
-```
-
-Similar artists:
-
-```bash
+curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10"
+curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10&diversity=0.2&popularity_penalty=0.1"
 curl "http://127.0.0.1:8000/similar-artists/artist_2?top_k=10"
 ```
 
-## Response Strategies
-
-Known users use ALS:
+Known-user response:
 
 ```json
 {
@@ -300,16 +314,16 @@ Known users use ALS:
   "strategy": "als_personalized",
   "recommendations": [
     {
-      "artist_id": "artist_15",
-      "artist_name": "Calvin Harris",
-      "score": 0.86,
-      "popularity_rank": 9
+      "artist_id": "artist_10",
+      "artist_name": "Coldplay",
+      "score": 0.4845,
+      "popularity_rank": 6
     }
   ]
 }
 ```
 
-Unknown users receive a popularity fallback:
+Unknown-user response:
 
 ```json
 {
@@ -327,27 +341,27 @@ Unknown users receive a popularity fallback:
 }
 ```
 
-## Evaluation Metrics
+## Evaluation
 
-The project reports:
+The project reports ranking quality, catalog behavior, and popularity bias:
 
-- Precision@K
-- Recall@K
-- MAP@K
-- NDCG@K
-- catalog coverage
-- average recommendation popularity
-- intra-list diversity
+| Metric | Meaning |
+| --- | --- |
+| `Precision@K` | Share of recommended artists that are relevant |
+| `Recall@K` | Share of relevant artists recovered by recommendations |
+| `MAP@K` | Ranking-sensitive precision across users |
+| `NDCG@K` | Ranking quality with higher weight for top positions |
+| Catalog coverage | Share of the artist catalog recommended at least once |
+| Average popularity | Average total plays of recommended artists |
+| Intra-list diversity | Average dissimilarity within each recommendation list |
 
-The popularity baseline is useful because many recommenders look strong only
-because they recommend globally popular items. Comparing ALS to that baseline
-makes the evaluation more honest.
-
-Example:
+Run a baseline comparison:
 
 ```bash
 uv run python -m music_recommender.cli evaluate --top-k 5 --folds 2 --compare-baseline --no-use-gpu
 ```
+
+Example output:
 
 ```text
 Evaluation over 2 fold(s):
@@ -369,7 +383,49 @@ Popularity:
   Intra-list diversity: 0.4357
 ```
 
-## Tests and Linting
+The comparison is useful because a recommender can look strong by recommending
+only globally popular artists. The baseline makes that tradeoff visible.
+
+## Artifact Bundle
+
+Training creates a versioned artifact bundle at:
+
+```text
+artifacts/recommender_artifact.joblib
+```
+
+The bundle contains:
+
+| Field | Purpose |
+| --- | --- |
+| model | Trained ALS model |
+| mappings | User and artist ID mappings |
+| user-item matrix | Filtered sparse interaction matrix for serving |
+| artist stats | Total plays, listener count, interaction count, popularity rank |
+| metadata | Created time, training device, dataset fingerprint, dimensions |
+| training config | ALS factors, regularization, iterations, alpha, GPU flag |
+
+Inspect it with:
+
+```bash
+uv run python -m music_recommender.cli artifact-info
+```
+
+## Data Contract
+
+Input CSV files must include:
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `user_id` | string | Original user identifier |
+| `artist_id` | string | Original artist identifier |
+| `artist_name` | string | Display name for the artist |
+| `play_count` | numeric | Positive implicit feedback signal |
+
+Validation rejects empty data, missing required columns, missing IDs or names,
+non-numeric play counts, and non-positive play counts.
+
+## Development
 
 Run tests:
 
@@ -395,41 +451,37 @@ Check formatting:
 uv run ruff format --check .
 ```
 
+Current coverage focus:
+
+- data validation;
+- preprocessing and sparse matrix creation;
+- ALS training and persistence;
+- recommendation behavior;
+- artifact bundles;
+- service-layer behavior;
+- ranking controls;
+- evaluation metrics.
+
 ## Model Card
 
-Intended use:
-This project is intended for learning, portfolio demonstration, and small-scale
-artist recommendation experiments.
+| Section | Details |
+| --- | --- |
+| Intended use | Learning, portfolio demonstration, small-scale artist recommendation experiments |
+| Model type | Implicit-feedback ALS collaborative filtering |
+| Training signal | Positive play counts |
+| Prediction target | Artist-level recommendations |
+| Cold start | Unknown users receive popular artists; unknown artists cannot get similarity results |
+| Serving | Local artifact bundle loaded by `RecommenderService` |
+| Bias controls | Popularity baseline, popularity penalty, catalog coverage, diversity metric |
+| Main limitation | Small synthetic sample dataset and no content metadata yet |
 
-Training data:
-The included dataset is a synthetic sample with overlapping listening patterns
-across hip-hop, pop, rock, electronic, and mixed-taste users. Users can replace
-it with a larger Last.fm-style dataset that uses the same columns.
-
-Model:
-The recommender uses implicit-feedback ALS. It learns user and artist factors
-from play counts and recommends artists with high predicted affinity.
-
-Cold start:
-Unknown users receive popular artists. Unknown artists cannot receive similarity
-results because they do not have trained factor vectors.
-
-Known limitations:
-The sample dataset is small, artist metadata is minimal, and the system does not
-yet include real-time updates, track-level modeling, or content-based features.
-
-Fairness and bias:
-Popularity can dominate recommendation systems. This project includes a
-popularity baseline, popularity penalty, catalog coverage metric, and diversity
-metric to make that tradeoff visible.
-
-## Future Improvements
+## Roadmap
 
 - Add Spotify API integration.
 - Add track-level recommendations.
 - Add genre and audio-feature content similarity.
 - Build a hybrid ALS plus content-based recommender.
-- Add a ranking model after candidate generation.
+- Add a learning-to-rank model after candidate generation.
 - Improve cold-start with onboarding preferences.
 - Add novelty and serendipity metrics.
 - Add a Streamlit dashboard.
