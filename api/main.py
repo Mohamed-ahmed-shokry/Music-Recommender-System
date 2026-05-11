@@ -46,13 +46,34 @@ def metadata() -> dict[str, object]:
     return get_service().metadata()
 
 
+@app.get("/popular-artists")
+def popular_artists(top_k: int = 10) -> dict[str, object]:
+    """Return globally popular artists."""
+    try:
+        return get_service().popular_artists(top_k=top_k)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
 @app.get("/recommend/user/{user_id}")
-def recommend_user(user_id: str, top_k: int = 10) -> dict[str, object]:
+def recommend_user(
+    user_id: str,
+    top_k: int = 10,
+    include_listened: bool = False,
+    diversity: float = 0.0,
+    popularity_penalty: float = 0.0,
+) -> dict[str, object]:
     """Return artist recommendations for a user."""
     try:
-        return get_service().recommend_user(user_id=user_id, top_k=top_k)
+        return get_service().recommend_user(
+            user_id=user_id,
+            top_k=top_k,
+            include_listened=include_listened,
+            diversity=diversity,
+            popularity_penalty=popularity_penalty,
+        )
     except ValueError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @app.get("/similar-artists/{artist_id}")
