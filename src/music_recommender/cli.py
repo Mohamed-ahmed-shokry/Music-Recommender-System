@@ -7,6 +7,7 @@ from music_recommender.config import (
     DEFAULT_ALS_FACTORS,
     DEFAULT_ALS_ITERATIONS,
     DEFAULT_ALS_REGULARIZATION,
+    DEFAULT_USE_GPU,
     DEFAULT_MIN_ARTIST_INTERACTIONS,
     DEFAULT_MIN_USER_INTERACTIONS,
     DEFAULT_TOP_K,
@@ -53,6 +54,7 @@ def train(
     regularization: float = DEFAULT_ALS_REGULARIZATION,
     iterations: int = DEFAULT_ALS_ITERATIONS,
     alpha: float = DEFAULT_ALS_ALPHA,
+    use_gpu: bool = DEFAULT_USE_GPU,
 ) -> None:
     """Train and save the ALS model."""
     _, user_item_matrix, mappings = train_and_save_model(
@@ -60,8 +62,13 @@ def train(
         regularization=regularization,
         iterations=iterations,
         alpha=alpha,
+        use_gpu=use_gpu,
     )
     typer.echo("Model trained successfully.")
+    typer.echo(f"Training device: {getattr(_, 'training_device', 'unknown')}")
+    fallback_reason = getattr(_, "gpu_fallback_reason", None)
+    if fallback_reason:
+        typer.echo(f"GPU fallback reason: {fallback_reason}")
     typer.echo(f"Saved model to: {MODEL_PATH}")
     typer.echo(f"Saved mappings to: {MAPPINGS_PATH}")
     typer.echo(f"Training matrix shape: {user_item_matrix.shape}")
@@ -115,10 +122,10 @@ def similar_artists(
 
 
 @app.command()
-def evaluate(top_k: int = DEFAULT_TOP_K) -> None:
+def evaluate(top_k: int = DEFAULT_TOP_K, use_gpu: bool = DEFAULT_USE_GPU) -> None:
     """Evaluate recommendations with ranking metrics."""
     df = load_and_validate_interactions(RAW_DATA_PATH)
-    metrics = evaluate_model(df, top_k=top_k)
+    metrics = evaluate_model(df, top_k=top_k, use_gpu=use_gpu)
     typer.echo(f"Precision@{top_k}: {metrics['precision_at_k']:.4f}")
     typer.echo(f"Recall@{top_k}: {metrics['recall_at_k']:.4f}")
     typer.echo(f"MAP@{top_k}: {metrics['map_at_k']:.4f}")
@@ -126,11 +133,11 @@ def evaluate(top_k: int = DEFAULT_TOP_K) -> None:
 
 
 @app.command()
-def demo() -> None:
+def demo(use_gpu: bool = DEFAULT_USE_GPU) -> None:
     """Train when needed and show example recommendations."""
     if not MODEL_PATH.exists() or not MAPPINGS_PATH.exists():
         typer.echo("No saved model found. Training on the sample dataset first.")
-        train_and_save_model()
+        train_and_save_model(use_gpu=use_gpu)
 
     model, user_item_matrix, mappings = load_recommender_artifacts()
     typer.echo("Recommendations for user_1:")
