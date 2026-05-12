@@ -1,0 +1,19 @@
+artist_id,artist_name,genres,mood_tags,country,era
+artist_1,The Weeknd,"pop;r&b;alternative r&b","dark;moody;night drive",Canada,2010s
+artist_2,Drake,"hip-hop;rap;pop rap","confident;melodic;late night",Canada,2010s
+artist_3,Travis Scott,"hip-hop;trap;psychedelic rap","atmospheric;energetic;dark",United States,2010s
+artist_4,Kendrick Lamar,"hip-hop;rap;conscious rap","lyrical;intense;reflective",United States,2010s
+artist_5,J. Cole,"hip-hop;rap;conscious rap","thoughtful;warm;lyrical",United States,2010s
+artist_6,Dua Lipa,"pop;dance pop;nu-disco","bright;dance;confident",United Kingdom,2020s
+artist_7,Taylor Swift,"pop;singer-songwriter;country pop","storytelling;romantic;uplifting",United States,2010s
+artist_8,Ariana Grande,"pop;r&b;dance pop","vocal;romantic;glossy",United States,2010s
+artist_9,Billie Eilish,"pop;alternative pop;electropop","dark;minimal;introspective",United States,2020s
+artist_10,Coldplay,"rock;pop rock;alternative rock","anthemic;uplifting;emotional",United Kingdom,2000s
+artist_11,Foo Fighters,"rock;alternative rock;post-grunge","driving;energetic;guitar",United States,1990s
+artist_12,Arctic Monkeys,"rock;indie rock;garage rock","cool;witty;guitar",United Kingdom,2000s
+artist_13,The Strokes,"rock;indie rock;garage rock","cool;raw;retro",United States,2000s
+artist_14,Daft Punk,"electronic;house;dance","futuristic;groovy;robotic",France,2000s
+artist_15,Calvin Harris,"electronic;dance pop;edm","festival;bright;dance",United Kingdom,2010s
+artist_16,ODESZA,"electronic;chillwave;future bass","dreamy;cinematic;warm",United States,2010s
+artist_17,SZA,"r&b;neo soul;alternative r&b","intimate;reflective;warm",United States,2020s
+artist_18,Radiohead,"rock;alternative rock;art rock","experimental;melancholic;atmospheric",United Kingdom,1990s
