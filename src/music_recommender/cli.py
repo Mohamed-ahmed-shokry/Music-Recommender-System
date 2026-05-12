@@ -214,7 +214,6 @@ def evaluate(
 
     _print_metric_row("ALS", metrics, top_k)
 
-
 def _print_metric_row(name: str, metrics: dict[str, float], top_k: int) -> None:
     typer.echo(f"{name}:")
     typer.echo(f"  Precision@{top_k}: {metrics['precision_at_k']:.4f}")
