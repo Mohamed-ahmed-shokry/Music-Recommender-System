@@ -24,7 +24,9 @@ def validate_artist_metadata(df: pd.DataFrame) -> None:
     if df.empty:
         raise ValueError("Artist metadata dataframe is empty.")
 
-    missing_columns = [column for column in METADATA_COLUMNS if column not in df.columns]
+    missing_columns = [
+        column for column in METADATA_COLUMNS if column not in df.columns
+    ]
     if missing_columns:
         raise ValueError(f"Missing metadata columns: {missing_columns}")
 
