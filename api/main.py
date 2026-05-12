@@ -1,12 +1,14 @@
 """FastAPI app for serving music recommendations."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from music_recommender.config import DEFAULT_CONTENT_WEIGHT
 from music_recommender.service import RecommenderService
 
-app = FastAPI(title="Music Recommendation System API")
 service: RecommenderService | None = None
 service_load_error: str | None = None
 
@@ -21,7 +23,6 @@ class ProfileRecommendationRequest(BaseModel):
     explain: bool = False
 
 
-@app.on_event("startup")
 def load_service() -> None:
     """Load model artifacts once at API startup when available."""
     global service, service_load_error
@@ -31,6 +32,16 @@ def load_service() -> None:
     except (FileNotFoundError, ValueError) as error:
         service = None
         service_load_error = str(error)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Initialize the recommender service once for the API process."""
+    load_service()
+    yield
+
+
+app = FastAPI(title="Music Recommendation System API", lifespan=lifespan)
 
 
 def get_service() -> RecommenderService:
