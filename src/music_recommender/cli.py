@@ -11,6 +11,7 @@ from music_recommender.config import (
     DEFAULT_ALS_FACTORS,
     DEFAULT_ALS_ITERATIONS,
     DEFAULT_ALS_REGULARIZATION,
+    DEFAULT_CONTENT_WEIGHT,
     DEFAULT_MIN_ARTIST_INTERACTIONS,
     DEFAULT_MIN_USER_INTERACTIONS,
     DEFAULT_TOP_K,
@@ -18,9 +19,11 @@ from music_recommender.config import (
     MAPPINGS_PATH,
     MODEL_PATH,
     RAW_DATA_PATH,
+    RAW_METADATA_PATH,
 )
 from music_recommender.data import load_and_validate_interactions
 from music_recommender.evaluate import evaluate_repeated_holdout
+from music_recommender.metadata import load_and_validate_artist_metadata
 from music_recommender.model import train_and_save_model
 from music_recommender.preprocessing import prepare_training_data
 from music_recommender.recommend import format_recommendations
@@ -38,6 +41,10 @@ def _format_artifact_age(created_at: str) -> str:
     if total_seconds < 3600:
         return f"{total_seconds // 60}m"
     return f"{total_seconds // 3600}h"
+
+
+def _parse_csv_option(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 @app.command()
@@ -60,22 +67,45 @@ def prepare_data(
 
 
 @app.command()
+def prepare_metadata(
+    metadata_path: Path = RAW_METADATA_PATH,
+    data_path: Path = RAW_DATA_PATH,
+) -> None:
+    """Validate artist metadata and sample interaction coverage."""
+    try:
+        interactions_df = load_and_validate_interactions(data_path)
+        metadata_df = load_and_validate_artist_metadata(metadata_path, interactions_df)
+    except ValueError as error:
+        typer.echo(f"Error: {error}")
+        raise typer.Exit(code=1) from error
+
+    typer.echo("Metadata validated successfully.")
+    typer.echo(f"Metadata rows: {len(metadata_df)}")
+    typer.echo(f"Interaction artists covered: {interactions_df['artist_id'].nunique()}")
+    typer.echo(f"Metadata path: {metadata_path}")
+
+
+@app.command()
 def train(
     data_path: Path = RAW_DATA_PATH,
+    metadata_path: Path = RAW_METADATA_PATH,
     factors: int = DEFAULT_ALS_FACTORS,
     regularization: float = DEFAULT_ALS_REGULARIZATION,
     iterations: int = DEFAULT_ALS_ITERATIONS,
     alpha: float = DEFAULT_ALS_ALPHA,
     use_gpu: bool = DEFAULT_USE_GPU,
+    content_weight: float = DEFAULT_CONTENT_WEIGHT,
 ) -> None:
     """Train and save the ALS model."""
     model, user_item_matrix, mappings = train_and_save_model(
         raw_data_path=data_path,
+        metadata_path=metadata_path,
         factors=factors,
         regularization=regularization,
         iterations=iterations,
         alpha=alpha,
         use_gpu=use_gpu,
+        content_weight=content_weight,
     )
     typer.echo("Model trained successfully.")
     typer.echo(f"Training device: {getattr(model, 'training_device', 'unknown')}")
@@ -88,6 +118,7 @@ def train(
     typer.echo(f"Training matrix shape: {user_item_matrix.shape}")
     typer.echo(f"Users: {len(mappings['user_id_to_index'])}")
     typer.echo(f"Artists: {len(mappings['artist_id_to_index'])}")
+    typer.echo(f"Default content weight: {content_weight}")
 
 
 @app.command()
@@ -102,6 +133,8 @@ def artifact_info() -> None:
     metadata = service.metadata()
     artifact_metadata = metadata["metadata"]
     training_config = metadata["training_config"]
+    hybrid_config = metadata["hybrid_config"]
+    content_metadata = metadata["content"]
     typer.echo(f"Artifact version: {metadata['version']}")
     typer.echo(f"Created at: {artifact_metadata['created_at']}")
     typer.echo(f"Artifact age: {_format_artifact_age(artifact_metadata['created_at'])}")
@@ -115,7 +148,12 @@ def artifact_info() -> None:
     typer.echo(f"Regularization: {training_config['regularization']}")
     typer.echo(f"Iterations: {training_config['iterations']}")
     typer.echo(f"Alpha: {training_config['alpha']}")
+    typer.echo(f"Default content weight: {hybrid_config['default_content_weight']}")
+    typer.echo(f"Content features: {content_metadata['num_features']}")
     typer.echo(f"Dataset hash: {artifact_metadata['dataset']['sha256']}")
+    typer.echo(
+        f"Metadata dataset hash: {artifact_metadata['metadata_dataset']['sha256']}"
+    )
 
 
 @app.command()
@@ -129,6 +167,8 @@ def recommend_user(
     ),
     popularity_penalty: float = 0.0,
     diversity: float = 0.0,
+    content_weight: float = DEFAULT_CONTENT_WEIGHT,
+    explain: bool = False,
 ) -> None:
     """Recommend artists for a user."""
     try:
@@ -139,6 +179,8 @@ def recommend_user(
             include_listened=include_listened,
             popularity_penalty=popularity_penalty,
             diversity=diversity,
+            content_weight=content_weight,
+            explain=explain,
         )
     except (FileNotFoundError, ValueError) as error:
         typer.echo(f"Error: {error}")
@@ -148,6 +190,42 @@ def recommend_user(
     typer.echo(f"Strategy: {response['strategy']}")
     if response.get("message"):
         typer.echo(response["message"])
+    typer.echo(format_recommendations(response["recommendations"]))
+
+
+@app.command()
+def recommend_profile(
+    artist_ids: str = typer.Option(
+        "",
+        help="Comma-separated favorite artist IDs, for example artist_1,artist_6.",
+    ),
+    genres: str = typer.Option(
+        "",
+        help="Comma-separated preferred genres, for example pop,electronic.",
+    ),
+    mood_tags: str = typer.Option(
+        "",
+        help="Comma-separated mood tags, for example bright,dancefloor.",
+    ),
+    top_k: int = DEFAULT_TOP_K,
+    explain: bool = False,
+) -> None:
+    """Recommend artists from onboarding preferences."""
+    try:
+        service = RecommenderService.from_artifacts()
+        response = service.recommend_profile(
+            artist_ids=_parse_csv_option(artist_ids),
+            genres=_parse_csv_option(genres),
+            mood_tags=_parse_csv_option(mood_tags),
+            top_k=top_k,
+            explain=explain,
+        )
+    except (FileNotFoundError, ValueError) as error:
+        typer.echo(f"Error: {error}")
+        raise typer.Exit(code=1) from error
+
+    typer.echo("Profile recommendations:")
+    typer.echo(f"Strategy: {response['strategy']}")
     typer.echo(format_recommendations(response["recommendations"]))
 
 
@@ -172,16 +250,51 @@ def similar_artists(
         ..., help="Original artist ID, for example artist_2."
     ),
     top_k: int = DEFAULT_TOP_K,
+    method: str = typer.Option("als", help="Similarity method: als, content, hybrid."),
+    content_weight: float = DEFAULT_CONTENT_WEIGHT,
+    explain: bool = False,
 ) -> None:
     """Find artists similar to a selected artist."""
     try:
         service = RecommenderService.from_artifacts()
-        response = service.similar_artists(artist_id=artist_id, top_k=top_k)
+        response = service.similar_artists(
+            artist_id=artist_id,
+            top_k=top_k,
+            method=method,
+            content_weight=content_weight,
+            explain=explain,
+        )
     except (FileNotFoundError, ValueError) as error:
         typer.echo(f"Error: {error}")
         raise typer.Exit(code=1) from error
 
     typer.echo(f"Artists similar to {artist_id}:")
+    typer.echo(f"Strategy: {response['strategy']}")
+    typer.echo(format_recommendations(response["similar_artists"]))
+
+
+@app.command()
+def content_similar_artists(
+    artist_id: str = typer.Option(
+        ..., help="Original artist ID, for example artist_2."
+    ),
+    top_k: int = DEFAULT_TOP_K,
+    explain: bool = False,
+) -> None:
+    """Find artists similar to a selected artist using metadata only."""
+    try:
+        service = RecommenderService.from_artifacts()
+        response = service.content_similar_artists(
+            artist_id=artist_id,
+            top_k=top_k,
+            explain=explain,
+        )
+    except (FileNotFoundError, ValueError) as error:
+        typer.echo(f"Error: {error}")
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"Content-similar artists for {artist_id}:")
+    typer.echo(f"Strategy: {response['strategy']}")
     typer.echo(format_recommendations(response["similar_artists"]))
 
 
@@ -214,6 +327,7 @@ def evaluate(
 
     _print_metric_row("ALS", metrics, top_k)
 
+
 def _print_metric_row(name: str, metrics: dict[str, float], top_k: int) -> None:
     typer.echo(f"{name}:")
     typer.echo(f"  Precision@{top_k}: {metrics['precision_at_k']:.4f}")
@@ -234,12 +348,16 @@ def demo(use_gpu: bool = DEFAULT_USE_GPU) -> None:
 
     service = RecommenderService.from_artifacts()
     typer.echo("Recommendations for user_1:")
-    response = service.recommend_user(user_id="user_1", top_k=5)
+    response = service.recommend_user(user_id="user_1", top_k=5, explain=True)
     typer.echo(f"Strategy: {response['strategy']}")
     typer.echo(format_recommendations(response["recommendations"]))
     typer.echo("")
-    typer.echo("Artists similar to artist_2:")
-    similar_response = service.similar_artists(artist_id="artist_2", top_k=5)
+    typer.echo("Content-similar artists for artist_2:")
+    similar_response = service.content_similar_artists(
+        artist_id="artist_2",
+        top_k=5,
+        explain=True,
+    )
     typer.echo(format_recommendations(similar_response["similar_artists"]))
 
 

@@ -204,9 +204,27 @@ def format_recommendations(recommendations: list[dict[str, Any]]) -> str:
         popularity = ""
         if "popularity_rank" in recommendation:
             popularity = f" | popularity rank: {recommendation['popularity_rank']}"
+        components = _format_score_components(
+            recommendation.get("score_components", {})
+        )
         lines.append(
             f"{index}. {recommendation['artist_name']} "
             f"({recommendation['artist_id']}) - score: {recommendation['score']:.4f}"
             f"{popularity}"
+            f"{components}"
         )
+        reasons = recommendation.get("reasons")
+        if reasons:
+            lines.extend(f"   - {reason}" for reason in reasons)
     return "\n".join(lines)
+
+
+def _format_score_components(score_components: Any) -> str:
+    if not isinstance(score_components, dict) or not score_components:
+        return ""
+
+    formatted_components = []
+    for name, value in score_components.items():
+        label = str(name).replace("_", " ")
+        formatted_components.append(f"{label}: {float(value):.4f}")
+    return f" | {'; '.join(formatted_components)}"
