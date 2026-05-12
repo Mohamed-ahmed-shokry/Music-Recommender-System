@@ -88,7 +88,9 @@ def content_similar_artists(
 
     recommendations: list[dict[str, Any]] = []
     for content_index in ranked_indices:
-        candidate_artist_id = content_artifacts.content_index_to_artist_id[int(content_index)]
+        candidate_artist_id = content_artifacts.content_index_to_artist_id[
+            int(content_index)
+        ]
         if candidate_artist_id == artist_id:
             continue
         recommendations.append(
@@ -133,7 +135,9 @@ def user_content_scores(
     weights = user_item_matrix[user_index].data.astype(float)
     if len(weights) != len(content_indices):
         weights = np.ones(len(content_indices))
-    profile = _weighted_profile(content_artifacts.content_matrix[content_indices], weights)
+    profile = _weighted_profile(
+        content_artifacts.content_matrix[content_indices], weights
+    )
     scores = cosine_similarity(profile, content_artifacts.content_matrix).ravel()
     return scores, listened_artist_ids
 
@@ -284,7 +288,9 @@ def build_reasons(
     if preference_tokens:
         matches = sorted(artist_tokens & preference_tokens)
         if matches:
-            reasons.append(f"Matches your selected preferences: {', '.join(matches[:4])}")
+            reasons.append(
+                f"Matches your selected preferences: {', '.join(matches[:4])}"
+            )
 
     if reference_artist_ids:
         for reference_artist_id in reference_artist_ids[:3]:
