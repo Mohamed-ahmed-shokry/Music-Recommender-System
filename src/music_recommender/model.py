@@ -17,13 +17,17 @@ from music_recommender.config import (
     DEFAULT_ALS_FACTORS,
     DEFAULT_ALS_ITERATIONS,
     DEFAULT_ALS_REGULARIZATION,
+    DEFAULT_CONTENT_WEIGHT,
     DEFAULT_MIN_ARTIST_INTERACTIONS,
     DEFAULT_MIN_USER_INTERACTIONS,
     DEFAULT_USE_GPU,
     MAPPINGS_PATH,
     MODEL_PATH,
     RAW_DATA_PATH,
+    RAW_METADATA_PATH,
 )
+from music_recommender.content import build_content_artifacts
+from music_recommender.metadata import load_and_validate_artist_metadata
 from music_recommender.preprocessing import Mappings, prepare_training_data
 
 if TYPE_CHECKING:
@@ -129,6 +133,7 @@ def load_model(path: str | Path) -> AlternatingLeastSquares:
 
 def train_and_save_model(
     raw_data_path: str | Path = RAW_DATA_PATH,
+    metadata_path: str | Path = RAW_METADATA_PATH,
     model_path: str | Path = MODEL_PATH,
     mappings_path: str | Path = MAPPINGS_PATH,
     artifact_path: str | Path = ARTIFACT_BUNDLE_PATH,
@@ -139,6 +144,7 @@ def train_and_save_model(
     iterations: int = DEFAULT_ALS_ITERATIONS,
     alpha: float = DEFAULT_ALS_ALPHA,
     use_gpu: bool = DEFAULT_USE_GPU,
+    content_weight: float = DEFAULT_CONTENT_WEIGHT,
 ) -> tuple[AlternatingLeastSquares, csr_matrix, Mappings]:
     """Prepare data, train ALS, and save model artifacts."""
     filtered_df, user_item_matrix, mappings = prepare_training_data(
@@ -156,8 +162,18 @@ def train_and_save_model(
         use_gpu=use_gpu,
     )
     save_model(model, model_path)
+    metadata_df = load_and_validate_artist_metadata(metadata_path, filtered_df)
+    artist_ids = [
+        artist_id
+        for artist_id, _ in sorted(
+            mappings["artist_id_to_index"].items(),
+            key=lambda item: item[1],
+        )
+    ]
+    content_artifacts = build_content_artifacts(metadata_df, artist_ids)
     training_config = {
         "raw_data_path": str(raw_data_path),
+        "metadata_path": str(metadata_path),
         "min_user_interactions": min_user_interactions,
         "min_artist_interactions": min_artist_interactions,
         "factors": factors,
@@ -165,14 +181,21 @@ def train_and_save_model(
         "iterations": iterations,
         "alpha": alpha,
         "use_gpu": use_gpu,
+        "content_weight": content_weight,
+    }
+    hybrid_config = {
+        "default_content_weight": content_weight,
     }
     artifact = build_recommender_artifact(
         model=model,
         mappings=mappings,
         user_item_matrix=user_item_matrix,
         filtered_df=filtered_df,
+        content_artifacts=content_artifacts,
         raw_data_path=raw_data_path,
+        metadata_path=metadata_path,
         training_config=training_config,
+        hybrid_config=hybrid_config,
     )
     save_artifact(artifact, artifact_path)
     return model, user_item_matrix, mappings
