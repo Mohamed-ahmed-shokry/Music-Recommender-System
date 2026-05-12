@@ -69,13 +69,16 @@ def create_service(tmp_path: Path) -> RecommenderService:
     return RecommenderService.from_artifacts(artifact_path)
 
 
-def test_known_user_returns_als_strategy(tmp_path: Path) -> None:
+def test_known_user_returns_hybrid_strategy(tmp_path: Path) -> None:
     service = create_service(tmp_path)
 
-    response = service.recommend_user("user_1", top_k=2)
+    response = service.recommend_user("user_1", top_k=2, explain=True)
 
-    assert response["strategy"] == "als_personalized"
+    assert response["strategy"] == "hybrid_personalized"
+    assert response["content_weight"] == 0.25
     assert response["recommendations"]
+    assert "score_components" in response["recommendations"][0]
+    assert "reasons" in response["recommendations"][0]
 
 
 def test_unknown_user_returns_popular_fallback(tmp_path: Path) -> None:
@@ -86,6 +89,32 @@ def test_unknown_user_returns_popular_fallback(tmp_path: Path) -> None:
     assert response["strategy"] == "popular_fallback"
     assert "Unknown user_id" in response["message"]
     assert response["recommendations"][0]["popularity_rank"] == 1
+
+
+def test_profile_recommendations_return_content_strategy(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    response = service.recommend_profile(
+        artist_ids=["artist_1"],
+        genres=["pop"],
+        top_k=2,
+        explain=True,
+    )
+
+    assert response["strategy"] == "content_profile"
+    assert response["recommendations"]
+    assert response["recommendations"][0]["artist_id"] != "artist_1"
+    assert response["recommendations"][0]["reasons"]
+
+
+def test_content_similar_artists_return_content_strategy(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    response = service.content_similar_artists("artist_1", top_k=2, explain=True)
+
+    assert response["strategy"] == "content_similarity"
+    assert response["similar_artists"]
+    assert response["similar_artists"][0]["artist_id"] != "artist_1"
 
 
 def test_service_metadata_is_available(tmp_path: Path) -> None:
