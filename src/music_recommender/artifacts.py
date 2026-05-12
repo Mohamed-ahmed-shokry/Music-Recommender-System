@@ -162,7 +162,9 @@ def load_artifact(path: str | Path = ARTIFACT_BUNDLE_PATH) -> RecommenderArtifac
             f"compatible with required version {ARTIFACT_VERSION}. Retrain the model."
         )
     required_fields = ("content_artifacts", "hybrid_config")
-    missing_fields = [field for field in required_fields if not hasattr(artifact, field)]
+    missing_fields = [
+        field for field in required_fields if not hasattr(artifact, field)
+    ]
     if missing_fields:
         raise ValueError(
             f"Artifact is missing v3 fields {missing_fields}. Retrain the model."
