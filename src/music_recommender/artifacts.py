@@ -13,10 +13,11 @@ import joblib
 import pandas as pd
 from scipy.sparse import csr_matrix
 
+from music_recommender.content import ContentArtifacts
 from music_recommender.config import ARTIFACT_BUNDLE_PATH
 from music_recommender.preprocessing import Mappings
 
-ARTIFACT_VERSION = "2.0"
+ARTIFACT_VERSION = "3.0"
 
 ArtistStats = dict[str, str | int | float]
 
@@ -30,8 +31,10 @@ class RecommenderArtifact:
     mappings: Mappings
     user_item_matrix: csr_matrix
     artist_stats: dict[str, ArtistStats]
+    content_artifacts: ContentArtifacts
     metadata: dict[str, Any]
     training_config: dict[str, Any]
+    hybrid_config: dict[str, Any]
 
 
 def create_dataset_fingerprint(
@@ -93,8 +96,11 @@ def build_recommender_artifact(
     mappings: Mappings,
     user_item_matrix: csr_matrix,
     filtered_df: pd.DataFrame,
+    content_artifacts: ContentArtifacts,
     raw_data_path: str | Path,
+    metadata_path: str | Path,
     training_config: dict[str, Any],
+    hybrid_config: dict[str, Any],
 ) -> RecommenderArtifact:
     """Build a versioned artifact from trained model state."""
     metadata = {
@@ -105,6 +111,10 @@ def build_recommender_artifact(
         "num_artists": len(mappings["artist_id_to_index"]),
         "num_interactions": int(user_item_matrix.nnz),
         "dataset": create_dataset_fingerprint(raw_data_path, filtered_df),
+        "metadata_dataset": create_dataset_fingerprint(
+            metadata_path,
+            content_artifacts.metadata,
+        ),
     }
 
     return RecommenderArtifact(
@@ -113,8 +123,10 @@ def build_recommender_artifact(
         mappings=mappings,
         user_item_matrix=user_item_matrix,
         artist_stats=build_artist_stats(filtered_df),
+        content_artifacts=content_artifacts,
         metadata=metadata,
         training_config=training_config,
+        hybrid_config=hybrid_config,
     )
 
 
@@ -142,4 +154,18 @@ def load_artifact(path: str | Path = ARTIFACT_BUNDLE_PATH) -> RecommenderArtifac
             category=UserWarning,
             module="implicit.gpu",
         )
-        return joblib.load(artifact_path)
+        artifact = joblib.load(artifact_path)
+
+    if getattr(artifact, "version", None) != ARTIFACT_VERSION:
+        raise ValueError(
+            f"Artifact version {getattr(artifact, 'version', 'unknown')} is not "
+            f"compatible with required version {ARTIFACT_VERSION}. Retrain the model."
+        )
+    required_fields = ("content_artifacts", "hybrid_config")
+    missing_fields = [field for field in required_fields if not hasattr(artifact, field)]
+    if missing_fields:
+        raise ValueError(
+            f"Artifact is missing v3 fields {missing_fields}. Retrain the model."
+        )
+
+    return artifact
