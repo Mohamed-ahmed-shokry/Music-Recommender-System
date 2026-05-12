@@ -13,8 +13,8 @@ import joblib
 import pandas as pd
 from scipy.sparse import csr_matrix
 
-from music_recommender.content import ContentArtifacts
 from music_recommender.config import ARTIFACT_BUNDLE_PATH
+from music_recommender.content import ContentArtifacts
 from music_recommender.preprocessing import Mappings
 
 ARTIFACT_VERSION = "3.0"
