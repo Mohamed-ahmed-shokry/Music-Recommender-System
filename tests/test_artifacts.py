@@ -9,6 +9,7 @@ from music_recommender.artifacts import (
     load_artifact,
     save_artifact,
 )
+from music_recommender.content import build_content_artifacts
 from music_recommender.model import train_als_model
 from music_recommender.preprocessing import build_user_item_matrix, create_id_mappings
 
@@ -24,6 +25,19 @@ def artifact_dataframe() -> pd.DataFrame:
     )
 
 
+def artifact_metadata_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "artist_id": ["artist_1", "artist_2", "artist_3"],
+            "artist_name": ["A", "B", "C"],
+            "genres": ["pop", "pop;dance", "rock"],
+            "mood_tags": ["bright", "bright;fun", "raw"],
+            "country": ["United States", "United States", "United Kingdom"],
+            "era": ["2020s", "2020s", "2000s"],
+        }
+    )
+
+
 def test_artifact_bundle_saves_and_loads(tmp_path: Path) -> None:
     df = artifact_dataframe()
     mappings = create_id_mappings(df)
@@ -33,23 +47,32 @@ def test_artifact_bundle_saves_and_loads(tmp_path: Path) -> None:
         mappings["artist_id_to_index"],
     )
     model = train_als_model(matrix, 4, 0.01, 1, 10.0, use_gpu=False)
+    content_artifacts = build_content_artifacts(
+        artifact_metadata_df(),
+        ["artist_1", "artist_2", "artist_3"],
+    )
     artifact = build_recommender_artifact(
         model=model,
         mappings=mappings,
         user_item_matrix=matrix,
         filtered_df=df,
+        content_artifacts=content_artifacts,
         raw_data_path=tmp_path / "missing.csv",
+        metadata_path=tmp_path / "metadata.csv",
         training_config={"factors": 4},
+        hybrid_config={"default_content_weight": 0.25},
     )
     artifact_path = tmp_path / "artifact.joblib"
 
     save_artifact(artifact, artifact_path)
     loaded_artifact = load_artifact(artifact_path)
 
-    assert loaded_artifact.version == "2.0"
+    assert loaded_artifact.version == "3.0"
     assert loaded_artifact.user_item_matrix.shape == (2, 3)
     assert loaded_artifact.metadata["num_users"] == 2
     assert loaded_artifact.training_config["factors"] == 4
+    assert loaded_artifact.hybrid_config["default_content_weight"] == 0.25
+    assert loaded_artifact.content_artifacts.content_matrix.shape[0] == 3
     assert "artist_2" in loaded_artifact.artist_stats
 
 
