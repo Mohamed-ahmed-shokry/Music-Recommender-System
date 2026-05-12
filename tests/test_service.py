@@ -3,6 +3,7 @@ from pathlib import Path
 import pandas as pd
 
 from music_recommender.artifacts import build_recommender_artifact, save_artifact
+from music_recommender.content import build_content_artifacts
 from music_recommender.model import train_als_model
 from music_recommender.preprocessing import build_user_item_matrix, create_id_mappings
 from music_recommender.service import RecommenderService
@@ -26,6 +27,19 @@ def service_dataframe() -> pd.DataFrame:
     )
 
 
+def service_metadata_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "artist_id": ["artist_1", "artist_2", "artist_3", "artist_4"],
+            "artist_name": ["A", "B", "C", "D"],
+            "genres": ["pop", "pop;dance", "rock", "soul"],
+            "mood_tags": ["bright", "bright;fun", "raw", "warm"],
+            "country": ["United States", "United States", "United Kingdom", "Canada"],
+            "era": ["2020s", "2020s", "2000s", "2010s"],
+        }
+    )
+
+
 def create_service(tmp_path: Path) -> RecommenderService:
     df = service_dataframe()
     mappings = create_id_mappings(df)
@@ -35,13 +49,20 @@ def create_service(tmp_path: Path) -> RecommenderService:
         mappings["artist_id_to_index"],
     )
     model = train_als_model(matrix, 4, 0.01, 1, 10.0, use_gpu=False)
+    content_artifacts = build_content_artifacts(
+        service_metadata_df(),
+        ["artist_1", "artist_2", "artist_3", "artist_4"],
+    )
     artifact = build_recommender_artifact(
         model=model,
         mappings=mappings,
         user_item_matrix=matrix,
         filtered_df=df,
+        content_artifacts=content_artifacts,
         raw_data_path=tmp_path / "missing.csv",
+        metadata_path=tmp_path / "metadata.csv",
         training_config={"factors": 4},
+        hybrid_config={"default_content_weight": 0.25},
     )
     artifact_path = tmp_path / "artifact.joblib"
     save_artifact(artifact, artifact_path)
@@ -72,6 +93,6 @@ def test_service_metadata_is_available(tmp_path: Path) -> None:
 
     metadata = service.metadata()
 
-    assert metadata["version"] == "2.0"
+    assert metadata["version"] == "3.0"
     assert metadata["metadata"]["num_users"] == 3
     assert metadata["training_config"]["factors"] == 4
