@@ -1,6 +1,7 @@
 """Evaluation helpers for recommendation quality."""
 
 import math
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -12,7 +13,14 @@ from music_recommender.config import (
     DEFAULT_ALS_FACTORS,
     DEFAULT_ALS_ITERATIONS,
     DEFAULT_ALS_REGULARIZATION,
+    DEFAULT_CONTENT_WEIGHT,
     DEFAULT_USE_GPU,
+)
+from music_recommender.content import (
+    build_content_artifacts,
+    hybrid_scores,
+    recommend_from_scores,
+    user_content_scores,
 )
 from music_recommender.model import train_als_model
 from music_recommender.preprocessing import build_user_item_matrix, create_id_mappings
@@ -139,6 +147,45 @@ def average_popularity(
     return float(np.mean(popularity_values)) if popularity_values else 0.0
 
 
+def novelty_at_k(
+    list_of_recommended_items: list[list[str]],
+    artist_stats: dict[str, dict[str, object]],
+) -> float:
+    """Calculate normalized novelty from inverse popularity rank."""
+    if not artist_stats:
+        return 0.0
+
+    max_rank = max(len(artist_stats), 1)
+    novelty_values = []
+    for recommended_items in list_of_recommended_items:
+        for item in recommended_items:
+            if item not in artist_stats:
+                continue
+            rank = int(artist_stats[item]["popularity_rank"])
+            novelty = 0.0 if max_rank == 1 else (rank - 1) / (max_rank - 1)
+            novelty_values.append(novelty)
+
+    return float(np.mean(novelty_values)) if novelty_values else 0.0
+
+
+def explanation_coverage(
+    list_of_recommendations: list[list[dict[str, Any]]],
+) -> float:
+    """Calculate the share of recommendations with at least one explanation."""
+    recommendations = [
+        recommendation
+        for recommendation_list in list_of_recommendations
+        for recommendation in recommendation_list
+    ]
+    if not recommendations:
+        return 0.0
+
+    explained_count = sum(
+        bool(recommendation.get("reasons")) for recommendation in recommendations
+    )
+    return explained_count / len(recommendations)
+
+
 def intra_list_diversity(
     recommended_items: list[str],
     artist_factors: np.ndarray,
@@ -219,8 +266,10 @@ def evaluate_repeated_holdout(
     folds: int = 1,
     use_gpu: bool = DEFAULT_USE_GPU,
     compare_baseline: bool = False,
+    compare_all: bool = False,
+    metadata_df: pd.DataFrame | None = None,
 ) -> dict[str, float] | dict[str, dict[str, float]]:
-    """Evaluate ALS and optionally compare it with a popularity baseline."""
+    """Evaluate ALS and optionally compare it with popularity/content/hybrid."""
     if top_k <= 0:
         raise ValueError("top_k must be greater than 0.")
     if folds <= 0:
@@ -228,6 +277,8 @@ def evaluate_repeated_holdout(
 
     als_fold_metrics: list[dict[str, float]] = []
     popularity_fold_metrics: list[dict[str, float]] = []
+    content_fold_metrics: list[dict[str, float]] = []
+    hybrid_fold_metrics: list[dict[str, float]] = []
 
     for fold in range(folds):
         fold_result = _evaluate_single_fold(
@@ -235,20 +286,29 @@ def evaluate_repeated_holdout(
             top_k=top_k,
             random_state=42 + fold,
             use_gpu=use_gpu,
-            compare_baseline=compare_baseline,
+            compare_baseline=compare_baseline or compare_all,
+            compare_all=compare_all,
+            metadata_df=metadata_df,
         )
         als_fold_metrics.append(fold_result["als"])
-        if compare_baseline:
+        if compare_baseline or compare_all:
             popularity_fold_metrics.append(fold_result["popularity"])
+        if compare_all:
+            content_fold_metrics.append(fold_result["content"])
+            hybrid_fold_metrics.append(fold_result["hybrid"])
 
     als_metrics = _average_metric_dicts(als_fold_metrics)
-    if not compare_baseline:
+    if not compare_baseline and not compare_all:
         return als_metrics
 
-    return {
+    comparison = {
         "als": als_metrics,
         "popularity": _average_metric_dicts(popularity_fold_metrics),
     }
+    if compare_all:
+        comparison["content"] = _average_metric_dicts(content_fold_metrics)
+        comparison["hybrid"] = _average_metric_dicts(hybrid_fold_metrics)
+    return comparison
 
 
 def _evaluate_single_fold(
@@ -257,6 +317,8 @@ def _evaluate_single_fold(
     random_state: int,
     use_gpu: bool,
     compare_baseline: bool,
+    compare_all: bool,
+    metadata_df: pd.DataFrame | None,
 ) -> dict[str, dict[str, float]]:
     train_df, test_df = train_test_split_by_user(df, random_state=random_state)
     mappings = create_id_mappings(train_df)
@@ -274,9 +336,26 @@ def _evaluate_single_fold(
         use_gpu=use_gpu,
     )
     artist_stats = build_artist_stats(train_df)
+    content_artifacts = None
+    if compare_all:
+        train_metadata_df = metadata_df
+        if train_metadata_df is None:
+            train_metadata_df = _metadata_from_interactions(train_df)
+        artist_ids = [
+            artist_id
+            for artist_id, _ in sorted(
+                mappings["artist_id_to_index"].items(),
+                key=lambda item: item[1],
+            )
+        ]
+        content_artifacts = build_content_artifacts(train_metadata_df, artist_ids)
 
     all_recommended_items: list[list[str]] = []
     all_popularity_items: list[list[str]] = []
+    all_content_items: list[list[str]] = []
+    all_hybrid_items: list[list[str]] = []
+    all_content_recommendations: list[list[dict[str, Any]]] = []
+    all_hybrid_recommendations: list[list[dict[str, Any]]] = []
     all_relevant_items: list[set[str]] = []
 
     known_artists = set(mappings["artist_id_to_index"])
@@ -317,6 +396,56 @@ def _evaluate_single_fold(
                     for recommendation in baseline_recommendations
                 ]
             )
+        if compare_all and content_artifacts is not None:
+            train_artist_ids = set(
+                train_df.loc[train_df["user_id"] == user_id, "artist_id"]
+            )
+            content_scores, listened_artist_ids = user_content_scores(
+                user_id=user_id,
+                user_item_matrix=user_item_matrix,
+                mappings=mappings,
+                content_artifacts=content_artifacts,
+            )
+            content_recommendations = recommend_from_scores(
+                scores=content_scores,
+                content_artifacts=content_artifacts,
+                artist_stats=artist_stats,
+                top_k=top_k,
+                exclude_artist_ids=train_artist_ids,
+                reference_artist_ids=listened_artist_ids,
+                explain=True,
+            )
+            all_content_recommendations.append(content_recommendations)
+            all_content_items.append(
+                [
+                    str(recommendation["artist_id"])
+                    for recommendation in content_recommendations
+                ]
+            )
+
+            user_index = mappings["user_id_to_index"][user_id]
+            collaborative_scores = model.user_factors @ model.item_factors[user_index]
+            blended_scores = hybrid_scores(
+                collaborative_scores=collaborative_scores,
+                content_scores=content_scores,
+                content_weight=DEFAULT_CONTENT_WEIGHT,
+            )
+            hybrid_recommendations = recommend_from_scores(
+                scores=blended_scores,
+                content_artifacts=content_artifacts,
+                artist_stats=artist_stats,
+                top_k=top_k,
+                exclude_artist_ids=train_artist_ids,
+                reference_artist_ids=listened_artist_ids,
+                explain=True,
+            )
+            all_hybrid_recommendations.append(hybrid_recommendations)
+            all_hybrid_items.append(
+                [
+                    str(recommendation["artist_id"])
+                    for recommendation in hybrid_recommendations
+                ]
+            )
 
     result = {
         "als": _summarize_recommendations(
@@ -339,6 +468,29 @@ def _evaluate_single_fold(
             mappings["artist_id_to_index"],
             top_k,
         )
+    if compare_all and content_artifacts is not None:
+        content_factors = content_artifacts.content_matrix.toarray()
+        content_artist_id_to_index = content_artifacts.artist_id_to_content_index
+        result["content"] = _summarize_recommendations(
+            all_content_items,
+            all_relevant_items,
+            known_artists,
+            artist_stats,
+            content_factors,
+            content_artist_id_to_index,
+            top_k,
+            all_content_recommendations,
+        )
+        result["hybrid"] = _summarize_recommendations(
+            all_hybrid_items,
+            all_relevant_items,
+            known_artists,
+            artist_stats,
+            content_factors,
+            content_artist_id_to_index,
+            top_k,
+            all_hybrid_recommendations,
+        )
     return result
 
 
@@ -350,6 +502,7 @@ def _summarize_recommendations(
     artist_factors: np.ndarray,
     artist_id_to_index: dict[str, int],
     top_k: int,
+    list_of_recommendations: list[list[dict[str, Any]]] | None = None,
 ) -> dict[str, float]:
     if not list_of_recommended_items:
         return {
@@ -360,6 +513,8 @@ def _summarize_recommendations(
             "catalog_coverage": 0.0,
             "average_popularity": 0.0,
             "intra_list_diversity": 0.0,
+            "novelty_at_k": 0.0,
+            "explanation_coverage": 0.0,
         }
 
     return {
@@ -409,6 +564,11 @@ def _summarize_recommendations(
             list_of_recommended_items,
             artist_stats,
         ),
+        "novelty_at_k": novelty_at_k(
+            list_of_recommended_items,
+            artist_stats,
+        ),
+        "explanation_coverage": explanation_coverage(list_of_recommendations or []),
         "intra_list_diversity": float(
             np.mean(
                 [
@@ -433,3 +593,12 @@ def _average_metric_dicts(metric_dicts: list[dict[str, float]]) -> dict[str, flo
         metric_name: float(np.mean([metrics[metric_name] for metrics in metric_dicts]))
         for metric_name in metric_names
     }
+
+
+def _metadata_from_interactions(df: pd.DataFrame) -> pd.DataFrame:
+    metadata_df = df[["artist_id", "artist_name"]].drop_duplicates("artist_id").copy()
+    metadata_df["genres"] = "unknown"
+    metadata_df["mood_tags"] = "unknown"
+    metadata_df["country"] = "unknown"
+    metadata_df["era"] = "unknown"
+    return metadata_df

@@ -5,9 +5,11 @@ from music_recommender.evaluate import (
     average_popularity,
     catalog_coverage,
     evaluate_repeated_holdout,
+    explanation_coverage,
     intra_list_diversity,
     map_at_k,
     ndcg_at_k,
+    novelty_at_k,
     precision_at_k,
     recall_at_k,
     train_test_split_by_user,
@@ -76,6 +78,30 @@ def test_average_popularity_works_on_known_example() -> None:
     assert popularity == pytest.approx(20.0)
 
 
+def test_novelty_at_k_works_on_known_example() -> None:
+    novelty = novelty_at_k(
+        [["a", "c"]],
+        {
+            "a": {"popularity_rank": 1},
+            "b": {"popularity_rank": 2},
+            "c": {"popularity_rank": 3},
+        },
+    )
+
+    assert novelty == pytest.approx(0.5)
+
+
+def test_explanation_coverage_works_on_known_example() -> None:
+    coverage = explanation_coverage(
+        [
+            [{"artist_id": "a", "reasons": ["shared pop"]}],
+            [{"artist_id": "b", "reasons": []}],
+        ]
+    )
+
+    assert coverage == pytest.approx(0.5)
+
+
 def test_intra_list_diversity_works_on_known_example() -> None:
     diversity = intra_list_diversity(
         ["a", "b"],
@@ -127,3 +153,57 @@ def test_repeated_holdout_returns_baseline_comparison() -> None:
     assert "als" in metrics
     assert "popularity" in metrics
     assert "catalog_coverage" in metrics["als"]
+
+
+def test_repeated_holdout_returns_all_model_comparison() -> None:
+    df = pd.DataFrame(
+        {
+            "user_id": [
+                "user_1",
+                "user_1",
+                "user_1",
+                "user_2",
+                "user_2",
+                "user_2",
+                "user_3",
+                "user_3",
+                "user_3",
+            ],
+            "artist_id": [
+                "artist_1",
+                "artist_2",
+                "artist_3",
+                "artist_1",
+                "artist_3",
+                "artist_4",
+                "artist_2",
+                "artist_3",
+                "artist_4",
+            ],
+            "artist_name": ["A", "B", "C", "A", "C", "D", "B", "C", "D"],
+            "play_count": [5, 4, 3, 5, 4, 3, 5, 4, 3],
+        }
+    )
+    metadata_df = pd.DataFrame(
+        {
+            "artist_id": ["artist_1", "artist_2", "artist_3", "artist_4"],
+            "artist_name": ["A", "B", "C", "D"],
+            "genres": ["pop", "pop", "rock", "rock"],
+            "mood_tags": ["bright", "bright", "raw", "raw"],
+            "country": ["US", "US", "UK", "UK"],
+            "era": ["2020s", "2020s", "2000s", "2000s"],
+        }
+    )
+
+    metrics = evaluate_repeated_holdout(
+        df,
+        top_k=2,
+        folds=1,
+        use_gpu=False,
+        compare_all=True,
+        metadata_df=metadata_df,
+    )
+
+    assert {"als", "popularity", "content", "hybrid"} <= set(metrics)
+    assert "novelty_at_k" in metrics["hybrid"]
+    assert "explanation_coverage" in metrics["content"]

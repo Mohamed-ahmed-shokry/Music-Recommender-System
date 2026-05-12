@@ -303,21 +303,37 @@ def evaluate(
     top_k: int = DEFAULT_TOP_K,
     folds: int = 1,
     compare_baseline: bool = False,
+    compare_all: bool = False,
     use_gpu: bool = DEFAULT_USE_GPU,
 ) -> None:
     """Evaluate recommendations with ranking metrics."""
     try:
         df = load_and_validate_interactions(RAW_DATA_PATH)
+        metadata_df = (
+            load_and_validate_artist_metadata(RAW_METADATA_PATH, df)
+            if compare_all
+            else None
+        )
         metrics = evaluate_repeated_holdout(
             df,
             top_k=top_k,
             folds=folds,
             compare_baseline=compare_baseline,
+            compare_all=compare_all,
+            metadata_df=metadata_df,
             use_gpu=use_gpu,
         )
     except ValueError as error:
         typer.echo(f"Error: {error}")
         raise typer.Exit(code=1) from error
+
+    if compare_all:
+        typer.echo(f"Evaluation over {folds} fold(s):")
+        _print_metric_row("ALS", metrics["als"], top_k)
+        _print_metric_row("Popularity", metrics["popularity"], top_k)
+        _print_metric_row("Content", metrics["content"], top_k)
+        _print_metric_row("Hybrid", metrics["hybrid"], top_k)
+        return
 
     if compare_baseline:
         typer.echo(f"Evaluation over {folds} fold(s):")
@@ -336,6 +352,8 @@ def _print_metric_row(name: str, metrics: dict[str, float], top_k: int) -> None:
     typer.echo(f"  NDCG@{top_k}: {metrics['ndcg_at_k']:.4f}")
     typer.echo(f"  Catalog coverage: {metrics['catalog_coverage']:.4f}")
     typer.echo(f"  Average popularity: {metrics['average_popularity']:.4f}")
+    typer.echo(f"  Novelty@{top_k}: {metrics['novelty_at_k']:.4f}")
+    typer.echo(f"  Explanation coverage: {metrics['explanation_coverage']:.4f}")
     typer.echo(f"  Intra-list diversity: {metrics['intra_list_diversity']:.4f}")
 
 
