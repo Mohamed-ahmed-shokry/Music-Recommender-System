@@ -9,12 +9,15 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 A production-style artist recommendation system that turns implicit listening
-signals into personalized music recommendations.
+signals and artist metadata into personalized, explainable music
+recommendations.
 
 This project uses collaborative filtering with Alternating Least Squares, ALS,
-from the `implicit` library. It includes a reusable Python package, versioned
-serving artifacts, cold-start handling, ranking controls, baseline comparison,
-a Typer CLI, a FastAPI API, tests, linting, and a portfolio-ready architecture.
+from the `implicit` library, then blends ALS scores with content-based artist
+metadata similarity. It includes a reusable Python package, versioned serving
+artifacts, cold-start onboarding, recommendation explanations, ranking controls,
+baseline comparison, a Typer CLI, a FastAPI API, tests, linting, and a
+portfolio-ready architecture.
 
 ## Contents
 
@@ -43,10 +46,13 @@ The current system:
 
 - trains an ALS model from implicit feedback;
 - recommends unseen artists for known users;
+- blends collaborative and content-based scores with a configurable weight;
+- recommends artists for new users from favorite artists, genres, or mood tags;
+- explains recommendations with score components and matched metadata;
 - serves popular fallback recommendations for unknown users;
-- finds similar artists from learned latent factors;
+- finds similar artists from ALS factors, metadata, or a hybrid of both;
 - stores everything needed for serving in a versioned artifact bundle;
-- compares ALS against a popularity baseline;
+- compares ALS, popularity, content-only, and hybrid strategies;
 - exposes both CLI and API workflows.
 
 The included dataset is intentionally small so the whole project can run quickly
@@ -58,33 +64,35 @@ with the same columns.
 | Area | Implementation |
 | --- | --- |
 | Recommendation modeling | ALS collaborative filtering with implicit play-count feedback |
+| Content modeling | TF-IDF artist metadata vectors for genre, mood, country, and era |
+| Hybrid ranking | Configurable ALS plus content scoring with score explanations |
 | Production structure | `src/` package layout, CLI, API, tests, docs, ignored artifacts |
 | Serving design | `RecommenderService` loads artifacts once for CLI/API use |
-| Cold start | Unknown users receive popular artist fallback recommendations |
+| Cold start | Unknown users receive popular fallback or profile-based recommendations |
 | Ranking controls | Optional listened-item inclusion, popularity penalty, diversity reranking |
-| Evaluation | ALS vs popularity baseline with ranking and catalog metrics |
+| Evaluation | ALS, popularity, content, and hybrid metrics with novelty and explanations |
 | Reproducibility | `uv`, `pyproject.toml`, `uv.lock`, deterministic sample data |
 | Portfolio polish | README, MIT license, clean commands, model card, roadmap |
 
 ## System Architecture
 
 ```text
-data/raw/sample_interactions.csv
+data/raw/sample_interactions.csv      data/raw/sample_artist_metadata.csv
         |
         v
-Data validation
+Data validation + metadata validation
         |
         v
 User and artist filtering
         |
         v
-ID mappings + sparse user-item matrix
+ID mappings + sparse user-item matrix + content vectors
         |
         v
-ALS model training with implicit
+ALS model training with implicit + hybrid scoring inputs
         |
         v
-Versioned recommender artifact bundle
+Versioned v3 recommender artifact bundle
         |
         v
 RecommenderService
@@ -101,14 +109,18 @@ rebuilding matrices or reloading raw CSV data for every request.
 
 | Strategy | When it is used | Behavior |
 | --- | --- | --- |
-| `als_personalized` | Known user ID | Scores artists using ALS user and artist factors |
+| `hybrid_personalized` | Known user ID | Blends ALS score and content profile score |
+| `content_profile` | New user onboarding | Scores artists from favorite artists, genres, and mood tags |
+| `content_similarity` | Metadata artist similarity | Finds artists with similar genres, moods, country, and era |
+| `hybrid_similarity` | Hybrid artist similarity | Blends ALS factor similarity and content similarity |
+| `als_similarity` | ALS artist similarity | Uses cosine similarity between artist factor vectors |
 | `popular_fallback` | Unknown user ID | Returns globally popular artists from training data |
 | `popular_baseline` | Evaluation and CLI baseline | Ranks artists by total plays and listener count |
-| Similar artists | Known artist ID | Uses cosine similarity between artist factor vectors |
 
 Ranking controls are optional and beginner-friendly by default:
 
 - listened artists are excluded by default;
+- content weight is `0.25` by default;
 - popularity penalty is `0.0` by default;
 - diversity reranking is `0.0` by default.
 
@@ -124,6 +136,7 @@ music-recommender-system/
 |   `-- models/
 |-- data/
 |   |-- raw/
+|   |   |-- sample_artist_metadata.csv
 |   |   `-- sample_interactions.csv
 |   |-- processed/
 |   `-- README.md
@@ -135,8 +148,10 @@ music-recommender-system/
 |       |-- baselines.py
 |       |-- cli.py
 |       |-- config.py
+|       |-- content.py
 |       |-- data.py
 |       |-- evaluate.py
+|       |-- metadata.py
 |       |-- model.py
 |       |-- preprocessing.py
 |       |-- ranking.py
@@ -212,6 +227,12 @@ Prepare data:
 uv run python -m music_recommender.cli prepare-data
 ```
 
+Validate artist metadata:
+
+```bash
+uv run python -m music_recommender.cli prepare-metadata
+```
+
 Train with the default sample dataset:
 
 ```bash
@@ -222,6 +243,12 @@ Train from a specific CSV:
 
 ```bash
 uv run python -m music_recommender.cli train --data-path data/raw/sample_interactions.csv
+```
+
+Train with explicit interaction and metadata files:
+
+```bash
+uv run python -m music_recommender.cli train --data-path data/raw/sample_interactions.csv --metadata-path data/raw/sample_artist_metadata.csv
 ```
 
 Inspect the saved artifact bundle:
@@ -236,10 +263,16 @@ Recommend artists:
 uv run python -m music_recommender.cli recommend-user --user-id user_1 --top-k 10
 ```
 
+Recommend with hybrid score explanations:
+
+```bash
+uv run python -m music_recommender.cli recommend-user --user-id user_1 --top-k 10 --content-weight 0.25 --explain
+```
+
 Recommend with reranking controls:
 
 ```bash
-uv run python -m music_recommender.cli recommend-user --user-id user_1 --top-k 10 --diversity 0.2 --popularity-penalty 0.1
+uv run python -m music_recommender.cli recommend-user --user-id user_1 --top-k 10 --content-weight 0.25 --diversity 0.2 --popularity-penalty 0.1
 ```
 
 Include artists the user already listened to:
@@ -254,10 +287,22 @@ Show popular artists:
 uv run python -m music_recommender.cli popular-artists --top-k 10
 ```
 
-Find similar artists:
+Recommend from onboarding preferences:
 
 ```bash
-uv run python -m music_recommender.cli similar-artists --artist-id artist_2 --top-k 10
+uv run python -m music_recommender.cli recommend-profile --artist-ids artist_1,artist_6 --genres pop,electronic --top-k 10 --explain
+```
+
+Find similar artists with ALS, content, or hybrid similarity:
+
+```bash
+uv run python -m music_recommender.cli similar-artists --artist-id artist_2 --method hybrid --top-k 10 --explain
+```
+
+Find metadata-similar artists:
+
+```bash
+uv run python -m music_recommender.cli content-similar-artists --artist-id artist_2 --top-k 10 --explain
 ```
 
 Evaluate ALS:
@@ -270,6 +315,12 @@ Compare ALS with a popularity baseline:
 
 ```bash
 uv run python -m music_recommender.cli evaluate --top-k 10 --folds 5 --compare-baseline
+```
+
+Compare ALS, popularity, content-only, and hybrid strategies:
+
+```bash
+uv run python -m music_recommender.cli evaluate --top-k 10 --folds 5 --compare-all --no-use-gpu
 ```
 
 ## API Reference
@@ -292,8 +343,10 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/health` | Artifact and service health |
 | `GET` | `/metadata` | Training config, dataset fingerprint, artifact metadata |
 | `GET` | `/popular-artists?top_k=10` | Popular artist recommendations |
-| `GET` | `/recommend/user/{user_id}?top_k=10` | Personalized or fallback recommendations |
-| `GET` | `/similar-artists/{artist_id}?top_k=10` | Similar artists |
+| `GET` | `/recommend/user/{user_id}?top_k=10&content_weight=0.25&explain=true` | Hybrid personalized or fallback recommendations |
+| `POST` | `/recommend/profile` | Onboarding recommendations from artists, genres, and moods |
+| `GET` | `/similar-artists/{artist_id}?method=hybrid&top_k=10` | ALS, content, or hybrid similar artists |
+| `GET` | `/content-similar-artists/{artist_id}?top_k=10` | Metadata-only similar artists |
 
 Example requests:
 
@@ -301,9 +354,13 @@ Example requests:
 curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/metadata
 curl "http://127.0.0.1:8000/popular-artists?top_k=10"
-curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10"
+curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10&content_weight=0.25&explain=true"
 curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10&diversity=0.2&popularity_penalty=0.1"
-curl "http://127.0.0.1:8000/similar-artists/artist_2?top_k=10"
+curl "http://127.0.0.1:8000/similar-artists/artist_2?method=hybrid&top_k=10&explain=true"
+curl "http://127.0.0.1:8000/content-similar-artists/artist_2?top_k=10&explain=true"
+curl -X POST http://127.0.0.1:8000/recommend/profile \
+  -H "Content-Type: application/json" \
+  -d '{"artist_ids":["artist_1","artist_6"],"genres":["pop","electronic"],"top_k":10,"explain":true}'
 ```
 
 Known-user response:
@@ -311,13 +368,26 @@ Known-user response:
 ```json
 {
   "user_id": "user_1",
-  "strategy": "als_personalized",
+  "strategy": "hybrid_personalized",
+  "content_weight": 0.25,
   "recommendations": [
     {
-      "artist_id": "artist_10",
-      "artist_name": "Coldplay",
-      "score": 0.4845,
-      "popularity_rank": 6
+      "artist_id": "artist_7",
+      "artist_name": "Taylor Swift",
+      "score": 0.3357,
+      "popularity_rank": 5,
+      "score_components": {
+        "collaborative_score": 0.4287,
+        "content_score": 0.1543,
+        "hybrid_score": 0.3357
+      },
+      "matched_metadata": {
+        "genres": ["pop", "singer-songwriter"],
+        "mood_tags": ["bright", "romantic", "anthemic"]
+      },
+      "reasons": [
+        "Shares 2010s, pop with The Weeknd"
+      ]
     }
   ]
 }
@@ -353,12 +423,14 @@ The project reports ranking quality, catalog behavior, and popularity bias:
 | `NDCG@K` | Ranking quality with higher weight for top positions |
 | Catalog coverage | Share of the artist catalog recommended at least once |
 | Average popularity | Average total plays of recommended artists |
+| Novelty@K | Average inverse popularity rank of recommended artists |
+| Explanation coverage | Share of recommendations with non-empty reasons |
 | Intra-list diversity | Average dissimilarity within each recommendation list |
 
-Run a baseline comparison:
+Run the full v3 comparison:
 
 ```bash
-uv run python -m music_recommender.cli evaluate --top-k 5 --folds 2 --compare-baseline --no-use-gpu
+uv run python -m music_recommender.cli evaluate --top-k 5 --folds 2 --compare-all --no-use-gpu
 ```
 
 Example output:
@@ -372,6 +444,8 @@ ALS:
   NDCG@5: 0.4013
   Catalog coverage: 0.9444
   Average popularity: 93.2417
+  Novelty@5: 0.4520
+  Explanation coverage: 0.0000
   Intra-list diversity: 0.5004
 Popularity:
   Precision@5: 0.1500
@@ -380,7 +454,29 @@ Popularity:
   NDCG@5: 0.3089
   Catalog coverage: 0.5833
   Average popularity: 110.9250
+  Novelty@5: 0.2387
+  Explanation coverage: 0.0000
   Intra-list diversity: 0.4357
+Content:
+  Precision@5: 0.3000
+  Recall@5: 0.7500
+  MAP@5: 0.6236
+  NDCG@5: 0.7000
+  Catalog coverage: 0.9722
+  Average popularity: 86.1667
+  Novelty@5: 0.5265
+  Explanation coverage: 1.0000
+  Intra-list diversity: 0.9009
+Hybrid:
+  Precision@5: 0.2417
+  Recall@5: 0.6042
+  MAP@5: 0.3726
+  NDCG@5: 0.4651
+  Catalog coverage: 0.9444
+  Average popularity: 91.9250
+  Novelty@5: 0.4647
+  Explanation coverage: 1.0000
+  Intra-list diversity: 0.9196
 ```
 
 The comparison is useful because a recommender can look strong by recommending
@@ -402,8 +498,10 @@ The bundle contains:
 | mappings | User and artist ID mappings |
 | user-item matrix | Filtered sparse interaction matrix for serving |
 | artist stats | Total plays, listener count, interaction count, popularity rank |
-| metadata | Created time, training device, dataset fingerprint, dimensions |
+| content artifacts | Metadata dataframe, TF-IDF vectorizer, content matrix, feature names |
+| metadata | Created time, training device, dataset fingerprints, dimensions |
 | training config | ALS factors, regularization, iterations, alpha, GPU flag |
+| hybrid config | Default content weight and serving-time hybrid settings |
 
 Inspect it with:
 
@@ -424,6 +522,20 @@ Input CSV files must include:
 
 Validation rejects empty data, missing required columns, missing IDs or names,
 non-numeric play counts, and non-positive play counts.
+
+Artist metadata CSV files must include:
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `artist_id` | string | Must match interaction artist IDs |
+| `artist_name` | string | Display name |
+| `genres` | string | Semicolon-separated genre labels |
+| `mood_tags` | string | Semicolon-separated mood or style tags |
+| `country` | string | Artist country or market |
+| `era` | string | Main listening or release era |
+
+Metadata validation rejects missing columns, duplicate artist IDs, empty genre or
+mood fields, and interaction artists that are not covered by metadata.
 
 ## Development
 
@@ -457,8 +569,10 @@ Current coverage focus:
 - preprocessing and sparse matrix creation;
 - ALS training and persistence;
 - recommendation behavior;
+- content vectorization and content recommendations;
 - artifact bundles;
 - service-layer behavior;
+- FastAPI route behavior;
 - ranking controls;
 - evaluation metrics.
 
@@ -467,23 +581,22 @@ Current coverage focus:
 | Section | Details |
 | --- | --- |
 | Intended use | Learning, portfolio demonstration, small-scale artist recommendation experiments |
-| Model type | Implicit-feedback ALS collaborative filtering |
-| Training signal | Positive play counts |
+| Model type | Hybrid implicit-feedback ALS plus content-based metadata similarity |
+| Training signal | Positive play counts and artist metadata |
 | Prediction target | Artist-level recommendations |
-| Cold start | Unknown users receive popular artists; unknown artists cannot get similarity results |
+| Cold start | Unknown users receive popular artists or profile-based onboarding recommendations |
 | Serving | Local artifact bundle loaded by `RecommenderService` |
-| Bias controls | Popularity baseline, popularity penalty, catalog coverage, diversity metric |
-| Main limitation | Small synthetic sample dataset and no content metadata yet |
+| Bias controls | Popularity baseline, popularity penalty, catalog coverage, diversity and novelty metrics |
+| Explainability | Score components, matched metadata, and human-readable reasons |
+| Main limitation | Small synthetic sample dataset; no real streaming events or external catalog integration yet |
 
 ## Roadmap
 
 - Add Spotify API integration.
 - Add track-level recommendations.
-- Add genre and audio-feature content similarity.
-- Build a hybrid ALS plus content-based recommender.
+- Add audio-feature content similarity.
 - Add a learning-to-rank model after candidate generation.
-- Improve cold-start with onboarding preferences.
-- Add novelty and serendipity metrics.
+- Add advanced serendipity metrics.
 - Add a Streamlit dashboard.
 - Deploy the API with Docker.
 - Add MLflow experiment tracking.
