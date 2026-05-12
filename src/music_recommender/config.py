@@ -6,6 +6,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DATA_PATH = DATA_DIR / "raw" / "sample_interactions.csv"
+RAW_METADATA_PATH = DATA_DIR / "raw" / "sample_artist_metadata.csv"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
@@ -22,4 +23,5 @@ DEFAULT_ALS_REGULARIZATION = 0.05
 DEFAULT_ALS_ITERATIONS = 20
 DEFAULT_ALS_ALPHA = 15.0
 DEFAULT_USE_GPU = True
+DEFAULT_CONTENT_WEIGHT = 0.25
 DEFAULT_TOP_K = 10
