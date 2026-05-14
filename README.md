@@ -15,9 +15,9 @@ recommendations.
 This project uses collaborative filtering with Alternating Least Squares, ALS,
 from the `implicit` library, then blends ALS scores with content-based artist
 metadata similarity. It includes a reusable Python package, versioned serving
-artifacts, cold-start onboarding, recommendation explanations, ranking controls,
-baseline comparison, a Typer CLI, a FastAPI API, tests, linting, and a
-portfolio-ready architecture.
+artifacts, cold-start onboarding, session-aware recommendations,
+recommendation explanations, ranking controls, baseline comparison, a Typer CLI,
+a FastAPI API, tests, linting, and a portfolio-ready architecture.
 
 ## Contents
 
@@ -48,6 +48,8 @@ The current system:
 - recommends unseen artists for known users;
 - blends collaborative and content-based scores with a configurable weight;
 - recommends artists for new users from favorite artists, genres, or mood tags;
+- builds short-term session recommendations from a known user plus seed artists,
+  genres, moods, and explicit exclusions;
 - explains recommendations with score components and matched metadata;
 - serves popular fallback recommendations for unknown users;
 - finds similar artists from ALS factors, metadata, or a hybrid of both;
@@ -66,9 +68,10 @@ with the same columns.
 | Recommendation modeling | ALS collaborative filtering with implicit play-count feedback |
 | Content modeling | TF-IDF artist metadata vectors for genre, mood, country, and era |
 | Hybrid ranking | Configurable ALS plus content scoring with score explanations |
+| Session ranking | Short-term seed artists, genre and mood intent, exclusions, and user taste blending |
 | Production structure | `src/` package layout, CLI, API, tests, docs, ignored artifacts |
 | Serving design | `RecommenderService` loads artifacts once for CLI/API use |
-| Cold start | Unknown users receive popular fallback or profile-based recommendations |
+| Cold start | Unknown users receive popular fallback or profile/session-based recommendations |
 | Ranking controls | Optional listened-item inclusion, popularity penalty, diversity reranking |
 | Evaluation | ALS, popularity, content, and hybrid metrics with novelty and explanations |
 | Reproducibility | `uv`, `pyproject.toml`, `uv.lock`, deterministic sample data |
@@ -92,7 +95,7 @@ ID mappings + sparse user-item matrix + content vectors
 ALS model training with implicit + hybrid scoring inputs
         |
         v
-Versioned v3 recommender artifact bundle
+Versioned v4 recommender artifact bundle
         |
         v
 RecommenderService
@@ -111,6 +114,8 @@ rebuilding matrices or reloading raw CSV data for every request.
 | --- | --- | --- |
 | `hybrid_personalized` | Known user ID | Blends ALS score and content profile score |
 | `content_profile` | New user onboarding | Scores artists from favorite artists, genres, and mood tags |
+| `session_hybrid` | Known user plus session seeds | Blends long-term ALS taste with short-term artist, genre, and mood intent |
+| `session_content` | Session seeds without a known user | Scores artists from short-term artist, genre, and mood intent |
 | `content_similarity` | Metadata artist similarity | Finds artists with similar genres, moods, country, and era |
 | `hybrid_similarity` | Hybrid artist similarity | Blends ALS factor similarity and content similarity |
 | `als_similarity` | ALS artist similarity | Uses cosine similarity between artist factor vectors |
@@ -293,6 +298,12 @@ Recommend from onboarding preferences:
 uv run python -m music_recommender.cli recommend-profile --artist-ids artist_1,artist_6 --genres pop,electronic --top-k 10 --explain
 ```
 
+Build a short-term session mix:
+
+```bash
+uv run python -m music_recommender.cli recommend-session --user-id user_1 --artist-ids artist_1,artist_6 --genres pop,electronic --mood-tags bright,dancefloor --exclude-artist-ids artist_2 --top-k 10 --content-weight 0.35 --explain
+```
+
 Find similar artists with ALS, content, or hybrid similarity:
 
 ```bash
@@ -345,6 +356,7 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/popular-artists?top_k=10` | Popular artist recommendations |
 | `GET` | `/recommend/user/{user_id}?top_k=10&content_weight=0.25&explain=true` | Hybrid personalized or fallback recommendations |
 | `POST` | `/recommend/profile` | Onboarding recommendations from artists, genres, and moods |
+| `POST` | `/recommend/session` | Short-term session recommendations from seeds, exclusions, and optional user taste |
 | `GET` | `/similar-artists/{artist_id}?method=hybrid&top_k=10` | ALS, content, or hybrid similar artists |
 | `GET` | `/content-similar-artists/{artist_id}?top_k=10` | Metadata-only similar artists |
 
@@ -361,6 +373,9 @@ curl "http://127.0.0.1:8000/content-similar-artists/artist_2?top_k=10&explain=tr
 curl -X POST http://127.0.0.1:8000/recommend/profile \
   -H "Content-Type: application/json" \
   -d '{"artist_ids":["artist_1","artist_6"],"genres":["pop","electronic"],"top_k":10,"explain":true}'
+curl -X POST http://127.0.0.1:8000/recommend/session \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"user_1","artist_ids":["artist_1","artist_6"],"genres":["pop","electronic"],"mood_tags":["bright"],"exclude_artist_ids":["artist_2"],"top_k":10,"content_weight":0.35,"explain":true}'
 ```
 
 Known-user response:
@@ -411,6 +426,35 @@ Unknown-user response:
 }
 ```
 
+Session response:
+
+```json
+{
+  "user_id": "user_1",
+  "strategy": "session_hybrid",
+  "content_weight": 0.35,
+  "seed_artist_ids": ["artist_1", "artist_6"],
+  "genres": ["pop", "electronic"],
+  "mood_tags": ["bright"],
+  "excluded_artist_ids": ["artist_1", "artist_2", "artist_6"],
+  "recommendations": [
+    {
+      "artist_id": "artist_7",
+      "artist_name": "Taylor Swift",
+      "score": 0.4421,
+      "score_components": {
+        "collaborative_score": 0.4287,
+        "session_content_score": 0.6242,
+        "hybrid_score": 0.4421
+      },
+      "reasons": [
+        "Matches your selected preferences: bright, pop"
+      ]
+    }
+  ]
+}
+```
+
 ## Evaluation
 
 The project reports ranking quality, catalog behavior, and popularity bias:
@@ -427,7 +471,7 @@ The project reports ranking quality, catalog behavior, and popularity bias:
 | Explanation coverage | Share of recommendations with non-empty reasons |
 | Intra-list diversity | Average dissimilarity within each recommendation list |
 
-Run the full v3 comparison:
+Run the full v4 comparison:
 
 ```bash
 uv run python -m music_recommender.cli evaluate --top-k 5 --folds 2 --compare-all --no-use-gpu
@@ -569,6 +613,7 @@ Current coverage focus:
 - preprocessing and sparse matrix creation;
 - ALS training and persistence;
 - recommendation behavior;
+- session recommendation behavior;
 - content vectorization and content recommendations;
 - artifact bundles;
 - service-layer behavior;
@@ -584,7 +629,7 @@ Current coverage focus:
 | Model type | Hybrid implicit-feedback ALS plus content-based metadata similarity |
 | Training signal | Positive play counts and artist metadata |
 | Prediction target | Artist-level recommendations |
-| Cold start | Unknown users receive popular artists or profile-based onboarding recommendations |
+| Cold start | Unknown users receive popular artists or profile/session-based recommendations |
 | Serving | Local artifact bundle loaded by `RecommenderService` |
 | Bias controls | Popularity baseline, popularity penalty, catalog coverage, diversity and novelty metrics |
 | Explainability | Score components, matched metadata, and human-readable reasons |
