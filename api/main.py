@@ -23,6 +23,22 @@ class ProfileRecommendationRequest(BaseModel):
     explain: bool = False
 
 
+class SessionRecommendationRequest(BaseModel):
+    """Short-term listening session payload for v4 recommendations."""
+
+    artist_ids: list[str] = Field(default_factory=list)
+    genres: list[str] = Field(default_factory=list)
+    mood_tags: list[str] = Field(default_factory=list)
+    user_id: str | None = None
+    top_k: int = 10
+    exclude_artist_ids: list[str] = Field(default_factory=list)
+    include_listened: bool = False
+    diversity: float = 0.0
+    popularity_penalty: float = 0.0
+    content_weight: float = DEFAULT_CONTENT_WEIGHT
+    explain: bool = False
+
+
 def load_service() -> None:
     """Load model artifacts once at API startup when available."""
     global service, service_load_error
@@ -116,6 +132,27 @@ def recommend_profile(request: ProfileRecommendationRequest) -> dict[str, object
             genres=request.genres,
             mood_tags=request.mood_tags,
             top_k=request.top_k,
+            explain=request.explain,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/recommend/session")
+def recommend_session(request: SessionRecommendationRequest) -> dict[str, object]:
+    """Return session recommendations from short-term taste signals."""
+    try:
+        return get_service().recommend_session(
+            artist_ids=request.artist_ids,
+            genres=request.genres,
+            mood_tags=request.mood_tags,
+            user_id=request.user_id,
+            top_k=request.top_k,
+            exclude_artist_ids=request.exclude_artist_ids,
+            include_listened=request.include_listened,
+            diversity=request.diversity,
+            popularity_penalty=request.popularity_penalty,
+            content_weight=request.content_weight,
             explain=request.explain,
         )
     except ValueError as error:
