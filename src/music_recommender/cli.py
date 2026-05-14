@@ -230,6 +230,66 @@ def recommend_profile(
 
 
 @app.command()
+def recommend_session(
+    user_id: str | None = typer.Option(
+        None,
+        help="Optional known user ID to blend long-term taste into the session.",
+    ),
+    artist_ids: str = typer.Option(
+        "",
+        help="Comma-separated seed artist IDs, for example artist_1,artist_6.",
+    ),
+    genres: str = typer.Option(
+        "",
+        help="Comma-separated session genres, for example pop,electronic.",
+    ),
+    mood_tags: str = typer.Option(
+        "",
+        help="Comma-separated session moods, for example bright,dancefloor.",
+    ),
+    exclude_artist_ids: str = typer.Option(
+        "",
+        help="Comma-separated artist IDs to exclude from the session.",
+    ),
+    top_k: int = DEFAULT_TOP_K,
+    include_listened: bool = typer.Option(
+        False,
+        "--include-listened/--exclude-listened",
+        help="Include or exclude artists the user already listened to.",
+    ),
+    popularity_penalty: float = 0.0,
+    diversity: float = 0.0,
+    content_weight: float = DEFAULT_CONTENT_WEIGHT,
+    explain: bool = False,
+) -> None:
+    """Recommend artists for a short-term listening session."""
+    try:
+        service = RecommenderService.from_artifacts()
+        response = service.recommend_session(
+            artist_ids=_parse_csv_option(artist_ids),
+            genres=_parse_csv_option(genres),
+            mood_tags=_parse_csv_option(mood_tags),
+            user_id=user_id,
+            top_k=top_k,
+            exclude_artist_ids=_parse_csv_option(exclude_artist_ids),
+            include_listened=include_listened,
+            popularity_penalty=popularity_penalty,
+            diversity=diversity,
+            content_weight=content_weight,
+            explain=explain,
+        )
+    except (FileNotFoundError, ValueError) as error:
+        typer.echo(f"Error: {error}")
+        raise typer.Exit(code=1) from error
+
+    typer.echo("Session recommendations:")
+    typer.echo(f"Strategy: {response['strategy']}")
+    if response.get("message"):
+        typer.echo(response["message"])
+    typer.echo(format_recommendations(response["recommendations"]))
+
+
+@app.command()
 def popular_artists(top_k: int = DEFAULT_TOP_K) -> None:
     """Show globally popular artists from the training data."""
     try:
