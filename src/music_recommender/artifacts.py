@@ -167,7 +167,7 @@ def load_artifact(path: str | Path = ARTIFACT_BUNDLE_PATH) -> RecommenderArtifac
     ]
     if missing_fields:
         raise ValueError(
-            f"Artifact is missing v3 fields {missing_fields}. Retrain the model."
+            f"Artifact is missing v4 fields {missing_fields}. Retrain the model."
         )
 
     return artifact
