@@ -17,7 +17,7 @@ from music_recommender.config import ARTIFACT_BUNDLE_PATH
 from music_recommender.content import ContentArtifacts
 from music_recommender.preprocessing import Mappings
 
-ARTIFACT_VERSION = "3.0"
+ARTIFACT_VERSION = "4.0"
 
 ArtistStats = dict[str, str | int | float]
 
