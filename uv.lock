@@ -173,6 +173,7 @@ dependencies = [
     { name = "threadpoolctl" },
     { name = "tqdm" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/32/24/bdaa4be7fcfb568d63e0ddff948c486515c6b728055ee060f3f131803476/implicit-0.7.3.tar.gz", hash = "sha256:9571a52d70b3667e99a6e6aae6681526dd3286c765cf0ea10e1073d068a98057", size = 443981, upload-time = "2026-05-14T04:36:05.331Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/81/e4/5d033371a1aca288bba68ed65a74307cb1ec3f6bb03339b3df6b8c050d37/implicit-0.7.3-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:a059c926f23813d288b0ad68e436c84ed24c7049a26dc1b4cced70c9b8d1cf40", size = 1248365, upload-time = "2026-05-08T18:37:09.808Z" },
     { url = "https://files.pythonhosted.org/packages/06/7f/16e15852849f99ccbaf9f4e0f8ccbab08f20ba37b09a60ad5b84e8d2e415/implicit-0.7.3-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:7a6035c0fbe89eef9d1789367c8097eb3145af3cfffd0dc0e92b2570ab67a6fc", size = 671535, upload-time = "2026-05-08T18:37:11.632Z" },
@@ -240,7 +241,7 @@ wheels = [
 
 [[package]]
 name = "music-recommender-system"
-version = "0.1.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
