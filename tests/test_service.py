@@ -107,6 +107,53 @@ def test_profile_recommendations_return_content_strategy(tmp_path: Path) -> None
     assert response["recommendations"][0]["reasons"]
 
 
+def test_session_recommendations_blend_user_and_session_preferences(
+    tmp_path: Path,
+) -> None:
+    service = create_service(tmp_path)
+
+    response = service.recommend_session(
+        user_id="user_1",
+        artist_ids=["artist_1"],
+        genres=["pop"],
+        top_k=2,
+        explain=True,
+    )
+
+    assert response["strategy"] == "session_hybrid"
+    assert response["seed_artist_ids"] == ["artist_1"]
+    assert response["recommendations"]
+    assert all(
+        recommendation["artist_id"] not in {"artist_1", "artist_2"}
+        for recommendation in response["recommendations"]
+    )
+    score_components = response["recommendations"][0]["score_components"]
+    assert "collaborative_score" in score_components
+    assert "session_content_score" in score_components
+    assert response["recommendations"][0]["reasons"]
+
+
+def test_session_recommendations_fall_back_for_unknown_user(
+    tmp_path: Path,
+) -> None:
+    service = create_service(tmp_path)
+
+    response = service.recommend_session(
+        user_id="missing_user",
+        artist_ids=["artist_1"],
+        exclude_artist_ids=["artist_2"],
+        top_k=2,
+    )
+
+    assert response["strategy"] == "session_content"
+    assert "Unknown user_id" in response["message"]
+    assert "artist_2" in response["excluded_artist_ids"]
+    assert all(
+        recommendation["artist_id"] != "artist_2"
+        for recommendation in response["recommendations"]
+    )
+
+
 def test_content_similar_artists_return_content_strategy(tmp_path: Path) -> None:
     service = create_service(tmp_path)
 
@@ -122,6 +169,6 @@ def test_service_metadata_is_available(tmp_path: Path) -> None:
 
     metadata = service.metadata()
 
-    assert metadata["version"] == "3.0"
+    assert metadata["version"] == "4.0"
     assert metadata["metadata"]["num_users"] == 3
     assert metadata["training_config"]["factors"] == 4

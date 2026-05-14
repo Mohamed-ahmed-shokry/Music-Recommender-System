@@ -67,7 +67,7 @@ def test_artifact_bundle_saves_and_loads(tmp_path: Path) -> None:
     save_artifact(artifact, artifact_path)
     loaded_artifact = load_artifact(artifact_path)
 
-    assert loaded_artifact.version == "3.0"
+    assert loaded_artifact.version == "4.0"
     assert loaded_artifact.user_item_matrix.shape == (2, 3)
     assert loaded_artifact.metadata["num_users"] == 2
     assert loaded_artifact.training_config["factors"] == 4
