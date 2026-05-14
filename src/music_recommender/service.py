@@ -191,6 +191,92 @@ class RecommenderService:
             "recommendations": recommendations,
         }
 
+    def recommend_session(
+        self,
+        artist_ids: list[str] | None = None,
+        genres: list[str] | None = None,
+        mood_tags: list[str] | None = None,
+        user_id: str | None = None,
+        top_k: int = 10,
+        exclude_artist_ids: list[str] | None = None,
+        include_listened: bool = False,
+        popularity_penalty: float = 0.0,
+        diversity: float = 0.0,
+        content_weight: float | None = None,
+        explain: bool = False,
+    ) -> dict[str, Any]:
+        """Recommend artists for a short-term listening session."""
+        content_weight = self._content_weight(content_weight)
+        session_scores, selected_artist_ids, preference_tokens = profile_content_scores(
+            content_artifacts=self.artifact.content_artifacts,
+            artist_ids=artist_ids,
+            genres=genres,
+            mood_tags=mood_tags,
+        )
+        scores = session_scores
+        strategy = "session_content"
+        message = None
+        reference_artist_ids = list(selected_artist_ids)
+        excluded_artist_ids = set(exclude_artist_ids or [])
+        excluded_artist_ids.update(selected_artist_ids)
+        score_components = {"session_content_score": session_scores}
+
+        if user_id:
+            if user_id in self.artifact.mappings["user_id_to_index"]:
+                collaborative_scores = self._collaborative_scores_for_user(user_id)
+                scores = hybrid_scores(
+                    collaborative_scores=collaborative_scores,
+                    content_scores=session_scores,
+                    content_weight=content_weight,
+                )
+                _, listened_artist_ids = user_content_scores(
+                    user_id=user_id,
+                    user_item_matrix=self.artifact.user_item_matrix,
+                    mappings=self.artifact.mappings,
+                    content_artifacts=self.artifact.content_artifacts,
+                )
+                reference_artist_ids = list(
+                    dict.fromkeys(selected_artist_ids + listened_artist_ids)
+                )
+                if not include_listened:
+                    excluded_artist_ids.update(listened_artist_ids)
+                score_components = {
+                    "collaborative_score": collaborative_scores,
+                    "session_content_score": session_scores,
+                    "hybrid_score": scores,
+                }
+                strategy = "session_hybrid"
+            else:
+                message = (
+                    f"Unknown user_id '{user_id}'. Returning session content "
+                    "recommendations."
+                )
+
+        recommendations = self._rank_content_scores(
+            scores=scores,
+            top_k=top_k,
+            exclude_artist_ids=excluded_artist_ids,
+            reference_artist_ids=reference_artist_ids,
+            preference_tokens=preference_tokens,
+            explain=explain,
+            popularity_penalty=popularity_penalty,
+            diversity=diversity,
+            score_components=score_components,
+        )
+        response = {
+            "user_id": user_id,
+            "strategy": strategy,
+            "content_weight": content_weight,
+            "seed_artist_ids": selected_artist_ids,
+            "genres": genres or [],
+            "mood_tags": mood_tags or [],
+            "excluded_artist_ids": sorted(excluded_artist_ids),
+            "recommendations": recommendations,
+        }
+        if message:
+            response["message"] = message
+        return response
+
     def popular_artists(self, top_k: int) -> dict[str, Any]:
         """Return globally popular artists from the training data."""
         return {
