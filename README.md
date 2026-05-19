@@ -122,12 +122,6 @@ rebuilding matrices or reloading raw CSV data for every request.
 | `popular_fallback` | Unknown user ID | Returns globally popular artists from training data |
 | `popular_baseline` | Evaluation and CLI baseline | Ranks artists by total plays and listener count |
 
-Ranking controls are optional and beginner-friendly by default:
-
-- listened artists are excluded by default;
-- content weight is `0.25` by default;
-- popularity penalty is `0.0` by default;
-- diversity reranking is `0.0` by default.
 
 ## Project Structure
 
