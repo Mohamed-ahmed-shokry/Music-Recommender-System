@@ -30,7 +30,6 @@ a FastAPI API, tests, linting, and a portfolio-ready architecture.
 - [CLI Reference](#cli-reference)
 - [API Reference](#api-reference)
 - [Evaluation](#evaluation)
-- [Artifact Bundle](#artifact-bundle)
 - [Model Card](#model-card)
 - [Development](#development)
 - [Roadmap](#roadmap)
