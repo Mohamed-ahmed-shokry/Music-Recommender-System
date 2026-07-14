@@ -211,7 +211,7 @@ GPU training also requires compatible NVIDIA CUDA runtime libraries. If the GPU
 path is unavailable, training falls back to CPU and records the reason in the
 artifact metadata.
 
-CPU-only training:
+CPU training:
 
 ```bash
 uv run python -m music_recommender.cli train --no-use-gpu
