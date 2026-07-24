@@ -5,7 +5,8 @@ description = "Artist-level music recommendation system using ALS collaborative 
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [
-    "fastapi>=0.136.1",
+    "fastapi>=0.139.2",
+    "idna>=3.15",
     "implicit>=0.7.3",
     "joblib>=1.5.3",
     "numpy>=2.4.4",
