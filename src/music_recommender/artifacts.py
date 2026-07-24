@@ -16,6 +16,7 @@ from scipy.sparse import csr_matrix
 from music_recommender.config import ARTIFACT_BUNDLE_PATH
 from music_recommender.content import ContentArtifacts
 from music_recommender.preprocessing import Mappings
+from music_recommender.utils import atomic_joblib_dump
 
 ARTIFACT_VERSION = "4.0"
 
@@ -135,9 +136,7 @@ def save_artifact(
     path: str | Path = ARTIFACT_BUNDLE_PATH,
 ) -> None:
     """Persist a recommender artifact bundle."""
-    output_path = Path(path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(artifact, output_path)
+    atomic_joblib_dump(artifact, path)
 
 
 def load_artifact(path: str | Path = ARTIFACT_BUNDLE_PATH) -> RecommenderArtifact:

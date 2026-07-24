@@ -9,6 +9,7 @@ import pandas as pd
 from scipy.sparse import csr_matrix
 
 from music_recommender.data import load_and_validate_interactions
+from music_recommender.utils import atomic_joblib_dump
 
 Mappings = dict[str, dict[Any, Any]]
 
@@ -85,9 +86,7 @@ def build_user_item_matrix(
 
 def save_mappings(mappings: Mappings, path: str | Path) -> None:
     """Save ID mappings to disk."""
-    output_path = Path(path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(mappings, output_path)
+    atomic_joblib_dump(mappings, path)
 
 
 def load_mappings(path: str | Path) -> Mappings:

@@ -29,6 +29,7 @@ from music_recommender.config import (
 from music_recommender.content import build_content_artifacts
 from music_recommender.metadata import load_and_validate_artist_metadata
 from music_recommender.preprocessing import Mappings, prepare_training_data
+from music_recommender.utils import atomic_joblib_dump
 
 if TYPE_CHECKING:
     from implicit.als import AlternatingLeastSquares
@@ -121,9 +122,7 @@ def train_als_model(
 
 def save_model(model: AlternatingLeastSquares, path: str | Path) -> None:
     """Save a trained ALS model to disk."""
-    output_path = Path(path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, output_path)
+    atomic_joblib_dump(model, path)
 
 
 def load_model(path: str | Path) -> AlternatingLeastSquares:
