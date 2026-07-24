@@ -17,6 +17,9 @@ MAX_API_RESULTS = 100
 PositiveTopK = Annotated[int, Query(ge=1, le=MAX_API_RESULTS)]
 UnitInterval = Annotated[float, Query(ge=0.0, le=1.0)]
 SimilarityMethod = Literal["als", "content", "hybrid"]
+OptionalCatalogText = Annotated[str | None, Query(max_length=100)]
+CatalogOffset = Annotated[int, Query(ge=0)]
+CatalogLimit = Annotated[int, Query(ge=1, le=MAX_API_RESULTS)]
 
 
 class ProfileRecommendationRequest(BaseModel):
@@ -104,6 +107,31 @@ def popular_artists(top_k: PositiveTopK = 10) -> dict[str, object]:
     """Return globally popular artists."""
     try:
         return get_service().popular_artists(top_k=top_k)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/catalog/artists")
+def browse_artists(
+    query: OptionalCatalogText = None,
+    genre: OptionalCatalogText = None,
+    mood_tag: OptionalCatalogText = None,
+    country: OptionalCatalogText = None,
+    era: OptionalCatalogText = None,
+    offset: CatalogOffset = 0,
+    limit: CatalogLimit = 25,
+) -> dict[str, object]:
+    """Search and page through artists available to the recommender."""
+    try:
+        return get_service().browse_artists(
+            query=query,
+            genre=genre,
+            mood_tag=mood_tag,
+            country=country,
+            era=era,
+            offset=offset,
+            limit=limit,
+        )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 

@@ -19,6 +19,42 @@ class FakeService:
             ][:top_k],
         }
 
+    def browse_artists(
+        self,
+        *,
+        query: str | None,
+        genre: str | None,
+        mood_tag: str | None,
+        country: str | None,
+        era: str | None,
+        offset: int,
+        limit: int,
+    ) -> dict[str, object]:
+        return {
+            "total": 1,
+            "offset": offset,
+            "limit": limit,
+            "has_more": False,
+            "filters": {
+                "query": query,
+                "genre": genre,
+                "mood_tag": mood_tag,
+                "country": country,
+                "era": era,
+            },
+            "artists": [
+                {
+                    "artist_id": "artist_1",
+                    "artist_name": "A",
+                    "genres": ["pop"],
+                    "mood_tags": ["bright"],
+                    "country": "Canada",
+                    "era": "2020s",
+                    "popularity_rank": 1,
+                }
+            ][:limit],
+        }
+
     def recommend_user(
         self,
         user_id: str,
@@ -178,6 +214,31 @@ def test_recommend_user_route_accepts_hybrid_params() -> None:
     assert body["recommendations"][0]["reasons"]
 
 
+def test_artist_catalog_route_accepts_search_filters_and_pagination() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get(
+            "/catalog/artists",
+            params={
+                "query": "week",
+                "genre": "pop",
+                "country": "Canada",
+                "offset": 0,
+                "limit": 10,
+            },
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["total"] == 1
+    assert body["limit"] == 10
+    assert body["filters"]["query"] == "week"
+    assert body["filters"]["genre"] == "pop"
+    assert body["artists"][0]["artist_id"] == "artist_1"
+
+
 def test_recommend_profile_route_returns_content_profile() -> None:
     with TestClient(api_main.app) as client:
         api_main.service = FakeService()
@@ -258,6 +319,8 @@ def test_missing_service_returns_training_error() -> None:
     [
         ("get", "/popular-artists?top_k=0", {}),
         ("get", "/popular-artists?top_k=101", {}),
+        ("get", "/catalog/artists?offset=-1", {}),
+        ("get", "/catalog/artists?limit=101", {}),
         ("get", "/recommend/user/user_1?diversity=1.1", {}),
         ("get", "/similar-artists/artist_1?method=unknown", {}),
         (
