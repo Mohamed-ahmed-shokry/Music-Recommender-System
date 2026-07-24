@@ -26,6 +26,9 @@ gpu = [
 dashboard = [
     "streamlit>=1.59.2",
 ]
+tracking = [
+    "mlflow-skinny>=3.14.0",
+]
 
 [dependency-groups]
 dev = [
