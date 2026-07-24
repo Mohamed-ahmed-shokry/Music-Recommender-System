@@ -23,6 +23,9 @@ music-recommender = "music_recommender.cli:app"
 gpu = [
     "implicit[gpu]>=0.7.3",
 ]
+dashboard = [
+    "streamlit>=1.59.2",
+]
 
 [dependency-groups]
 dev = [
