@@ -43,3 +43,35 @@ jobs:
 
       - name: Build distributions
         run: uv build
+
+  container:
+    name: Build and smoke test container
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build --tag music-recommender-api:ci .
+
+      - name: Verify API health
+        run: |
+          container_id="$(docker run \
+            --detach \
+            --name music-recommender-api-ci \
+            --publish 127.0.0.1:8000:8000 \
+            music-recommender-api:ci)"
+          trap 'docker logs "$container_id"; docker rm --force "$container_id"' EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error \
+              http://127.0.0.1:8000/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "Container did not become healthy within 30 seconds." >&2
+          exit 1
