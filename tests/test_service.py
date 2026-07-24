@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from music_recommender.artifacts import build_recommender_artifact, save_artifact
 from music_recommender.content import build_content_artifacts
@@ -172,3 +173,49 @@ def test_service_metadata_is_available(tmp_path: Path) -> None:
     assert metadata["version"] == "4.0"
     assert metadata["metadata"]["num_users"] == 3
     assert metadata["training_config"]["factors"] == 4
+
+
+def test_artist_catalog_is_popularity_sorted_and_paginated(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    first_page = service.browse_artists(limit=2)
+    second_page = service.browse_artists(offset=2, limit=2)
+
+    assert first_page["total"] == 4
+    assert first_page["has_more"] is True
+    assert [artist["popularity_rank"] for artist in first_page["artists"]] == [1, 2]
+    assert second_page["has_more"] is False
+    assert [artist["popularity_rank"] for artist in second_page["artists"]] == [3, 4]
+    assert first_page["artists"][0]["genres"]
+    assert first_page["artists"][0]["mood_tags"]
+
+
+def test_artist_catalog_searches_and_filters_metadata(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    search_result = service.browse_artists(query="CANADA")
+    filtered_result = service.browse_artists(genre="POP", mood_tag="fun")
+
+    assert [artist["artist_id"] for artist in search_result["artists"]] == ["artist_4"]
+    assert [artist["artist_id"] for artist in filtered_result["artists"]] == [
+        "artist_2"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("offset", "limit", "message"),
+    [
+        (-1, 10, "offset must be a non-negative integer"),
+        (0, 0, "limit must be a positive integer"),
+    ],
+)
+def test_artist_catalog_rejects_invalid_pagination(
+    tmp_path: Path,
+    offset: int,
+    limit: int,
+    message: str,
+) -> None:
+    service = create_service(tmp_path)
+
+    with pytest.raises(ValueError, match=message):
+        service.browse_artists(offset=offset, limit=limit)

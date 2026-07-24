@@ -284,6 +284,67 @@ class RecommenderService:
             "recommendations": popular_artists(self.artifact.artist_stats, top_k=top_k),
         }
 
+    def browse_artists(
+        self,
+        *,
+        query: str | None = None,
+        genre: str | None = None,
+        mood_tag: str | None = None,
+        country: str | None = None,
+        era: str | None = None,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        """Search and page through the artist catalog."""
+        if isinstance(offset, bool) or offset < 0:
+            raise ValueError("offset must be a non-negative integer.")
+        if isinstance(limit, bool) or limit < 1:
+            raise ValueError("limit must be a positive integer.")
+
+        normalized_filters = {
+            "genre": _normalize_catalog_filter(genre),
+            "mood_tag": _normalize_catalog_filter(mood_tag),
+            "country": _normalize_catalog_filter(country),
+            "era": _normalize_catalog_filter(era),
+        }
+        normalized_query = _normalize_catalog_filter(query)
+        artists = []
+        for row in self.artifact.content_artifacts.metadata.itertuples(index=False):
+            artist_id = str(row.artist_id)
+            artist = {
+                "artist_id": artist_id,
+                "artist_name": str(row.artist_name),
+                "genres": _split_catalog_terms(row.genres),
+                "mood_tags": _split_catalog_terms(row.mood_tags),
+                "country": str(row.country),
+                "era": str(row.era),
+                **self.artifact.artist_stats.get(artist_id, {}),
+            }
+            if not _artist_matches_catalog(
+                artist,
+                query=normalized_query,
+                **normalized_filters,
+            ):
+                continue
+            artists.append(artist)
+
+        artists.sort(
+            key=lambda artist: (
+                int(artist.get("popularity_rank", len(artists) + 1)),
+                str(artist["artist_name"]).casefold(),
+                str(artist["artist_id"]),
+            )
+        )
+        total = len(artists)
+        page = artists[offset : offset + limit]
+        return {
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "has_more": offset + len(page) < total,
+            "artists": page,
+        }
+
     def similar_artists(
         self,
         artist_id: str,
@@ -463,3 +524,46 @@ class RecommenderService:
             recommendations.append(recommendation)
 
         return recommendations
+
+
+def _normalize_catalog_filter(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().casefold()
+    return normalized or None
+
+
+def _split_catalog_terms(value: Any) -> list[str]:
+    return [term.strip() for term in str(value).split(";") if term.strip()]
+
+
+def _artist_matches_catalog(
+    artist: dict[str, Any],
+    *,
+    query: str | None,
+    genre: str | None,
+    mood_tag: str | None,
+    country: str | None,
+    era: str | None,
+) -> bool:
+    normalized_genres = {value.casefold() for value in artist["genres"]}
+    normalized_moods = {value.casefold() for value in artist["mood_tags"]}
+    if genre and genre not in normalized_genres:
+        return False
+    if mood_tag and mood_tag not in normalized_moods:
+        return False
+    if country and country != str(artist["country"]).casefold():
+        return False
+    if era and era != str(artist["era"]).casefold():
+        return False
+    if query:
+        searchable_values = [
+            artist["artist_id"],
+            artist["artist_name"],
+            *artist["genres"],
+            *artist["mood_tags"],
+            artist["country"],
+            artist["era"],
+        ]
+        return any(query in str(value).casefold() for value in searchable_values)
+    return True
