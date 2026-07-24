@@ -1,9 +1,27 @@
 [project]
 name = "music-recommender-system"
 version = "0.4.0"
-description = "Artist-level music recommendation system using ALS collaborative filtering."
+description = "Production-style hybrid artist recommendations with ALS and metadata."
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
+license = "MIT"
+authors = [
+    { name = "Mohamed Ahmed Shokry" },
+]
+keywords = [
+    "collaborative-filtering",
+    "implicit-feedback",
+    "machine-learning",
+    "music-recommendation",
+    "recommender-system",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "fastapi>=0.139.2",
     "idna>=3.15",
@@ -19,6 +37,11 @@ dependencies = [
 
 [project.scripts]
 music-recommender = "music_recommender.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System"
+Issues = "https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/issues"
+Repository = "https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System"
 
 [project.optional-dependencies]
 gpu = [
