@@ -257,12 +257,18 @@ def test_missing_service_returns_training_error() -> None:
     ("method", "path", "request_kwargs"),
     [
         ("get", "/popular-artists?top_k=0", {}),
+        ("get", "/popular-artists?top_k=101", {}),
         ("get", "/recommend/user/user_1?diversity=1.1", {}),
         ("get", "/similar-artists/artist_1?method=unknown", {}),
         (
             "post",
             "/recommend/profile",
             {"json": {"artist_ids": ["artist_1"], "top_k": 0}},
+        ),
+        (
+            "post",
+            "/recommend/profile",
+            {"json": {"artist_ids": ["artist_1"], "top_k": 101}},
         ),
         (
             "post",

@@ -13,7 +13,8 @@ from music_recommender.service import RecommenderService
 service: RecommenderService | None = None
 service_load_error: str | None = None
 
-PositiveTopK = Annotated[int, Query(ge=1)]
+MAX_API_RESULTS = 100
+PositiveTopK = Annotated[int, Query(ge=1, le=MAX_API_RESULTS)]
 UnitInterval = Annotated[float, Query(ge=0.0, le=1.0)]
 SimilarityMethod = Literal["als", "content", "hybrid"]
 
@@ -24,7 +25,7 @@ class ProfileRecommendationRequest(BaseModel):
     artist_ids: list[str] = Field(default_factory=list)
     genres: list[str] = Field(default_factory=list)
     mood_tags: list[str] = Field(default_factory=list)
-    top_k: int = Field(default=10, ge=1)
+    top_k: int = Field(default=10, ge=1, le=MAX_API_RESULTS)
     explain: bool = False
 
 
@@ -35,7 +36,7 @@ class SessionRecommendationRequest(BaseModel):
     genres: list[str] = Field(default_factory=list)
     mood_tags: list[str] = Field(default_factory=list)
     user_id: str | None = None
-    top_k: int = Field(default=10, ge=1)
+    top_k: int = Field(default=10, ge=1, le=MAX_API_RESULTS)
     exclude_artist_ids: list[str] = Field(default_factory=list)
     include_listened: bool = False
     diversity: float = Field(default=0.0, ge=0.0, le=1.0)
