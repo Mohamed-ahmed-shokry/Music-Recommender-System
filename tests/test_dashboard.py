@@ -77,6 +77,35 @@ class FakeDashboardService:
             "content_features": 12,
         }
 
+    def browse_artists(
+        self,
+        *,
+        query: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, object]:
+        artists = []
+        for metadata in self.artifact.content_artifacts.metadata.to_dict("records"):
+            artist_id = metadata["artist_id"]
+            artist = {
+                **metadata,
+                "genres": metadata["genres"].split(";"),
+                "mood_tags": metadata["mood_tags"].split(";"),
+                **self.artifact.artist_stats[artist_id],
+            }
+            if (
+                query
+                and query.casefold()
+                not in " ".join(str(value) for value in artist.values()).casefold()
+            ):
+                continue
+            artists.append(artist)
+        page = artists[:limit]
+        return {
+            "total": len(artists),
+            "has_more": len(page) < len(artists),
+            "artists": page,
+        }
+
     def recommend_user(self, **_: Any) -> dict[str, object]:
         return self._recommendation_response("hybrid_personalized")
 
@@ -140,11 +169,15 @@ def test_recommendation_frame_supports_similarity_responses() -> None:
     assert frame.loc[0, "Why"] == "Shares pop · Matches bright"
 
 
-def test_catalog_frame_joins_metadata_and_popularity() -> None:
+def test_catalog_frame_uses_service_search_and_formats_metadata() -> None:
     frame = catalog_frame(FakeDashboardService())
+    filtered_frame = catalog_frame(FakeDashboardService(), query="canada")
 
     assert frame["artist_id"].tolist() == ["artist_1", "artist_2", "artist_3"]
     assert frame["total_plays"].tolist() == [30, 20, 10]
+    assert frame.loc[1, "genres"] == "pop; dance"
+    assert filtered_frame["artist_id"].tolist() == ["artist_1"]
+    assert filtered_frame.attrs["total"] == 1
 
 
 def test_dashboard_renders_all_product_workflows() -> None:

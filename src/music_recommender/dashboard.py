@@ -74,17 +74,24 @@ def recommendation_frame(payload: dict[str, Any]) -> pd.DataFrame:
     )
 
 
-def catalog_frame(service: RecommenderService) -> pd.DataFrame:
-    """Build a catalog table by joining metadata and popularity statistics."""
-    metadata = service.artifact.content_artifacts.metadata.copy()
-    stats = pd.DataFrame(service.artifact.artist_stats.values())
-    catalog = metadata.merge(
-        stats,
-        on=["artist_id", "artist_name"],
-        how="left",
-        validate="one_to_one",
+def catalog_frame(
+    service: RecommenderService,
+    query: str | None = None,
+    limit: int = 100,
+) -> pd.DataFrame:
+    """Build a dashboard table from the shared catalog service."""
+    payload = service.browse_artists(query=query, limit=limit)
+    catalog = pd.DataFrame(payload["artists"])
+    for column in ("genres", "mood_tags"):
+        if column in catalog:
+            catalog[column] = catalog[column].apply(
+                lambda values: "; ".join(str(value) for value in values)
+            )
+    catalog.attrs.update(
+        total=payload["total"],
+        has_more=payload["has_more"],
     )
-    return catalog.sort_values("popularity_rank").reset_index(drop=True)
+    return catalog
 
 
 def _artist_choices(service: RecommenderService) -> dict[str, str]:
@@ -368,16 +375,16 @@ def _render_similarity_tab(
 
 def _render_catalog_tab(service: RecommenderService) -> None:
     st.write("Inspect artist metadata and the popularity signals used by the model.")
-    catalog = catalog_frame(service)
     search = st.text_input(
         "Search artists, genres, countries, or moods",
         placeholder="Try electronic, Canada, or atmospheric",
     )
-    if search:
-        searchable = catalog.astype(str).apply(
-            lambda column: column.str.contains(search, case=False, na=False)
-        )
-        catalog = catalog[searchable.any(axis=1)]
+    catalog = catalog_frame(service, query=search or None)
+    total = int(catalog.attrs["total"])
+    if catalog.attrs["has_more"]:
+        st.caption(f"Showing the first {len(catalog)} of {total} matching artists.")
+    else:
+        st.caption(f"Showing {total} matching artist{'s' if total != 1 else ''}.")
 
     st.dataframe(
         catalog,
