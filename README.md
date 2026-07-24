@@ -695,6 +695,13 @@ Inspect it with:
 uv run python -m music_recommender.cli artifact-info
 ```
 
+Model, mapping, and serving-bundle writes use atomic replacement, so an
+interrupted retraining run does not overwrite the last healthy file with a
+partial artifact. On load, the service verifies the artifact version, mappings,
+matrix and factor dimensions, content alignment, statistics, and metadata. An
+invalid bundle leaves the API liveness route available while `/health` returns
+`503` with an actionable retraining message.
+
 ## Data Contract
 
 Input CSV files must include:
