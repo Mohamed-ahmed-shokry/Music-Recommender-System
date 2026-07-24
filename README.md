@@ -177,6 +177,7 @@ music-recommender-system/
 |       `-- utils.py
 |-- tests/
 |-- .dockerignore
+|-- CHANGELOG.md
 |-- compose.yaml
 |-- Dockerfile
 |-- LICENSE
@@ -830,3 +831,4 @@ Current coverage focus:
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE).
+Release notes are maintained in [CHANGELOG.md](CHANGELOG.md).
