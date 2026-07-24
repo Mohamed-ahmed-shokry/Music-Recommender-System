@@ -6,6 +6,7 @@
 [![ALS](https://img.shields.io/badge/recommender-implicit%20ALS-111827)](https://github.com/benfred/implicit)
 [![Tests](https://img.shields.io/badge/tests-pytest-0A9EDC)](https://docs.pytest.org/)
 [![Lint](https://img.shields.io/badge/lint-ruff-D7FF64)](https://docs.astral.sh/ruff/)
+[![CI](https://github.com/Mohamed-ahmed-shokry/music-recommender-system/actions/workflows/ci.yml/badge.svg)](https://github.com/Mohamed-ahmed-shokry/music-recommender-system/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 A production-style artist recommendation system that turns implicit listening
@@ -17,7 +18,8 @@ from the `implicit` library, then blends ALS scores with content-based artist
 metadata similarity. It includes a reusable Python package, versioned serving
 artifacts, cold-start onboarding, session-aware recommendations,
 recommendation explanations, ranking controls, baseline comparison, a Typer CLI,
-a FastAPI API, tests, linting, and a portfolio-ready architecture.
+a FastAPI API, Docker deployment, continuous integration, tests, linting, and a
+portfolio-ready architecture.
 
 ## Contents
 
@@ -29,6 +31,7 @@ a FastAPI API, tests, linting, and a portfolio-ready architecture.
 - [Quickstart](#quickstart)
 - [CLI Reference](#cli-reference)
 - [API Reference](#api-reference)
+- [Docker Deployment](#docker-deployment)
 - [Evaluation](#evaluation)
 - [Model Card](#model-card)
 - [Development](#development)
@@ -70,6 +73,8 @@ with the same columns.
 | Session ranking | Short-term seed artists, genre and mood intent, exclusions, and user taste blending |
 | Production structure | `src/` package layout, CLI, API, tests, docs, ignored artifacts |
 | Serving design | `RecommenderService` loads artifacts once for CLI/API use |
+| Deployment | Multi-stage, non-root Docker image with a baked model artifact and health check |
+| Continuous integration | Locked install, formatting, lint, tests, package build, and container smoke test |
 | Cold start | Unknown users receive popular fallback or profile/session-based recommendations |
 | Ranking controls | Optional listened-item inclusion, popularity penalty, diversity reranking |
 | Evaluation | ALS, popularity, content, and hybrid metrics with novelty and explanations |
@@ -126,6 +131,9 @@ rebuilding matrices or reloading raw CSV data for every request.
 
 ```text
 music-recommender-system/
+|-- .github/
+|   `-- workflows/
+|       `-- ci.yml
 |-- api/
 |   |-- __init__.py
 |   `-- main.py
@@ -157,6 +165,9 @@ music-recommender-system/
 |       |-- service.py
 |       `-- utils.py
 |-- tests/
+|-- .dockerignore
+|-- compose.yaml
+|-- Dockerfile
 |-- LICENSE
 |-- README.md
 |-- pyproject.toml
@@ -370,6 +381,41 @@ curl -X POST http://127.0.0.1:8000/recommend/session \
   -H "Content-Type: application/json" \
   -d '{"user_id":"user_1","artist_ids":["artist_1","artist_6"],"genres":["pop","electronic"],"mood_tags":["bright"],"exclude_artist_ids":["artist_2"],"top_k":10,"content_weight":0.35,"explain":true}'
 ```
+
+## Docker Deployment
+
+Build and run the API with Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+The image installs only production dependencies, trains the bundled sample
+dataset on CPU during the build, and runs the API as a non-root user. Compose
+also enables a read-only root filesystem and a temporary `/tmp` mount.
+
+Verify the running service:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+Stop the service:
+
+```bash
+docker compose down
+```
+
+To build and run without Compose:
+
+```bash
+docker build --tag music-recommender-api .
+docker run --rm --publish 8000:8000 music-recommender-api
+```
+
+For non-editable or packaged deployments, set `MUSIC_RECOMMENDER_ROOT` to the
+directory that contains the `data/` and `artifacts/` directories. The container
+sets this to `/app` automatically.
 
 Known-user response:
 
@@ -600,6 +646,11 @@ Check formatting:
 uv run ruff format --check .
 ```
 
+Every push to `main` and every pull request runs the same locked install,
+formatting, lint, test, and package-build checks in GitHub Actions. CI also
+builds the Docker image, starts a container, and verifies the `/health`
+endpoint.
+
 Current coverage focus:
 
 - data validation;
@@ -636,9 +687,8 @@ Current coverage focus:
 - Add a learning-to-rank model after candidate generation.
 - Add advanced serendipity metrics.
 - Add a Streamlit dashboard.
-- Deploy the API with Docker.
 - Add MLflow experiment tracking.
-- Add GitHub Actions CI.
+- Publish versioned container images.
 
 ## License
 
