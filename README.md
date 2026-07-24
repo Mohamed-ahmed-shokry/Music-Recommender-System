@@ -18,8 +18,8 @@ from the `implicit` library, then blends ALS scores with content-based artist
 metadata similarity. It includes a reusable Python package, versioned serving
 artifacts, cold-start onboarding, session-aware recommendations,
 recommendation explanations, ranking controls, baseline comparison, a Typer CLI,
-a FastAPI API, Docker deployment, continuous integration, tests, linting, and a
-portfolio-ready architecture.
+a FastAPI API, an interactive Streamlit dashboard, Docker deployment, continuous
+integration, tests, linting, and a portfolio-ready architecture.
 
 ## Contents
 
@@ -31,6 +31,7 @@ portfolio-ready architecture.
 - [Quickstart](#quickstart)
 - [CLI Reference](#cli-reference)
 - [API Reference](#api-reference)
+- [Dashboard](#dashboard)
 - [Docker Deployment](#docker-deployment)
 - [Evaluation](#evaluation)
 - [Model Card](#model-card)
@@ -57,7 +58,7 @@ The current system:
 - finds similar artists from ALS factors, metadata, or a hybrid of both;
 - stores everything needed for serving in a versioned artifact bundle;
 - compares ALS, popularity, content-only, and hybrid strategies;
-- exposes both CLI and API workflows.
+- exposes CLI, API, and interactive dashboard workflows.
 
 The included dataset is intentionally small so the whole project can run quickly
 on a laptop. The same pipeline can be pointed at a larger Last.fm-style dataset
@@ -72,9 +73,10 @@ with the same columns.
 | Hybrid ranking | Configurable ALS plus content scoring with score explanations |
 | Session ranking | Short-term seed artists, genre and mood intent, exclusions, and user taste blending |
 | Production structure | `src/` package layout, CLI, API, tests, docs, ignored artifacts |
-| Serving design | `RecommenderService` loads artifacts once for CLI/API use |
+| Serving design | `RecommenderService` loads artifacts once for CLI, API, and dashboard use |
 | Deployment | Multi-stage, non-root Docker image with a baked model artifact and health check |
 | Continuous integration | Locked install, formatting, lint, tests, package build, and container smoke test |
+| Interactive product | Streamlit studio for personalized, profile, session, similarity, and catalog exploration |
 | Cold start | Unknown users receive popular fallback or profile/session-based recommendations |
 | Ranking controls | Optional listened-item inclusion, popularity penalty, diversity reranking |
 | Evaluation | ALS, popularity, content, and hybrid metrics with novelty and explanations |
@@ -107,6 +109,8 @@ RecommenderService
         +--> Typer CLI
         |
         +--> FastAPI API
+        |
+        +--> Streamlit dashboard
 ```
 
 The API uses `RecommenderService`, so model artifacts are loaded once instead of
@@ -155,6 +159,7 @@ music-recommender-system/
 |       |-- cli.py
 |       |-- config.py
 |       |-- content.py
+|       |-- dashboard.py
 |       |-- data.py
 |       |-- evaluate.py
 |       |-- metadata.py
@@ -170,6 +175,7 @@ music-recommender-system/
 |-- Dockerfile
 |-- LICENSE
 |-- README.md
+|-- streamlit_app.py
 |-- pyproject.toml
 `-- uv.lock
 ```
@@ -382,23 +388,59 @@ curl -X POST http://127.0.0.1:8000/recommend/session \
   -d '{"user_id":"user_1","artist_ids":["artist_1","artist_6"],"genres":["pop","electronic"],"mood_tags":["bright"],"exclude_artist_ids":["artist_2"],"top_k":10,"content_weight":0.35,"explain":true}'
 ```
 
+## Dashboard
+
+Install the optional dashboard dependencies:
+
+```bash
+uv sync --extra dashboard
+```
+
+Train the model if an artifact is not already available, then launch Streamlit:
+
+```bash
+uv run python -m music_recommender.cli train --no-use-gpu
+uv run --extra dashboard streamlit run streamlit_app.py
+```
+
+Open the dashboard at:
+
+```text
+http://127.0.0.1:8501
+```
+
+The dashboard provides five workflows:
+
+- personalized hybrid recommendations for known listeners;
+- cold-start recommendations from favorite artists, genres, and moods;
+- session mixes that blend long-term taste with short-term intent;
+- ALS, metadata, and hybrid artist similarity;
+- searchable catalog metadata and popularity statistics.
+
+The trained `RecommenderService` is cached as a shared Streamlit resource, so
+widget reruns do not reload the model artifact.
+
 ## Docker Deployment
 
-Build and run the API with Docker Compose:
+Build and run both the API and dashboard with Docker Compose:
 
 ```bash
 docker compose up --build
 ```
 
-The image installs only production dependencies, trains the bundled sample
-dataset on CPU during the build, and runs the API as a non-root user. Compose
-also enables a read-only root filesystem and a temporary `/tmp` mount.
+The images install only their required runtime dependencies, train the bundled
+sample dataset on CPU during the build, and run as a non-root user. Compose also
+enables read-only root filesystems and temporary `/tmp` mounts.
 
-Verify the running service:
+Verify the running services:
 
 ```bash
 curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8501/_stcore/health
 ```
+
+The API is available at `http://127.0.0.1:8000` and the dashboard at
+`http://127.0.0.1:8501`.
 
 Stop the service:
 
@@ -411,6 +453,13 @@ To build and run without Compose:
 ```bash
 docker build --tag music-recommender-api .
 docker run --rm --publish 8000:8000 music-recommender-api
+```
+
+Build and run only the dashboard:
+
+```bash
+docker build --target dashboard-runtime --tag music-recommender-dashboard .
+docker run --rm --publish 8501:8501 music-recommender-dashboard
 ```
 
 For non-editable or packaged deployments, set `MUSIC_RECOMMENDER_ROOT` to the
@@ -625,7 +674,7 @@ mood fields, and interaction artists that are not covered by metadata.
 Run tests:
 
 ```bash
-uv run pytest
+uv run --extra dashboard pytest
 ```
 
 Run linting:
@@ -646,10 +695,10 @@ Check formatting:
 uv run ruff format --check .
 ```
 
-Every push to `main` and every pull request runs the same locked install,
-formatting, lint, test, and package-build checks in GitHub Actions. CI also
-builds the Docker image, starts a container, and verifies the `/health`
-endpoint.
+Every push to `main` and every pull request runs the same locked dashboard and
+development install, formatting, lint, test, and package-build checks in GitHub
+Actions. CI also builds both Docker targets, starts each container, and verifies
+the API and Streamlit health endpoints.
 
 Current coverage focus:
 
@@ -662,6 +711,7 @@ Current coverage focus:
 - artifact bundles;
 - service-layer behavior;
 - FastAPI route behavior;
+- Streamlit dashboard rendering and interaction;
 - ranking controls;
 - evaluation metrics.
 
@@ -674,7 +724,7 @@ Current coverage focus:
 | Training signal | Positive play counts and artist metadata |
 | Prediction target | Artist-level recommendations |
 | Cold start | Unknown users receive popular artists or profile/session-based recommendations |
-| Serving | Local artifact bundle loaded by `RecommenderService` |
+| Serving | Local artifact bundle loaded by the CLI, API, or Streamlit dashboard |
 | Bias controls | Popularity baseline, popularity penalty, catalog coverage, diversity and novelty metrics |
 | Explainability | Score components, matched metadata, and human-readable reasons |
 | Main limitation | Small synthetic sample dataset; no real streaming events or external catalog integration yet |
@@ -686,7 +736,6 @@ Current coverage focus:
 - Add audio-feature content similarity.
 - Add a learning-to-rank model after candidate generation.
 - Add advanced serendipity metrics.
-- Add a Streamlit dashboard.
 - Add MLflow experiment tracking.
 - Publish versioned container images.
 
