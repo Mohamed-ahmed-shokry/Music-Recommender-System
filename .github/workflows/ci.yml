@@ -30,7 +30,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install locked dependencies
-        run: uv sync --locked --extra dashboard --dev
+        run: uv sync --locked --extra dashboard --extra tracking --dev
 
       - name: Check formatting
         run: uv run ruff format --check .
@@ -39,7 +39,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Test
-        run: uv run --extra dashboard pytest
+        run: uv run --extra dashboard --extra tracking pytest
 
       - name: Build distributions
         run: uv build
