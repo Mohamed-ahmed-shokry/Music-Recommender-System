@@ -28,6 +28,11 @@ from music_recommender.model import train_and_save_model
 from music_recommender.preprocessing import prepare_training_data
 from music_recommender.recommend import format_recommendations
 from music_recommender.service import RecommenderService
+from music_recommender.tracking import (
+    DEFAULT_TRAINING_EXPERIMENT,
+    ExperimentTrackingError,
+    tracking_run,
+)
 
 app = typer.Typer(help="Train and use an ALS music artist recommender.")
 
@@ -95,18 +100,87 @@ def train(
     alpha: float = DEFAULT_ALS_ALPHA,
     use_gpu: bool = DEFAULT_USE_GPU,
     content_weight: float = DEFAULT_CONTENT_WEIGHT,
+    track: bool = typer.Option(
+        False,
+        "--track/--no-track",
+        help="Log this training run to MLflow.",
+    ),
+    tracking_uri: str | None = typer.Option(
+        None,
+        help="Remote MLflow server URI; defaults to MLFLOW_TRACKING_URI.",
+    ),
+    experiment_name: str = typer.Option(
+        DEFAULT_TRAINING_EXPERIMENT,
+        help="MLflow experiment name.",
+    ),
+    run_name: str | None = typer.Option(None, help="Optional MLflow run name."),
+    log_artifact: bool = typer.Option(
+        True,
+        "--log-artifact/--no-log-artifact",
+        help="Upload the serving artifact when tracking is enabled.",
+    ),
 ) -> None:
     """Train and save the ALS model."""
-    model, user_item_matrix, mappings = train_and_save_model(
-        raw_data_path=data_path,
-        metadata_path=metadata_path,
-        factors=factors,
-        regularization=regularization,
-        iterations=iterations,
-        alpha=alpha,
-        use_gpu=use_gpu,
-        content_weight=content_weight,
-    )
+    try:
+        with tracking_run(
+            enabled=track,
+            tracking_uri=tracking_uri,
+            experiment_name=experiment_name,
+            run_name=run_name,
+            tags={"workflow": "training", "model_type": "implicit_als"},
+        ) as tracked_run:
+            tracked_run.log_params(
+                {
+                    "data_path": str(data_path),
+                    "metadata_path": str(metadata_path),
+                    "factors": factors,
+                    "regularization": regularization,
+                    "iterations": iterations,
+                    "alpha": alpha,
+                    "use_gpu": use_gpu,
+                    "content_weight": content_weight,
+                }
+            )
+            model, user_item_matrix, mappings = train_and_save_model(
+                raw_data_path=data_path,
+                metadata_path=metadata_path,
+                factors=factors,
+                regularization=regularization,
+                iterations=iterations,
+                alpha=alpha,
+                use_gpu=use_gpu,
+                content_weight=content_weight,
+            )
+            matrix_size = user_item_matrix.shape[0] * user_item_matrix.shape[1]
+            tracked_run.log_metrics(
+                {
+                    "num_users": len(mappings["user_id_to_index"]),
+                    "num_artists": len(mappings["artist_id_to_index"]),
+                    "num_interactions": user_item_matrix.nnz,
+                    "matrix_density": (
+                        user_item_matrix.nnz / matrix_size if matrix_size else 0.0
+                    ),
+                }
+            )
+            tracked_run.set_tags(
+                {
+                    "training_device": getattr(
+                        model,
+                        "training_device",
+                        "unknown",
+                    ),
+                    "gpu_fallback": bool(getattr(model, "gpu_fallback_reason", None)),
+                }
+            )
+            if track and log_artifact:
+                tracked_run.log_artifact(
+                    ARTIFACT_BUNDLE_PATH,
+                    artifact_path="serving",
+                )
+    except ExperimentTrackingError as error:
+        typer.echo(f"Error: {error}")
+        raise typer.Exit(code=1) from error
+
     typer.echo("Model trained successfully.")
     typer.echo(f"Training device: {getattr(model, 'training_device', 'unknown')}")
     fallback_reason = getattr(model, "gpu_fallback_reason", None)
@@ -119,6 +193,9 @@ def train(
     typer.echo(f"Users: {len(mappings['user_id_to_index'])}")
     typer.echo(f"Artists: {len(mappings['artist_id_to_index'])}")
     typer.echo(f"Default content weight: {content_weight}")
+    if tracked_run.enabled:
+        typer.echo(f"MLflow run ID: {tracked_run.run_id}")
+        typer.echo(f"MLflow tracking URI: {tracked_run.tracking_uri}")
 
 
 @app.command()
