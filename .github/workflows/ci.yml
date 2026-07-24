@@ -75,3 +75,30 @@ jobs:
 
           echo "Container did not become healthy within 30 seconds." >&2
           exit 1
+
+      - name: Build dashboard image
+        run: |
+          docker build \
+            --target dashboard-runtime \
+            --tag music-recommender-dashboard:ci \
+            .
+
+      - name: Verify dashboard health
+        run: |
+          container_id="$(docker run \
+            --detach \
+            --name music-recommender-dashboard-ci \
+            --publish 127.0.0.1:8501:8501 \
+            music-recommender-dashboard:ci)"
+          trap 'docker logs "$container_id"; docker rm --force "$container_id"' EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error \
+              http://127.0.0.1:8501/_stcore/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "Dashboard did not become healthy within 30 seconds." >&2
+          exit 1
