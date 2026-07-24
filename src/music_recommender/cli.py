@@ -29,6 +29,7 @@ from music_recommender.preprocessing import prepare_training_data
 from music_recommender.recommend import format_recommendations
 from music_recommender.service import RecommenderService
 from music_recommender.tracking import (
+    DEFAULT_EVALUATION_EXPERIMENT,
     DEFAULT_TRAINING_EXPERIMENT,
     ExperimentTrackingError,
     tracking_run,
@@ -442,25 +443,70 @@ def evaluate(
     compare_baseline: bool = False,
     compare_all: bool = False,
     use_gpu: bool = DEFAULT_USE_GPU,
+    track: bool = typer.Option(
+        False,
+        "--track/--no-track",
+        help="Log this evaluation run to MLflow.",
+    ),
+    tracking_uri: str | None = typer.Option(
+        None,
+        help="Remote MLflow server URI; defaults to MLFLOW_TRACKING_URI.",
+    ),
+    experiment_name: str = typer.Option(
+        DEFAULT_EVALUATION_EXPERIMENT,
+        help="MLflow experiment name.",
+    ),
+    run_name: str | None = typer.Option(None, help="Optional MLflow run name."),
 ) -> None:
     """Evaluate recommendations with ranking metrics."""
     try:
-        df = load_and_validate_interactions(RAW_DATA_PATH)
-        metadata_df = (
-            load_and_validate_artist_metadata(RAW_METADATA_PATH, df)
-            if compare_all
-            else None
-        )
-        metrics = evaluate_repeated_holdout(
-            df,
-            top_k=top_k,
-            folds=folds,
-            compare_baseline=compare_baseline,
-            compare_all=compare_all,
-            metadata_df=metadata_df,
-            use_gpu=use_gpu,
-        )
-    except ValueError as error:
+        with tracking_run(
+            enabled=track,
+            tracking_uri=tracking_uri,
+            experiment_name=experiment_name,
+            run_name=run_name,
+            tags={"workflow": "evaluation", "model_type": "implicit_als"},
+        ) as tracked_run:
+            tracked_run.log_params(
+                {
+                    "top_k": top_k,
+                    "folds": folds,
+                    "compare_baseline": compare_baseline,
+                    "compare_all": compare_all,
+                    "use_gpu": use_gpu,
+                    "data_path": str(RAW_DATA_PATH),
+                    "metadata_path": str(RAW_METADATA_PATH) if compare_all else None,
+                }
+            )
+            df = load_and_validate_interactions(RAW_DATA_PATH)
+            metadata_df = (
+                load_and_validate_artist_metadata(RAW_METADATA_PATH, df)
+                if compare_all
+                else None
+            )
+            metrics = evaluate_repeated_holdout(
+                df,
+                top_k=top_k,
+                folds=folds,
+                compare_baseline=compare_baseline,
+                compare_all=compare_all,
+                metadata_df=metadata_df,
+                use_gpu=use_gpu,
+            )
+            tracked_run.log_metrics(metrics)
+            tracked_run.log_dict(metrics, "evaluation/metrics.json")
+            tracked_run.set_tags(
+                {
+                    "strategies": (
+                        "als,popularity,content,hybrid"
+                        if compare_all
+                        else "als,popularity"
+                        if compare_baseline
+                        else "als"
+                    )
+                }
+            )
+    except (ExperimentTrackingError, ValueError) as error:
         typer.echo(f"Error: {error}")
         raise typer.Exit(code=1) from error
 
@@ -470,15 +516,16 @@ def evaluate(
         _print_metric_row("Popularity", metrics["popularity"], top_k)
         _print_metric_row("Content", metrics["content"], top_k)
         _print_metric_row("Hybrid", metrics["hybrid"], top_k)
-        return
-
-    if compare_baseline:
+    elif compare_baseline:
         typer.echo(f"Evaluation over {folds} fold(s):")
         _print_metric_row("ALS", metrics["als"], top_k)
         _print_metric_row("Popularity", metrics["popularity"], top_k)
-        return
+    else:
+        _print_metric_row("ALS", metrics, top_k)
 
-    _print_metric_row("ALS", metrics, top_k)
+    if tracked_run.enabled:
+        typer.echo(f"MLflow run ID: {tracked_run.run_id}")
+        typer.echo(f"MLflow tracking URI: {tracked_run.tracking_uri}")
 
 
 def _print_metric_row(name: str, metrics: dict[str, float], top_k: int) -> None:
