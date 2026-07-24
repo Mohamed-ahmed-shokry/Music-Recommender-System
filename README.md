@@ -706,8 +706,12 @@ Input CSV files must include:
 | `artist_name` | string | Display name for the artist |
 | `play_count` | numeric | Positive implicit feedback signal |
 
-Validation rejects empty data, missing required columns, missing IDs or names,
-non-numeric play counts, and non-positive play counts.
+Interaction identifiers are loaded as text, so values such as `001` retain
+leading zeroes. Boundary whitespace is trimmed and repeated rows for the same
+user and artist are combined by summing `play_count` before filtering or
+training. Validation rejects empty data, missing required columns, blank IDs or
+names, conflicting names for one artist ID, and non-numeric, non-finite, or
+non-positive play counts.
 
 Artist metadata CSV files must include:
 
