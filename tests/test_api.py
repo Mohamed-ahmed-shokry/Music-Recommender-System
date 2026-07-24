@@ -314,6 +314,27 @@ def test_missing_service_returns_training_error() -> None:
     assert response.json()["detail"] == "Retrain the model."
 
 
+def test_invalid_artifact_keeps_api_alive_but_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_to_load(_: type[api_main.RecommenderService]) -> None:
+        raise ValueError("Artifact structure is invalid. Retrain the model.")
+
+    monkeypatch.setattr(
+        api_main.RecommenderService,
+        "from_artifacts",
+        classmethod(fail_to_load),
+    )
+
+    with TestClient(api_main.app) as client:
+        liveness_response = client.get("/")
+        readiness_response = client.get("/health")
+
+    assert liveness_response.status_code == 200
+    assert readiness_response.status_code == 503
+    assert "Artifact structure is invalid" in readiness_response.json()["detail"]
+
+
 @pytest.mark.parametrize(
     ("method", "path", "request_kwargs"),
     [
