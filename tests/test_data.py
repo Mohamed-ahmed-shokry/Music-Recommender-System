@@ -1,7 +1,13 @@
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
-from music_recommender.data import validate_interactions
+from music_recommender.data import (
+    load_and_validate_interactions,
+    normalize_interactions,
+    validate_interactions,
+)
 
 
 def valid_interactions_df() -> pd.DataFrame:
@@ -74,3 +80,44 @@ def test_conflicting_artist_names_raise_value_error() -> None:
 
     with pytest.raises(ValueError, match="multiple artist names"):
         validate_interactions(df)
+
+
+def test_normalization_trims_text_and_aggregates_duplicate_pairs() -> None:
+    df = pd.DataFrame(
+        {
+            "user_id": [" user_1 ", "user_1"],
+            "artist_id": [" artist_1", "artist_1 "],
+            "artist_name": ["Artist A ", " Artist A"],
+            "play_count": [2, 3],
+            "ignored": ["first", "second"],
+        }
+    )
+
+    normalized = normalize_interactions(df)
+
+    assert normalized.to_dict("records") == [
+        {
+            "user_id": "user_1",
+            "artist_id": "artist_1",
+            "artist_name": "Artist A",
+            "play_count": 5,
+        }
+    ]
+
+
+def test_loading_preserves_text_identifiers_with_leading_zeroes(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "interactions.csv"
+    path.write_text(
+        "user_id,artist_id,artist_name,play_count\n"
+        "001,007,Artist A,2\n"
+        "001,007,Artist A,3\n",
+        encoding="utf-8",
+    )
+
+    loaded = load_and_validate_interactions(path)
+
+    assert loaded.loc[0, "user_id"] == "001"
+    assert loaded.loc[0, "artist_id"] == "007"
+    assert loaded.loc[0, "play_count"] == 5

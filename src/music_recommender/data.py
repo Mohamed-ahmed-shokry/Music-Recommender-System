@@ -6,11 +6,15 @@ import numpy as np
 import pandas as pd
 
 REQUIRED_COLUMNS = ("user_id", "artist_id", "artist_name", "play_count")
+TEXT_COLUMNS = ("user_id", "artist_id", "artist_name")
 
 
 def load_interactions(path: str | Path) -> pd.DataFrame:
     """Load interaction data from a CSV file."""
-    return pd.read_csv(path)
+    return pd.read_csv(
+        path,
+        dtype={column: "string" for column in TEXT_COLUMNS},
+    )
 
 
 def validate_interactions(df: pd.DataFrame) -> None:
@@ -33,7 +37,7 @@ def validate_interactions(df: pd.DataFrame) -> None:
     if df["play_count"].isna().any():
         raise ValueError("Column 'play_count' contains missing values.")
 
-    for column in ("user_id", "artist_id", "artist_name"):
+    for column in TEXT_COLUMNS:
         if (df[column].astype("string").str.strip() == "").any():
             raise ValueError(f"Column '{column}' contains empty values.")
 
@@ -62,8 +66,27 @@ def validate_interactions(df: pd.DataFrame) -> None:
         )
 
 
-def load_and_validate_interactions(path: str | Path) -> pd.DataFrame:
-    """Load interactions from disk and validate them."""
-    df = load_interactions(path)
+def normalize_interactions(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize identifiers and combine repeated user-artist interactions."""
     validate_interactions(df)
-    return df
+    normalized = df.loc[:, REQUIRED_COLUMNS].copy()
+    for column in TEXT_COLUMNS:
+        normalized[column] = normalized[column].astype("string").str.strip()
+
+    normalized = (
+        normalized.groupby(
+            ["user_id", "artist_id", "artist_name"],
+            as_index=False,
+            sort=False,
+        )["play_count"]
+        .sum()
+        .loc[:, REQUIRED_COLUMNS]
+    )
+    validate_interactions(normalized)
+    return normalized
+
+
+def load_and_validate_interactions(path: str | Path) -> pd.DataFrame:
+    """Load, validate, and normalize interactions from disk."""
+    df = load_interactions(path)
+    return normalize_interactions(df)
