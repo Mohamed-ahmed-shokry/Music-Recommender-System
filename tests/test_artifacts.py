@@ -1,8 +1,12 @@
 from pathlib import Path
 
+import joblib
 import pandas as pd
+import pytest
+from scipy.sparse import csr_matrix
 
 from music_recommender.artifacts import (
+    RecommenderArtifact,
     build_artist_stats,
     build_recommender_artifact,
     create_dataset_fingerprint,
@@ -38,7 +42,7 @@ def artifact_metadata_df() -> pd.DataFrame:
     )
 
 
-def test_artifact_bundle_saves_and_loads(tmp_path: Path) -> None:
+def create_test_artifact(tmp_path: Path) -> RecommenderArtifact:
     df = artifact_dataframe()
     mappings = create_id_mappings(df)
     matrix = build_user_item_matrix(
@@ -51,7 +55,7 @@ def test_artifact_bundle_saves_and_loads(tmp_path: Path) -> None:
         artifact_metadata_df(),
         ["artist_1", "artist_2", "artist_3"],
     )
-    artifact = build_recommender_artifact(
+    return build_recommender_artifact(
         model=model,
         mappings=mappings,
         user_item_matrix=matrix,
@@ -62,6 +66,10 @@ def test_artifact_bundle_saves_and_loads(tmp_path: Path) -> None:
         training_config={"factors": 4},
         hybrid_config={"default_content_weight": 0.25},
     )
+
+
+def test_artifact_bundle_saves_and_loads(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
     artifact_path = tmp_path / "artifact.joblib"
 
     save_artifact(artifact, artifact_path)
@@ -74,6 +82,32 @@ def test_artifact_bundle_saves_and_loads(tmp_path: Path) -> None:
     assert loaded_artifact.hybrid_config["default_content_weight"] == 0.25
     assert loaded_artifact.content_artifacts.content_matrix.shape[0] == 3
     assert "artist_2" in loaded_artifact.artist_stats
+
+
+def test_corrupt_artifact_has_actionable_load_error(tmp_path: Path) -> None:
+    artifact_path = tmp_path / "corrupt.joblib"
+    artifact_path.write_bytes(b"not a joblib artifact")
+
+    with pytest.raises(ValueError, match="could not be loaded.*Retrain"):
+        load_artifact(artifact_path)
+
+
+def test_non_bundle_artifact_is_rejected(tmp_path: Path) -> None:
+    artifact_path = tmp_path / "wrong-type.joblib"
+    joblib.dump({"version": "4.0"}, artifact_path)
+
+    with pytest.raises(ValueError, match="not a valid recommender bundle"):
+        load_artifact(artifact_path)
+
+
+def test_inconsistent_artifact_dimensions_are_rejected(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.user_item_matrix = csr_matrix((1, 1))
+    artifact_path = tmp_path / "inconsistent.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="matrix dimensions"):
+        load_artifact(artifact_path)
 
 
 def test_artist_stats_include_popularity_rank() -> None:

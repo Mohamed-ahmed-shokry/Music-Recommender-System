@@ -153,20 +153,93 @@ def load_artifact(path: str | Path = ARTIFACT_BUNDLE_PATH) -> RecommenderArtifac
             category=UserWarning,
             module="implicit.gpu",
         )
-        artifact = joblib.load(artifact_path)
+        try:
+            artifact = joblib.load(artifact_path)
+        except Exception as error:
+            raise ValueError(
+                f"Recommender artifact at '{artifact_path}' could not be loaded. "
+                "Retrain the model."
+            ) from error
 
-    if getattr(artifact, "version", None) != ARTIFACT_VERSION:
+    try:
+        _validate_loaded_artifact(artifact)
+    except ValueError:
+        raise
+    except Exception as error:
+        raise ValueError("Artifact structure is invalid. Retrain the model.") from error
+    return artifact
+
+
+def _validate_loaded_artifact(artifact: Any) -> None:
+    if not isinstance(artifact, RecommenderArtifact):
         raise ValueError(
-            f"Artifact version {getattr(artifact, 'version', 'unknown')} is not "
+            "Artifact is not a valid recommender bundle. Retrain the model."
+        )
+    if artifact.version != ARTIFACT_VERSION:
+        raise ValueError(
+            f"Artifact version {artifact.version} is not "
             f"compatible with required version {ARTIFACT_VERSION}. Retrain the model."
         )
-    required_fields = ("content_artifacts", "hybrid_config")
-    missing_fields = [
-        field for field in required_fields if not hasattr(artifact, field)
-    ]
-    if missing_fields:
+
+    required_mapping_fields = {
+        "user_id_to_index",
+        "index_to_user_id",
+        "artist_id_to_index",
+        "index_to_artist_id",
+        "artist_id_to_name",
+    }
+    missing_mapping_fields = sorted(required_mapping_fields - artifact.mappings.keys())
+    if missing_mapping_fields:
         raise ValueError(
-            f"Artifact is missing v4 fields {missing_fields}. Retrain the model."
+            f"Artifact mappings are missing fields {missing_mapping_fields}. "
+            "Retrain the model."
         )
 
-    return artifact
+    num_users = len(artifact.mappings["user_id_to_index"])
+    num_artists = len(artifact.mappings["artist_id_to_index"])
+    if artifact.user_item_matrix.shape != (num_users, num_artists):
+        raise ValueError(
+            "Artifact interaction matrix dimensions do not match its mappings. "
+            "Retrain the model."
+        )
+    if artifact.model.user_factors.shape[0] != num_artists:
+        raise ValueError(
+            "Artifact artist factors do not match its artist mappings. "
+            "Retrain the model."
+        )
+    if artifact.model.item_factors.shape[0] != num_users:
+        raise ValueError(
+            "Artifact user factors do not match its user mappings. Retrain the model."
+        )
+    if artifact.content_artifacts.content_matrix.shape[0] != num_artists:
+        raise ValueError(
+            "Artifact content matrix does not match its artist mappings. "
+            "Retrain the model."
+        )
+
+    artist_ids = {str(value) for value in artifact.mappings["artist_id_to_index"]}
+    content_artist_ids = set(artifact.content_artifacts.artist_id_to_content_index)
+    if artist_ids != content_artist_ids or artist_ids != set(artifact.artist_stats):
+        raise ValueError(
+            "Artifact artist data is inconsistent across mappings, content, and "
+            "statistics. Retrain the model."
+        )
+
+    required_metadata_fields = {"num_users", "num_artists", "num_interactions"}
+    missing_metadata_fields = sorted(
+        required_metadata_fields - artifact.metadata.keys()
+    )
+    if missing_metadata_fields:
+        raise ValueError(
+            f"Artifact metadata is missing fields {missing_metadata_fields}. "
+            "Retrain the model."
+        )
+    if (
+        int(artifact.metadata["num_users"]) != num_users
+        or int(artifact.metadata["num_artists"]) != num_artists
+        or int(artifact.metadata["num_interactions"]) != artifact.user_item_matrix.nnz
+    ):
+        raise ValueError(
+            "Artifact metadata dimensions do not match its model data. "
+            "Retrain the model."
+        )
