@@ -58,6 +58,7 @@ The current system:
 - explains recommendations with score components and matched metadata;
 - serves popular fallback recommendations for unknown users;
 - finds similar artists from ALS factors, metadata, or a hybrid of both;
+- exposes searchable, filterable artist catalog discovery;
 - stores everything needed for serving in a versioned artifact bundle;
 - compares ALS, popularity, content-only, and hybrid strategies;
 - tracks reproducible training and evaluation runs in MLflow;
@@ -368,6 +369,7 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/` | Basic API message |
 | `GET` | `/health` | Artifact and service health |
 | `GET` | `/metadata` | Training config, dataset fingerprint, artifact metadata |
+| `GET` | `/catalog/artists?query=pop&limit=25` | Search and page through artists and metadata |
 | `GET` | `/popular-artists?top_k=10` | Popular artist recommendations |
 | `GET` | `/recommend/user/{user_id}?top_k=10&content_weight=0.25&explain=true` | Hybrid personalized or fallback recommendations |
 | `POST` | `/recommend/profile` | Onboarding recommendations from artists, genres, and moods |
@@ -380,6 +382,7 @@ Example requests:
 ```bash
 curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/metadata
+curl "http://127.0.0.1:8000/catalog/artists?genre=pop&country=Canada&limit=25"
 curl "http://127.0.0.1:8000/popular-artists?top_k=10"
 curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10&content_weight=0.25&explain=true"
 curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10&diversity=0.2&popularity_penalty=0.1"
@@ -392,6 +395,10 @@ curl -X POST http://127.0.0.1:8000/recommend/session \
   -H "Content-Type: application/json" \
   -d '{"user_id":"user_1","artist_ids":["artist_1","artist_6"],"genres":["pop","electronic"],"mood_tags":["bright"],"exclude_artist_ids":["artist_2"],"top_k":10,"content_weight":0.35,"explain":true}'
 ```
+
+Catalog discovery accepts a free-text `query`, exact `genre`, `mood_tag`,
+`country`, and `era` filters, plus `offset` and `limit` pagination. API result
+counts are capped at 100 items per request.
 
 ## Dashboard
 
@@ -420,10 +427,11 @@ The dashboard provides five workflows:
 - cold-start recommendations from favorite artists, genres, and moods;
 - session mixes that blend long-term taste with short-term intent;
 - ALS, metadata, and hybrid artist similarity;
-- searchable catalog metadata and popularity statistics.
+- responsive catalog search over artist metadata and popularity statistics.
 
 The trained `RecommenderService` is cached as a shared Streamlit resource, so
-widget reruns do not reload the model artifact.
+widget reruns do not reload the model artifact. Catalog search uses the same
+service contract as the API and bounds rendered results for larger datasets.
 
 ## Docker Deployment
 
@@ -756,6 +764,7 @@ Current coverage focus:
 - content vectorization and content recommendations;
 - artifact bundles;
 - service-layer behavior;
+- artist catalog search, filters, and pagination;
 - FastAPI route behavior;
 - Streamlit dashboard rendering and interaction;
 - MLflow tracking lifecycle and CLI integration;
