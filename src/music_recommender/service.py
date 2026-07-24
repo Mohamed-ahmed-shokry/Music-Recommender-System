@@ -312,13 +312,13 @@ class RecommenderService:
         for row in self.artifact.content_artifacts.metadata.itertuples(index=False):
             artist_id = str(row.artist_id)
             artist = {
+                **self.artifact.artist_stats.get(artist_id, {}),
                 "artist_id": artist_id,
                 "artist_name": str(row.artist_name),
                 "genres": _split_catalog_terms(row.genres),
                 "mood_tags": _split_catalog_terms(row.mood_tags),
                 "country": str(row.country),
                 "era": str(row.era),
-                **self.artifact.artist_stats.get(artist_id, {}),
             }
             if not _artist_matches_catalog(
                 artist,
