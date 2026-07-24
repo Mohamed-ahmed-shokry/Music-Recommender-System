@@ -14,4 +14,5 @@ data/processed/*
 .env
 .DS_Store
 mlflow.db
+mlartifacts/
 mlruns/
