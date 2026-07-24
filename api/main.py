@@ -2,8 +2,9 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from music_recommender.config import DEFAULT_CONTENT_WEIGHT
@@ -12,6 +13,10 @@ from music_recommender.service import RecommenderService
 service: RecommenderService | None = None
 service_load_error: str | None = None
 
+PositiveTopK = Annotated[int, Query(ge=1)]
+UnitInterval = Annotated[float, Query(ge=0.0, le=1.0)]
+SimilarityMethod = Literal["als", "content", "hybrid"]
+
 
 class ProfileRecommendationRequest(BaseModel):
     """Onboarding preference payload for content-based recommendations."""
@@ -19,7 +24,7 @@ class ProfileRecommendationRequest(BaseModel):
     artist_ids: list[str] = Field(default_factory=list)
     genres: list[str] = Field(default_factory=list)
     mood_tags: list[str] = Field(default_factory=list)
-    top_k: int = 10
+    top_k: int = Field(default=10, ge=1)
     explain: bool = False
 
 
@@ -30,12 +35,16 @@ class SessionRecommendationRequest(BaseModel):
     genres: list[str] = Field(default_factory=list)
     mood_tags: list[str] = Field(default_factory=list)
     user_id: str | None = None
-    top_k: int = 10
+    top_k: int = Field(default=10, ge=1)
     exclude_artist_ids: list[str] = Field(default_factory=list)
     include_listened: bool = False
-    diversity: float = 0.0
-    popularity_penalty: float = 0.0
-    content_weight: float = DEFAULT_CONTENT_WEIGHT
+    diversity: float = Field(default=0.0, ge=0.0, le=1.0)
+    popularity_penalty: float = Field(default=0.0, ge=0.0, le=1.0)
+    content_weight: float = Field(
+        default=DEFAULT_CONTENT_WEIGHT,
+        ge=0.0,
+        le=1.0,
+    )
     explain: bool = False
 
 
@@ -90,7 +99,7 @@ def metadata() -> dict[str, object]:
 
 
 @app.get("/popular-artists")
-def popular_artists(top_k: int = 10) -> dict[str, object]:
+def popular_artists(top_k: PositiveTopK = 10) -> dict[str, object]:
     """Return globally popular artists."""
     try:
         return get_service().popular_artists(top_k=top_k)
@@ -101,11 +110,11 @@ def popular_artists(top_k: int = 10) -> dict[str, object]:
 @app.get("/recommend/user/{user_id}")
 def recommend_user(
     user_id: str,
-    top_k: int = 10,
+    top_k: PositiveTopK = 10,
     include_listened: bool = False,
-    diversity: float = 0.0,
-    popularity_penalty: float = 0.0,
-    content_weight: float = DEFAULT_CONTENT_WEIGHT,
+    diversity: UnitInterval = 0.0,
+    popularity_penalty: UnitInterval = 0.0,
+    content_weight: UnitInterval = DEFAULT_CONTENT_WEIGHT,
     explain: bool = False,
 ) -> dict[str, object]:
     """Return artist recommendations for a user."""
@@ -162,9 +171,9 @@ def recommend_session(request: SessionRecommendationRequest) -> dict[str, object
 @app.get("/similar-artists/{artist_id}")
 def similar_artists(
     artist_id: str,
-    top_k: int = 10,
-    method: str = "als",
-    content_weight: float = DEFAULT_CONTENT_WEIGHT,
+    top_k: PositiveTopK = 10,
+    method: SimilarityMethod = "als",
+    content_weight: UnitInterval = DEFAULT_CONTENT_WEIGHT,
     explain: bool = False,
 ) -> dict[str, object]:
     """Return artists similar to a selected artist."""
@@ -183,7 +192,7 @@ def similar_artists(
 @app.get("/content-similar-artists/{artist_id}")
 def content_similar_artists(
     artist_id: str,
-    top_k: int = 10,
+    top_k: PositiveTopK = 10,
     explain: bool = False,
 ) -> dict[str, object]:
     """Return artists similar to a selected artist by metadata only."""

@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 import api.main as api_main
@@ -250,3 +251,35 @@ def test_missing_service_returns_training_error() -> None:
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Retrain the model."
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "request_kwargs"),
+    [
+        ("get", "/popular-artists?top_k=0", {}),
+        ("get", "/recommend/user/user_1?diversity=1.1", {}),
+        ("get", "/similar-artists/artist_1?method=unknown", {}),
+        (
+            "post",
+            "/recommend/profile",
+            {"json": {"artist_ids": ["artist_1"], "top_k": 0}},
+        ),
+        (
+            "post",
+            "/recommend/session",
+            {"json": {"genres": ["pop"], "popularity_penalty": -0.1}},
+        ),
+    ],
+)
+def test_routes_reject_invalid_ranking_parameters(
+    method: str,
+    path: str,
+    request_kwargs: dict[str, object],
+) -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.request(method, path, **request_kwargs)
+
+    assert response.status_code == 422
