@@ -242,6 +242,12 @@ uv run python -m music_recommender.cli train --no-use-gpu
 
 ## CLI Reference
 
+Check the installed release:
+
+```bash
+uv run music-recommender --version
+```
+
 Prepare data:
 
 ```bash
