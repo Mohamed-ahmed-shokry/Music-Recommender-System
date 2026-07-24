@@ -5,6 +5,7 @@ from pathlib import Path
 
 import typer
 
+from music_recommender import __version__
 from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
     DEFAULT_ALS_ALPHA,
@@ -36,6 +37,25 @@ from music_recommender.tracking import (
 )
 
 app = typer.Typer(help="Train and use an ALS music artist recommender.")
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(__version__)
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the installed package version and exit.",
+    ),
+) -> None:
+    """Train, evaluate, and serve hybrid artist recommendations."""
 
 
 def _format_artifact_age(created_at: str) -> str:

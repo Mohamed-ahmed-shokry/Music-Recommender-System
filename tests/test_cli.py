@@ -10,9 +10,17 @@ from scipy.sparse import csr_matrix
 from typer.testing import CliRunner
 
 import music_recommender.cli as cli
+from music_recommender import __version__
 from music_recommender.tracking import ExperimentTrackingError
 
 runner = CliRunner()
+
+
+def test_cli_reports_installed_version() -> None:
+    result = runner.invoke(cli.app, ["--version"])
+
+    assert result.exit_code == 0
+    assert result.stdout.strip() == __version__
 
 
 class RecordingRun:
