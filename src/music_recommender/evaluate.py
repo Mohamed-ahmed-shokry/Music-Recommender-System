@@ -22,6 +22,7 @@ from music_recommender.content import (
     recommend_from_scores,
     user_content_scores,
 )
+from music_recommender.data import normalize_interactions
 from music_recommender.model import train_als_model
 from music_recommender.preprocessing import build_user_item_matrix, create_id_mappings
 from music_recommender.recommend import recommend_artists_for_user
@@ -223,6 +224,9 @@ def train_test_split_by_user(
     random_state: int = 42,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Split interactions per user while keeping train interactions when possible."""
+    if not 0 < test_ratio < 1:
+        raise ValueError("test_ratio must be between 0 and 1.")
+    df = normalize_interactions(df)
     rng = np.random.default_rng(random_state)
     train_indices: list[int] = []
     test_indices: list[int] = []

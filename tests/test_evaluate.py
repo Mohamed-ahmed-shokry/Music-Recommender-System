@@ -60,6 +60,44 @@ def test_train_test_split_by_user_keeps_users_in_train_when_possible() -> None:
     assert {"user_1", "user_2"} == set(test_df["user_id"])
 
 
+def test_train_test_split_aggregates_duplicates_before_holdout() -> None:
+    df = pd.DataFrame(
+        {
+            "user_id": ["user_1", "user_1", "user_1"],
+            "artist_id": ["a", "a", "b"],
+            "artist_name": ["A", "A", "B"],
+            "play_count": [1, 2, 3],
+        }
+    )
+
+    train_df, test_df = train_test_split_by_user(
+        df,
+        test_ratio=0.5,
+        random_state=1,
+    )
+
+    train_pairs = set(zip(train_df["user_id"], train_df["artist_id"], strict=True))
+    test_pairs = set(zip(test_df["user_id"], test_df["artist_id"], strict=True))
+    assert not train_pairs & test_pairs
+    assert train_df["play_count"].sum() + test_df["play_count"].sum() == 6
+
+
+@pytest.mark.parametrize("test_ratio", [0.0, 1.0, -0.1, 1.1])
+def test_train_test_split_rejects_invalid_ratio(test_ratio: float) -> None:
+    with pytest.raises(ValueError, match="test_ratio must be between 0 and 1"):
+        train_test_split_by_user(
+            pd.DataFrame(
+                {
+                    "user_id": ["user_1", "user_1"],
+                    "artist_id": ["a", "b"],
+                    "artist_name": ["A", "B"],
+                    "play_count": [1, 2],
+                }
+            ),
+            test_ratio=test_ratio,
+        )
+
+
 def test_catalog_coverage_works_on_known_example() -> None:
     coverage = catalog_coverage([["a", "b"], ["b", "c"]], {"a", "b", "c", "d"})
 
