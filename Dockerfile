@@ -31,15 +31,18 @@ ENV MUSIC_RECOMMENDER_ROOT=/app
 RUN .venv/bin/python -m music_recommender.cli train --no-use-gpu
 
 
-FROM base AS runtime
+FROM builder AS dashboard-builder
+
+COPY streamlit_app.py ./
+RUN uv sync --locked --no-dev --no-editable --extra dashboard
+
+
+FROM base AS runtime-common
 
 RUN groupadd --system app \
     && useradd --system --gid app --create-home --home-dir /app app
 
 WORKDIR /app
-
-COPY --from=builder --chown=app:app /app/.venv /app/.venv
-COPY --from=builder --chown=app:app /app/artifacts /app/artifacts
 
 ENV MUSIC_RECOMMENDER_ROOT=/app \
     PATH="/app/.venv/bin:$PATH" \
@@ -47,6 +50,34 @@ ENV MUSIC_RECOMMENDER_ROOT=/app \
     PYTHONUNBUFFERED=1
 
 USER app
+
+
+FROM runtime-common AS dashboard-runtime
+
+COPY --from=dashboard-builder --chown=app:app /app/.venv /app/.venv
+COPY --from=dashboard-builder --chown=app:app /app/artifacts /app/artifacts
+COPY --from=dashboard-builder --chown=app:app \
+    /app/streamlit_app.py /app/streamlit_app.py
+
+ENV HOME=/tmp \
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false \
+    STREAMLIT_SERVER_ADDRESS=0.0.0.0 \
+    STREAMLIT_SERVER_FILE_WATCHER_TYPE=none \
+    STREAMLIT_SERVER_HEADLESS=true \
+    STREAMLIT_SERVER_PORT=8501
+
+EXPOSE 8501
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"]
+
+CMD ["streamlit", "run", "streamlit_app.py"]
+
+
+FROM runtime-common AS runtime
+
+COPY --from=builder --chown=app:app /app/.venv /app/.venv
+COPY --from=builder --chown=app:app /app/artifacts /app/artifacts
 
 EXPOSE 8000
 

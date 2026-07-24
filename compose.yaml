@@ -2,10 +2,26 @@ services:
   api:
     build:
       context: .
+      target: runtime
     image: music-recommender-api:local
     init: true
     ports:
       - "8000:8000"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  dashboard:
+    build:
+      context: .
+      target: dashboard-runtime
+    image: music-recommender-dashboard:local
+    init: true
+    ports:
+      - "8501:8501"
     restart: unless-stopped
     read_only: true
     tmpfs:
