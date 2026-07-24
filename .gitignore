@@ -13,3 +13,5 @@ data/processed/*
 !data/processed/.gitkeep
 .env
 .DS_Store
+mlflow.db
+mlruns/
