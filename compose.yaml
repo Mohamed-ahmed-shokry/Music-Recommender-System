@@ -1,0 +1,14 @@
+services:
+  api:
+    build:
+      context: .
+    image: music-recommender-api:local
+    init: true
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
