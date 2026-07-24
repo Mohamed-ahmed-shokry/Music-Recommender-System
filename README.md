@@ -481,6 +481,19 @@ docker build --target dashboard-runtime --tag music-recommender-dashboard .
 docker run --rm --publish 8501:8501 music-recommender-dashboard
 ```
 
+Version tags that match `pyproject.toml`, for example `v0.4.0`, run the complete
+quality gate and publish both images to GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-api:0.4.0
+docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-dashboard:0.4.0
+```
+
+Published images receive full, major/minor, major, and stable `latest` tags.
+Each image also includes OCI metadata and a GitHub artifact provenance
+attestation. Release actions are pinned to immutable commits and publishing
+uses only tag-scoped source plus the repository `GITHUB_TOKEN`.
+
 For non-editable or packaged deployments, set `MUSIC_RECOMMENDER_ROOT` to the
 directory that contains the `data/` and `artifacts/` directories. The container
 sets this to `/app` automatically.
@@ -771,6 +784,9 @@ tracking, and development install, formatting, lint, test, and package-build
 checks in GitHub Actions. CI also builds both Docker targets, starts each
 container, and verifies the API and Streamlit health endpoints.
 
+Release tags repeat the quality gate without reusable dependency caches before
+publishing the API and dashboard images, then attach registry provenance.
+
 Current coverage focus:
 
 - data validation;
@@ -810,7 +826,6 @@ Current coverage focus:
 - Add audio-feature content similarity.
 - Add a learning-to-rank model after candidate generation.
 - Add advanced serendipity metrics.
-- Publish versioned container images.
 
 ## License
 
