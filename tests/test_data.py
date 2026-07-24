@@ -39,3 +39,38 @@ def test_empty_dataframe_raises_value_error() -> None:
 
     with pytest.raises(ValueError, match="empty"):
         validate_interactions(df)
+
+
+@pytest.mark.parametrize("column", ["user_id", "artist_id", "artist_name"])
+def test_empty_identifiers_and_names_raise_value_error(column: str) -> None:
+    df = valid_interactions_df()
+    df.loc[0, column] = "   "
+
+    with pytest.raises(ValueError, match=rf"Column '{column}' contains empty values"):
+        validate_interactions(df)
+
+
+@pytest.mark.parametrize("play_count", [float("inf"), float("-inf")])
+def test_non_finite_play_count_raises_value_error(play_count: float) -> None:
+    df = valid_interactions_df()
+    df["play_count"] = df["play_count"].astype(float)
+    df.loc[0, "play_count"] = play_count
+
+    with pytest.raises(ValueError, match="finite values"):
+        validate_interactions(df)
+
+
+def test_boolean_play_count_raises_value_error() -> None:
+    df = valid_interactions_df()
+    df["play_count"] = [True, False]
+
+    with pytest.raises(ValueError, match="must be numeric"):
+        validate_interactions(df)
+
+
+def test_conflicting_artist_names_raise_value_error() -> None:
+    df = valid_interactions_df()
+    df.loc[1, "artist_id"] = "artist_1"
+
+    with pytest.raises(ValueError, match="multiple artist names"):
+        validate_interactions(df)
