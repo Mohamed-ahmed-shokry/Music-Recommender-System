@@ -1,8 +1,20 @@
 """Project configuration and default training settings."""
 
+import os
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT_ENV_VAR = "MUSIC_RECOMMENDER_ROOT"
+
+
+def resolve_project_root() -> Path:
+    """Resolve the runtime root for data and model artifacts."""
+    configured_root = os.getenv(PROJECT_ROOT_ENV_VAR)
+    if configured_root:
+        return Path(configured_root).expanduser().resolve()
+    return Path(__file__).resolve().parents[2]
+
+
+PROJECT_ROOT = resolve_project_root()
 
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DATA_PATH = DATA_DIR / "raw" / "sample_interactions.csv"
