@@ -19,7 +19,8 @@ metadata similarity. It includes a reusable Python package, versioned serving
 artifacts, cold-start onboarding, session-aware recommendations,
 recommendation explanations, ranking controls, baseline comparison, a Typer CLI,
 a FastAPI API, an interactive Streamlit dashboard, Docker deployment, continuous
-integration, tests, linting, and a portfolio-ready architecture.
+integration, optional MLflow experiment tracking, tests, linting, and a
+portfolio-ready architecture.
 
 ## Contents
 
@@ -34,6 +35,7 @@ integration, tests, linting, and a portfolio-ready architecture.
 - [Dashboard](#dashboard)
 - [Docker Deployment](#docker-deployment)
 - [Evaluation](#evaluation)
+- [Experiment Tracking](#experiment-tracking)
 - [Model Card](#model-card)
 - [Development](#development)
 - [Roadmap](#roadmap)
@@ -58,6 +60,7 @@ The current system:
 - finds similar artists from ALS factors, metadata, or a hybrid of both;
 - stores everything needed for serving in a versioned artifact bundle;
 - compares ALS, popularity, content-only, and hybrid strategies;
+- tracks reproducible training and evaluation runs in MLflow;
 - exposes CLI, API, and interactive dashboard workflows.
 
 The included dataset is intentionally small so the whole project can run quickly
@@ -80,6 +83,7 @@ with the same columns.
 | Cold start | Unknown users receive popular fallback or profile/session-based recommendations |
 | Ranking controls | Optional listened-item inclusion, popularity penalty, diversity reranking |
 | Evaluation | ALS, popularity, content, and hybrid metrics with novelty and explanations |
+| Experiment tracking | Optional MLflow training parameters, evaluation metrics, tags, and artifacts |
 | Reproducibility | `uv`, `pyproject.toml`, `uv.lock`, deterministic sample data |
 | Portfolio polish | README, MIT license, clean commands, model card, roadmap |
 
@@ -168,6 +172,7 @@ music-recommender-system/
 |       |-- ranking.py
 |       |-- recommend.py
 |       |-- service.py
+|       |-- tracking.py
 |       `-- utils.py
 |-- tests/
 |-- .dockerignore
@@ -614,6 +619,47 @@ Hybrid:
 The comparison is useful because a recommender can look strong by recommending
 only globally popular artists. The baseline makes that tradeoff visible.
 
+## Experiment Tracking
+
+The optional tracking integration uses `mlflow-skinny` in the project and a
+separate MLflow server process. This keeps the recommender's modern data stack
+isolated from the full server dependency set.
+
+Install the tracking client:
+
+```bash
+uv sync --extra tracking
+```
+
+Start a local MLflow server in another terminal:
+
+```bash
+uvx --from "mlflow==3.14.0" mlflow server --host 127.0.0.1 --port 5000
+```
+
+Track a training run:
+
+```bash
+uv run --extra tracking music-recommender train --no-use-gpu --track --tracking-uri http://127.0.0.1:5000 --run-name als-baseline
+```
+
+Training records the input and model configuration, dataset dimensions and
+density, the actual training device, GPU fallback details, and the versioned
+serving artifact.
+
+Track a full strategy comparison:
+
+```bash
+uv run --extra tracking music-recommender evaluate --top-k 5 --folds 2 --compare-all --no-use-gpu --track --tracking-uri http://127.0.0.1:5000 --run-name v4-comparison
+```
+
+Evaluation records the run configuration, every nested ranking metric, strategy
+tags, and the complete metrics document as a JSON artifact. Open
+`http://127.0.0.1:5000` to compare runs.
+
+`--tracking-uri` can be omitted when `MLFLOW_TRACKING_URI` is set. Tracking is
+opt-in, so the default train and evaluate workflows do not require MLflow.
+
 ## Artifact Bundle
 
 Training creates a versioned artifact bundle at:
@@ -674,7 +720,7 @@ mood fields, and interaction artists that are not covered by metadata.
 Run tests:
 
 ```bash
-uv run --extra dashboard pytest
+uv run --extra dashboard --extra tracking pytest
 ```
 
 Run linting:
@@ -695,10 +741,10 @@ Check formatting:
 uv run ruff format --check .
 ```
 
-Every push to `main` and every pull request runs the same locked dashboard and
-development install, formatting, lint, test, and package-build checks in GitHub
-Actions. CI also builds both Docker targets, starts each container, and verifies
-the API and Streamlit health endpoints.
+Every push to `main` and every pull request runs the same locked dashboard,
+tracking, and development install, formatting, lint, test, and package-build
+checks in GitHub Actions. CI also builds both Docker targets, starts each
+container, and verifies the API and Streamlit health endpoints.
 
 Current coverage focus:
 
@@ -712,6 +758,7 @@ Current coverage focus:
 - service-layer behavior;
 - FastAPI route behavior;
 - Streamlit dashboard rendering and interaction;
+- MLflow tracking lifecycle and CLI integration;
 - ranking controls;
 - evaluation metrics.
 
@@ -727,6 +774,7 @@ Current coverage focus:
 | Serving | Local artifact bundle loaded by the CLI, API, or Streamlit dashboard |
 | Bias controls | Popularity baseline, popularity penalty, catalog coverage, diversity and novelty metrics |
 | Explainability | Score components, matched metadata, and human-readable reasons |
+| Reproducibility | Versioned artifacts, locked dependencies, deterministic splits, and optional MLflow run tracking |
 | Main limitation | Small synthetic sample dataset; no real streaming events or external catalog integration yet |
 
 ## Roadmap
@@ -736,7 +784,6 @@ Current coverage focus:
 - Add audio-feature content similarity.
 - Add a learning-to-rank model after candidate generation.
 - Add advanced serendipity metrics.
-- Add MLflow experiment tracking.
 - Publish versioned container images.
 
 ## License
