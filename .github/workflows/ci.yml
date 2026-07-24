@@ -30,7 +30,7 @@ jobs:
           python-version-file: .python-version
 
       - name: Install locked dependencies
-        run: uv sync --locked --dev
+        run: uv sync --locked --extra dashboard --dev
 
       - name: Check formatting
         run: uv run ruff format --check .
@@ -39,7 +39,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Test
-        run: uv run pytest
+        run: uv run --extra dashboard pytest
 
       - name: Build distributions
         run: uv build
