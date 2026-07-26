@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from music_recommender.config import DEFAULT_CONTENT_WEIGHT
 from music_recommender.service import RecommenderService
@@ -14,20 +14,34 @@ service: RecommenderService | None = None
 service_load_error: str | None = None
 
 MAX_API_RESULTS = 100
+MAX_REQUEST_VALUES = 100
 PositiveTopK = Annotated[int, Query(ge=1, le=MAX_API_RESULTS)]
 UnitInterval = Annotated[float, Query(ge=0.0, le=1.0)]
 SimilarityMethod = Literal["als", "content", "hybrid"]
 OptionalCatalogText = Annotated[str | None, Query(max_length=100)]
 CatalogOffset = Annotated[int, Query(ge=0)]
 CatalogLimit = Annotated[int, Query(ge=1, le=MAX_API_RESULTS)]
+RequestText = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=100),
+]
 
 
 class ProfileRecommendationRequest(BaseModel):
     """Onboarding preference payload for content-based recommendations."""
 
-    artist_ids: list[str] = Field(default_factory=list)
-    genres: list[str] = Field(default_factory=list)
-    mood_tags: list[str] = Field(default_factory=list)
+    artist_ids: list[RequestText] = Field(
+        default_factory=list,
+        max_length=MAX_REQUEST_VALUES,
+    )
+    genres: list[RequestText] = Field(
+        default_factory=list,
+        max_length=MAX_REQUEST_VALUES,
+    )
+    mood_tags: list[RequestText] = Field(
+        default_factory=list,
+        max_length=MAX_REQUEST_VALUES,
+    )
     top_k: int = Field(default=10, ge=1, le=MAX_API_RESULTS)
     explain: bool = False
 
@@ -35,12 +49,24 @@ class ProfileRecommendationRequest(BaseModel):
 class SessionRecommendationRequest(BaseModel):
     """Short-term listening session payload for v4 recommendations."""
 
-    artist_ids: list[str] = Field(default_factory=list)
-    genres: list[str] = Field(default_factory=list)
-    mood_tags: list[str] = Field(default_factory=list)
-    user_id: str | None = None
+    artist_ids: list[RequestText] = Field(
+        default_factory=list,
+        max_length=MAX_REQUEST_VALUES,
+    )
+    genres: list[RequestText] = Field(
+        default_factory=list,
+        max_length=MAX_REQUEST_VALUES,
+    )
+    mood_tags: list[RequestText] = Field(
+        default_factory=list,
+        max_length=MAX_REQUEST_VALUES,
+    )
+    user_id: RequestText | None = None
     top_k: int = Field(default=10, ge=1, le=MAX_API_RESULTS)
-    exclude_artist_ids: list[str] = Field(default_factory=list)
+    exclude_artist_ids: list[RequestText] = Field(
+        default_factory=list,
+        max_length=MAX_REQUEST_VALUES,
+    )
     include_listened: bool = False
     diversity: float = Field(default=0.0, ge=0.0, le=1.0)
     popularity_penalty: float = Field(default=0.0, ge=0.0, le=1.0)

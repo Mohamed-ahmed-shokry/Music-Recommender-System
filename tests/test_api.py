@@ -287,6 +287,29 @@ def test_recommend_session_route_returns_session_recommendations() -> None:
     assert body["recommendations"][0]["reasons"]
 
 
+def test_recommendation_payload_text_is_trimmed() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.post(
+            "/recommend/session",
+            json={
+                "user_id": " user_1 ",
+                "artist_ids": [" artist_1 "],
+                "genres": [" pop "],
+                "exclude_artist_ids": [" artist_2 "],
+            },
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["user_id"] == "user_1"
+    assert body["seed_artist_ids"] == ["artist_1"]
+    assert body["genres"] == ["pop"]
+    assert body["excluded_artist_ids"] == ["artist_2"]
+
+
 def test_content_similar_route_returns_content_similarity() -> None:
     with TestClient(api_main.app) as client:
         api_main.service = FakeService()
@@ -371,5 +394,35 @@ def test_routes_reject_invalid_ranking_parameters(
         api_main.service_load_error = None
 
         response = client.request(method, path, **request_kwargs)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("/recommend/profile", {"genres": [""]}),
+        ("/recommend/profile", {"mood_tags": [" "]}),
+        ("/recommend/profile", {"artist_ids": ["a" * 101]}),
+        (
+            "/recommend/profile",
+            {"genres": ["pop"] * (api_main.MAX_REQUEST_VALUES + 1)},
+        ),
+        ("/recommend/session", {"user_id": " "}),
+        (
+            "/recommend/session",
+            {"exclude_artist_ids": ["artist_1"] * (api_main.MAX_REQUEST_VALUES + 1)},
+        ),
+    ],
+)
+def test_recommendation_routes_reject_invalid_payload_text(
+    path: str,
+    payload: dict[str, object],
+) -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.post(path, json=payload)
 
     assert response.status_code == 422
