@@ -1,12 +1,13 @@
 """Evaluation helpers for recommendation quality."""
 
 import math
-from typing import Any
+from collections.abc import Collection, Mapping, Sequence
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
 
-from music_recommender.artifacts import build_artist_stats
+from music_recommender.artifacts import ArtistStats, build_artist_stats
 from music_recommender.baselines import popular_artists
 from music_recommender.config import (
     DEFAULT_ALS_ALPHA,
@@ -29,8 +30,8 @@ from music_recommender.recommend import recommend_artists_for_user
 
 
 def precision_at_k(
-    recommended_items: list[str],
-    relevant_items: set[str] | list[str],
+    recommended_items: Sequence[str],
+    relevant_items: Collection[str],
     k: int,
 ) -> float:
     """Calculate Precision@K."""
@@ -44,8 +45,8 @@ def precision_at_k(
 
 
 def recall_at_k(
-    recommended_items: list[str],
-    relevant_items: set[str] | list[str],
+    recommended_items: Sequence[str],
+    relevant_items: Collection[str],
     k: int,
 ) -> float:
     """Calculate Recall@K."""
@@ -59,8 +60,8 @@ def recall_at_k(
 
 
 def average_precision_at_k(
-    recommended_items: list[str],
-    relevant_items: set[str] | list[str],
+    recommended_items: Sequence[str],
+    relevant_items: Collection[str],
     k: int,
 ) -> float:
     """Calculate Average Precision@K."""
@@ -79,8 +80,8 @@ def average_precision_at_k(
 
 
 def map_at_k(
-    list_of_recommended_items: list[list[str]],
-    list_of_relevant_items: list[set[str] | list[str]],
+    list_of_recommended_items: Sequence[Sequence[str]],
+    list_of_relevant_items: Sequence[Collection[str]],
     k: int,
 ) -> float:
     """Calculate Mean Average Precision@K."""
@@ -99,8 +100,8 @@ def map_at_k(
 
 
 def ndcg_at_k(
-    recommended_items: list[str],
-    relevant_items: set[str] | list[str],
+    recommended_items: Sequence[str],
+    relevant_items: Collection[str],
     k: int,
 ) -> float:
     """Calculate normalized discounted cumulative gain at K."""
@@ -136,7 +137,7 @@ def catalog_coverage(
 
 def average_popularity(
     list_of_recommended_items: list[list[str]],
-    artist_stats: dict[str, dict[str, object]],
+    artist_stats: dict[str, ArtistStats],
 ) -> float:
     """Calculate average total plays for recommended artists."""
     popularity_values = [
@@ -150,7 +151,7 @@ def average_popularity(
 
 def novelty_at_k(
     list_of_recommended_items: list[list[str]],
-    artist_stats: dict[str, dict[str, object]],
+    artist_stats: dict[str, ArtistStats],
 ) -> float:
     """Calculate normalized novelty from inverse popularity rank."""
     if not artist_stats:
@@ -170,7 +171,7 @@ def novelty_at_k(
 
 
 def explanation_coverage(
-    list_of_recommendations: list[list[dict[str, Any]]],
+    list_of_recommendations: Sequence[Sequence[Mapping[str, Any]]],
 ) -> float:
     """Calculate the share of recommendations with at least one explanation."""
     recommendations = [
@@ -255,12 +256,15 @@ def evaluate_model(
     use_gpu: bool = DEFAULT_USE_GPU,
 ) -> dict[str, float]:
     """Train and evaluate ALS using a simple per-user holdout split."""
-    return evaluate_repeated_holdout(
-        df=df,
-        top_k=top_k,
-        folds=1,
-        use_gpu=use_gpu,
-        compare_baseline=False,
+    return cast(
+        dict[str, float],
+        evaluate_repeated_holdout(
+            df=df,
+            top_k=top_k,
+            folds=1,
+            use_gpu=use_gpu,
+            compare_baseline=False,
+        ),
     )
 
 
@@ -502,11 +506,11 @@ def _summarize_recommendations(
     list_of_recommended_items: list[list[str]],
     list_of_relevant_items: list[set[str]],
     catalog_items: set[str],
-    artist_stats: dict[str, dict[str, object]],
+    artist_stats: dict[str, ArtistStats],
     artist_factors: np.ndarray,
     artist_id_to_index: dict[str, int],
     top_k: int,
-    list_of_recommendations: list[list[dict[str, Any]]] | None = None,
+    list_of_recommendations: Sequence[Sequence[Mapping[str, Any]]] | None = None,
 ) -> dict[str, float]:
     if not list_of_recommended_items:
         return {

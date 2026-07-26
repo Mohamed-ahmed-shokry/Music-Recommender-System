@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import typer
 
@@ -531,17 +532,19 @@ def evaluate(
         raise typer.Exit(code=1) from error
 
     if compare_all:
+        comparison_metrics = cast(dict[str, dict[str, float]], metrics)
         typer.echo(f"Evaluation over {folds} fold(s):")
-        _print_metric_row("ALS", metrics["als"], top_k)
-        _print_metric_row("Popularity", metrics["popularity"], top_k)
-        _print_metric_row("Content", metrics["content"], top_k)
-        _print_metric_row("Hybrid", metrics["hybrid"], top_k)
+        _print_metric_row("ALS", comparison_metrics["als"], top_k)
+        _print_metric_row("Popularity", comparison_metrics["popularity"], top_k)
+        _print_metric_row("Content", comparison_metrics["content"], top_k)
+        _print_metric_row("Hybrid", comparison_metrics["hybrid"], top_k)
     elif compare_baseline:
+        comparison_metrics = cast(dict[str, dict[str, float]], metrics)
         typer.echo(f"Evaluation over {folds} fold(s):")
-        _print_metric_row("ALS", metrics["als"], top_k)
-        _print_metric_row("Popularity", metrics["popularity"], top_k)
+        _print_metric_row("ALS", comparison_metrics["als"], top_k)
+        _print_metric_row("Popularity", comparison_metrics["popularity"], top_k)
     else:
-        _print_metric_row("ALS", metrics, top_k)
+        _print_metric_row("ALS", cast(dict[str, float], metrics), top_k)
 
     if tracked_run.enabled:
         typer.echo(f"MLflow run ID: {tracked_run.run_id}")

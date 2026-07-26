@@ -308,7 +308,7 @@ class RecommenderService:
             "era": _normalize_catalog_filter(era),
         }
         normalized_query = _normalize_catalog_filter(query)
-        artists = []
+        artists: list[dict[str, Any]] = []
         for row in self.artifact.content_artifacts.metadata.itertuples(index=False):
             artist_id = str(row.artist_id)
             artist = {
