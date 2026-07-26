@@ -759,7 +759,7 @@ mood fields, and interaction artists that are not covered by metadata.
 Run tests:
 
 ```bash
-uv run --extra dashboard --extra tracking pytest
+uv run --extra dashboard --extra tracking pytest --cov
 ```
 
 Run linting:

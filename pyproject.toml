@@ -80,10 +80,14 @@ select = ["E", "F", "I", "B", "UP"]
 addopts = """
     --strict-config
     --strict-markers
-    --cov=music_recommender
-    --cov=api
-    --cov-report=term-missing:skip-covered
-    --cov-fail-under=75
 """
 filterwarnings = ["error"]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["music_recommender", "api"]
+
+[tool.coverage.report]
+fail_under = 75
+show_missing = true
+skip_covered = true

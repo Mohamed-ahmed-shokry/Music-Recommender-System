@@ -41,7 +41,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Test
-        run: uv run --extra dashboard --extra tracking pytest
+        run: uv run --extra dashboard --extra tracking pytest --cov
 
       - name: Build distributions
         run: uv build

@@ -52,7 +52,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Test without warnings
-        run: uv run --extra dashboard --extra tracking pytest -W error
+        run: uv run --extra dashboard --extra tracking pytest --cov
 
       - name: Build distributions
         run: uv build
