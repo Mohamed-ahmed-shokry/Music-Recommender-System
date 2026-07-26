@@ -58,6 +58,7 @@ tracking = [
 dev = [
     "httpx2>=2.7.0",
     "pytest>=9.0.3",
+    "pytest-cov>=7.0.0",
     "ruff>=0.15.12",
 ]
 
@@ -74,3 +75,15 @@ line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+addopts = """
+    --strict-config
+    --strict-markers
+    --cov=music_recommender
+    --cov=api
+    --cov-report=term-missing:skip-covered
+    --cov-fail-under=75
+"""
+filterwarnings = ["error"]
+testpaths = ["tests"]

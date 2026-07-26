@@ -788,6 +788,10 @@ container, and verifies the API and Streamlit health endpoints.
 Release tags repeat the quality gate without reusable dependency caches before
 publishing the API and dashboard images, then attach registry provenance.
 
+The pytest configuration treats warnings as errors and enforces at least 75%
+statement coverage across the application package and API. The terminal report
+lists uncovered lines so new tests can target meaningful behavior.
+
 Current coverage focus:
 
 - data validation;
