@@ -57,6 +57,7 @@ tracking = [
 [dependency-groups]
 dev = [
     "httpx2>=2.7.0",
+    "mypy>=2.3.0",
     "pytest>=9.0.3",
     "pytest-cov>=7.0.0",
     "ruff>=0.15.12",
@@ -75,6 +76,12 @@ line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+files = ["src", "api"]
+ignore_missing_imports = true
+python_version = "3.11"
+strict = true
 
 [tool.pytest.ini_options]
 addopts = """

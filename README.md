@@ -768,6 +768,12 @@ Run linting:
 uv run ruff check .
 ```
 
+Run strict static type checks:
+
+```bash
+uv run mypy
+```
+
 Format code:
 
 ```bash
