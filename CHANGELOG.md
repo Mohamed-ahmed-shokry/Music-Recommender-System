@@ -5,6 +5,27 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Strict mypy checks and a 75% coverage regression gate in local, CI, and
+  release verification.
+- Corruption tests for artifact mappings, numeric model data, content
+  alignment, artist statistics, provenance, and training configuration.
+
+### Changed
+
+- Recommendation request bodies now reject unknown fields, implicit type
+  coercion, blank values, oversized strings, and unbounded preference lists.
+- Training, filtering, ranking, and evaluation parameters now fail fast with
+  actionable errors before expensive processing or artifact writes.
+- Artifact loading now verifies mapping bijections, finite matrices and factors,
+  content metadata alignment, popularity statistics, dataset fingerprints, and
+  recorded training settings.
+- CLI training and evaluation workflows now report validation and missing-file
+  failures without exposing internal tracebacks.
+
 ## [0.4.0] - 2026-07-24
 
 ### Added
