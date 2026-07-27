@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -442,7 +442,7 @@ class RecommenderService:
         user_index = self.artifact.mappings["user_id_to_index"][user_id]
         user_factors = self.artifact.model.item_factors
         artist_factors = self.artifact.model.user_factors
-        return artist_factors @ user_factors[user_index]
+        return cast(np.ndarray, artist_factors @ user_factors[user_index])
 
     def _collaborative_similarity_scores(self, artist_id: str) -> np.ndarray:
         artist_id_to_index = self.artifact.mappings["artist_id_to_index"]
@@ -458,11 +458,14 @@ class RecommenderService:
 
         norms = np.linalg.norm(artist_factors, axis=1)
         denominator = norms * query_norm
-        return np.divide(
-            artist_factors @ query_vector,
-            denominator,
-            out=np.zeros_like(norms),
-            where=denominator != 0,
+        return cast(
+            np.ndarray,
+            np.divide(
+                artist_factors @ query_vector,
+                denominator,
+                out=np.zeros_like(norms),
+                where=denominator != 0,
+            ),
         )
 
     def _rank_content_scores(

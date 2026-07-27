@@ -1,7 +1,7 @@
 """Preprocessing utilities for ALS training."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import joblib
 import numpy as np
@@ -91,7 +91,7 @@ def save_mappings(mappings: Mappings, path: str | Path) -> None:
 
 def load_mappings(path: str | Path) -> Mappings:
     """Load ID mappings from disk."""
-    return joblib.load(path)
+    return cast(Mappings, joblib.load(path))
 
 
 def prepare_training_data(

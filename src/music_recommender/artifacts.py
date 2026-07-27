@@ -162,7 +162,7 @@ def load_artifact(path: str | Path = ARTIFACT_BUNDLE_PATH) -> RecommenderArtifac
             ) from error
 
     try:
-        _validate_loaded_artifact(artifact)
+        artifact = _validate_loaded_artifact(artifact)
     except ValueError:
         raise
     except Exception as error:
@@ -170,7 +170,7 @@ def load_artifact(path: str | Path = ARTIFACT_BUNDLE_PATH) -> RecommenderArtifac
     return artifact
 
 
-def _validate_loaded_artifact(artifact: Any) -> None:
+def _validate_loaded_artifact(artifact: Any) -> RecommenderArtifact:
     if not isinstance(artifact, RecommenderArtifact):
         raise ValueError(
             "Artifact is not a valid recommender bundle. Retrain the model."
@@ -243,3 +243,4 @@ def _validate_loaded_artifact(artifact: Any) -> None:
             "Artifact metadata dimensions do not match its model data. "
             "Retrain the model."
         )
+    return artifact

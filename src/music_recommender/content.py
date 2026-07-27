@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -68,10 +68,13 @@ def content_similarity_scores(
         raise ValueError(f"Unknown artist_id: {artist_id}")
 
     artist_index = content_artifacts.artist_id_to_content_index[artist_id]
-    return cosine_similarity(
-        content_artifacts.content_matrix[artist_index],
-        content_artifacts.content_matrix,
-    ).ravel()
+    return cast(
+        np.ndarray,
+        cosine_similarity(
+            content_artifacts.content_matrix[artist_index],
+            content_artifacts.content_matrix,
+        ).ravel(),
+    )
 
 
 def content_similar_artists(
