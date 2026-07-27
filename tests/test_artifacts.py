@@ -223,6 +223,31 @@ def test_inconsistent_artist_statistics_are_rejected(
         load_artifact(artifact_path)
 
 
+@pytest.mark.parametrize(
+    "corrupt_metadata",
+    [
+        lambda artifact: artifact.metadata.update({"num_users": "2"}),
+        lambda artifact: artifact.metadata.update({"created_at": "not-a-timestamp"}),
+        lambda artifact: artifact.metadata["dataset"].update({"sha256": "invalid"}),
+        lambda artifact: artifact.metadata["metadata_dataset"].update(
+            {"row_count": 999}
+        ),
+        lambda artifact: artifact.metadata.update({"training_device": "quantum"}),
+    ],
+)
+def test_inconsistent_artifact_metadata_is_rejected(
+    tmp_path: Path,
+    corrupt_metadata,
+) -> None:
+    artifact = create_test_artifact(tmp_path)
+    corrupt_metadata(artifact)
+    artifact_path = tmp_path / "invalid-metadata.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="metadata|fingerprint"):
+        load_artifact(artifact_path)
+
+
 def test_artist_stats_include_popularity_rank() -> None:
     stats = build_artist_stats(artifact_dataframe())
 

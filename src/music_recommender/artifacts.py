@@ -285,24 +285,12 @@ def _validate_loaded_artifact(artifact: Any) -> RecommenderArtifact:
         artist_id_to_name,
     )
 
-    required_metadata_fields = {"num_users", "num_artists", "num_interactions"}
-    missing_metadata_fields = sorted(
-        required_metadata_fields - artifact.metadata.keys()
+    _validate_artifact_metadata(
+        artifact.metadata,
+        num_users=num_users,
+        num_artists=num_artists,
+        num_interactions=artifact.user_item_matrix.nnz,
     )
-    if missing_metadata_fields:
-        raise ValueError(
-            f"Artifact metadata is missing fields {missing_metadata_fields}. "
-            "Retrain the model."
-        )
-    if (
-        int(artifact.metadata["num_users"]) != num_users
-        or int(artifact.metadata["num_artists"]) != num_artists
-        or int(artifact.metadata["num_interactions"]) != artifact.user_item_matrix.nnz
-    ):
-        raise ValueError(
-            "Artifact metadata dimensions do not match its model data. "
-            "Retrain the model."
-        )
     return artifact
 
 
@@ -540,3 +528,106 @@ def _is_finite_number(value: Any) -> bool:
         and isinstance(value, (int, float, np.number))
         and bool(np.isfinite(value))
     )
+
+
+def _validate_artifact_metadata(
+    metadata: Any,
+    *,
+    num_users: int,
+    num_artists: int,
+    num_interactions: int,
+) -> None:
+    required_fields = {
+        "created_at",
+        "training_device",
+        "gpu_fallback_reason",
+        "num_users",
+        "num_artists",
+        "num_interactions",
+        "dataset",
+        "metadata_dataset",
+    }
+    if not isinstance(metadata, dict):
+        raise ValueError("Artifact metadata is not a dictionary. Retrain the model.")
+    missing_fields = sorted(required_fields - metadata.keys())
+    if missing_fields:
+        raise ValueError(
+            f"Artifact metadata is missing fields {missing_fields}. Retrain the model."
+        )
+
+    created_at = metadata["created_at"]
+    try:
+        parsed_created_at = (
+            datetime.fromisoformat(created_at) if isinstance(created_at, str) else None
+        )
+    except ValueError:
+        parsed_created_at = None
+    if parsed_created_at is None or parsed_created_at.tzinfo is None:
+        raise ValueError(
+            "Artifact metadata has an invalid creation timestamp. Retrain the model."
+        )
+
+    training_device = metadata["training_device"]
+    fallback_reason = metadata["gpu_fallback_reason"]
+    if training_device not in {"cpu", "gpu"} or (
+        fallback_reason is not None
+        and (not isinstance(fallback_reason, str) or not fallback_reason.strip())
+    ):
+        raise ValueError(
+            "Artifact metadata has invalid training device details. Retrain the model."
+        )
+
+    expected_counts = {
+        "num_users": num_users,
+        "num_artists": num_artists,
+        "num_interactions": num_interactions,
+    }
+    if any(
+        type(metadata[field]) is not int or metadata[field] != expected
+        for field, expected in expected_counts.items()
+    ):
+        raise ValueError(
+            "Artifact metadata dimensions do not match its model data. "
+            "Retrain the model."
+        )
+
+    _validate_dataset_fingerprint(
+        metadata["dataset"],
+        expected_rows=num_interactions,
+        label="interaction dataset",
+    )
+    _validate_dataset_fingerprint(
+        metadata["metadata_dataset"],
+        expected_rows=num_artists,
+        label="artist metadata dataset",
+    )
+
+
+def _validate_dataset_fingerprint(
+    fingerprint: Any,
+    *,
+    expected_rows: int,
+    label: str,
+) -> None:
+    if not isinstance(fingerprint, dict):
+        raise ValueError(
+            f"Artifact {label} fingerprint is not a dictionary. Retrain the model."
+        )
+    required_fields = {"path", "row_count", "sha256"}
+    path = fingerprint.get("path")
+    row_count = fingerprint.get("row_count")
+    digest = fingerprint.get("sha256")
+    is_sha256 = (
+        isinstance(digest, str)
+        and len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest.casefold())
+    )
+    if (
+        not required_fields <= set(fingerprint)
+        or not isinstance(path, str)
+        or not path.strip()
+        or type(row_count) is not int
+        or row_count != expected_rows
+        or not is_sha256
+    ):
+        raise ValueError(f"Artifact {label} fingerprint is invalid. Retrain the model.")
