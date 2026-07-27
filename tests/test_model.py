@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import numpy as np
+import pytest
 from scipy.sparse import csr_matrix
 
 from music_recommender.model import load_model, save_model, train_als_model
@@ -46,3 +48,57 @@ def test_saved_model_can_be_loaded(tmp_path: Path) -> None:
 
     assert loaded_model.user_factors.shape == model.user_factors.shape
     assert loaded_model.item_factors.shape == model.item_factors.shape
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"factors": 0}, "factors"),
+        ({"factors": True}, "factors"),
+        ({"regularization": -0.1}, "regularization"),
+        ({"regularization": np.nan}, "regularization"),
+        ({"iterations": 0}, "iterations"),
+        ({"alpha": 0.0}, "alpha"),
+        ({"alpha": np.inf}, "alpha"),
+        ({"use_gpu": 1}, "use_gpu"),
+    ],
+)
+def test_als_training_rejects_invalid_hyperparameters(
+    overrides: dict[str, object],
+    message: str,
+) -> None:
+    parameters = {
+        "user_item_matrix": tiny_matrix(),
+        "factors": 4,
+        "regularization": 0.01,
+        "iterations": 2,
+        "alpha": 10.0,
+        "use_gpu": False,
+        **overrides,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        train_als_model(**parameters)
+
+
+@pytest.mark.parametrize(
+    "matrix",
+    [
+        csr_matrix((0, 0), dtype="float32"),
+        csr_matrix([[0, 0], [0, 0]], dtype="float32"),
+        csr_matrix([[1, np.nan]], dtype="float32"),
+        csr_matrix([[1, -1]], dtype="float32"),
+    ],
+)
+def test_als_training_rejects_invalid_interaction_matrix(
+    matrix: csr_matrix,
+) -> None:
+    with pytest.raises(ValueError, match="user_item_matrix"):
+        train_als_model(
+            user_item_matrix=matrix,
+            factors=4,
+            regularization=0.01,
+            iterations=2,
+            alpha=10.0,
+            use_gpu=False,
+        )

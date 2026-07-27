@@ -75,6 +75,14 @@ def train_als_model(
     use_gpu: bool = DEFAULT_USE_GPU,
 ) -> AlternatingLeastSquares:
     """Train an ALS model on a user-item interaction matrix."""
+    _validate_als_training_inputs(
+        user_item_matrix=user_item_matrix,
+        factors=factors,
+        regularization=regularization,
+        iterations=iterations,
+        alpha=alpha,
+        use_gpu=use_gpu,
+    )
     item_user_matrix = (user_item_matrix * alpha).T.tocsr()
     try:
         model = _create_als_model(
@@ -118,6 +126,47 @@ def train_als_model(
         model.training_device = "gpu"
         model.gpu_fallback_reason = None
     return model
+
+
+def _validate_als_training_inputs(
+    *,
+    user_item_matrix: csr_matrix,
+    factors: int,
+    regularization: float,
+    iterations: int,
+    alpha: float,
+    use_gpu: bool,
+) -> None:
+    if (
+        not isinstance(user_item_matrix, csr_matrix)
+        or min(user_item_matrix.shape) < 1
+        or user_item_matrix.nnz < 1
+        or not np.issubdtype(user_item_matrix.dtype, np.number)
+        or not np.all(np.isfinite(user_item_matrix.data))
+        or np.any(user_item_matrix.data <= 0)
+    ):
+        raise ValueError(
+            "user_item_matrix must be a non-empty CSR matrix with finite, "
+            "positive interaction weights."
+        )
+    if type(factors) is not int or factors < 1:
+        raise ValueError("factors must be a positive integer.")
+    if type(iterations) is not int or iterations < 1:
+        raise ValueError("iterations must be a positive integer.")
+    if not _is_finite_number(regularization) or regularization < 0:
+        raise ValueError("regularization must be finite and non-negative.")
+    if not _is_finite_number(alpha) or alpha <= 0:
+        raise ValueError("alpha must be finite and greater than 0.")
+    if type(use_gpu) is not bool:
+        raise ValueError("use_gpu must be a boolean.")
+
+
+def _is_finite_number(value: object) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float, np.number))
+        and bool(np.isfinite(value))
+    )
 
 
 def save_model(model: AlternatingLeastSquares, path: str | Path) -> None:
