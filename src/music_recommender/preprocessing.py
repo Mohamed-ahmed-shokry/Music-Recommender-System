@@ -20,6 +20,11 @@ def filter_interactions(
     min_artist_interactions: int,
 ) -> pd.DataFrame:
     """Remove users and artists with too few interactions."""
+    if type(min_user_interactions) is not int or min_user_interactions < 1:
+        raise ValueError("min_user_interactions must be a positive integer.")
+    if type(min_artist_interactions) is not int or min_artist_interactions < 1:
+        raise ValueError("min_artist_interactions must be a positive integer.")
+
     filtered = df.copy()
 
     while True:
@@ -33,6 +38,11 @@ def filter_interactions(
         if len(filtered) == start_count:
             break
 
+    if filtered.empty:
+        raise ValueError(
+            "No interactions remain after filtering. Lower the minimum interaction "
+            "thresholds or provide more data."
+        )
     return filtered.reset_index(drop=True)
 
 

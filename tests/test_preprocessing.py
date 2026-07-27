@@ -1,8 +1,10 @@
 import pandas as pd
+import pytest
 
 from music_recommender.preprocessing import (
     build_user_item_matrix,
     create_id_mappings,
+    filter_interactions,
 )
 
 
@@ -56,3 +58,35 @@ def test_sparse_matrix_contains_expected_play_counts() -> None:
     assert matrix[0, 0] == 10
     assert matrix[0, 1] == 5
     assert matrix[1, 1] == 20
+
+
+@pytest.mark.parametrize(
+    ("min_user_interactions", "min_artist_interactions", "message"),
+    [
+        (0, 1, "min_user_interactions"),
+        (1, 0, "min_artist_interactions"),
+        (-1, 1, "min_user_interactions"),
+        (1, 1.5, "min_artist_interactions"),
+        (True, 1, "min_user_interactions"),
+    ],
+)
+def test_filter_interactions_rejects_invalid_thresholds(
+    min_user_interactions,
+    min_artist_interactions,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        filter_interactions(
+            interactions_df(),
+            min_user_interactions=min_user_interactions,
+            min_artist_interactions=min_artist_interactions,
+        )
+
+
+def test_filter_interactions_rejects_empty_result() -> None:
+    with pytest.raises(ValueError, match="No interactions remain"):
+        filter_interactions(
+            interactions_df(),
+            min_user_interactions=3,
+            min_artist_interactions=3,
+        )
