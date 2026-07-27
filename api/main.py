@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from music_recommender.config import DEFAULT_CONTENT_WEIGHT
 from music_recommender.service import RecommenderService
@@ -30,6 +30,8 @@ RequestText = Annotated[
 class ProfileRecommendationRequest(BaseModel):
     """Onboarding preference payload for content-based recommendations."""
 
+    model_config = ConfigDict(strict=True, extra="forbid")
+
     artist_ids: list[RequestText] = Field(
         default_factory=list,
         max_length=MAX_REQUEST_VALUES,
@@ -48,6 +50,8 @@ class ProfileRecommendationRequest(BaseModel):
 
 class SessionRecommendationRequest(BaseModel):
     """Short-term listening session payload for v4 recommendations."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
 
     artist_ids: list[RequestText] = Field(
         default_factory=list,

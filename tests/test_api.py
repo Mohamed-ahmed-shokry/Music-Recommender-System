@@ -426,3 +426,41 @@ def test_recommendation_routes_reject_invalid_payload_text(
         response = client.post(path, json=payload)
 
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "/recommend/profile",
+            {"artist_ids": ["artist_1"], "top_k": True},
+        ),
+        (
+            "/recommend/profile",
+            {"artist_ids": ["artist_1"], "explain": 1},
+        ),
+        (
+            "/recommend/session",
+            {"genres": ["pop"], "content_weight": True},
+        ),
+        (
+            "/recommend/session",
+            {"genres": ["pop"], "include_listened": "yes"},
+        ),
+        (
+            "/recommend/session",
+            {"genres": ["pop"], "content_weigth": 0.5},
+        ),
+    ],
+)
+def test_recommendation_routes_reject_coerced_or_unknown_fields(
+    path: str,
+    payload: dict[str, object],
+) -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.post(path, json=payload)
+
+    assert response.status_code == 422
