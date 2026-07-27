@@ -199,7 +199,7 @@ def train(
                     ARTIFACT_BUNDLE_PATH,
                     artifact_path="serving",
                 )
-    except ExperimentTrackingError as error:
+    except (ExperimentTrackingError, FileNotFoundError, ValueError) as error:
         typer.echo(f"Error: {error}")
         raise typer.Exit(code=1) from error
 
@@ -527,7 +527,7 @@ def evaluate(
                     )
                 }
             )
-    except (ExperimentTrackingError, ValueError) as error:
+    except (ExperimentTrackingError, FileNotFoundError, ValueError) as error:
         typer.echo(f"Error: {error}")
         raise typer.Exit(code=1) from error
 

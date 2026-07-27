@@ -209,3 +209,29 @@ def test_train_command_reports_tracking_configuration_error(monkeypatch) -> None
 
     assert result.exit_code == 1
     assert "Error: tracking server is required" in result.output
+
+
+def test_train_command_reports_validation_error(monkeypatch) -> None:
+    def fail_training(**_: Any) -> None:
+        raise ValueError("factors must be a positive integer")
+
+    monkeypatch.setattr(cli, "train_and_save_model", fail_training)
+
+    result = runner.invoke(cli.app, ["train", "--no-use-gpu"])
+
+    assert result.exit_code == 1
+    assert "Error: factors must be a positive integer" in result.output
+    assert result.exception is not None
+
+
+def test_evaluate_command_reports_missing_data(monkeypatch) -> None:
+    def fail_to_load_data(_path: Any) -> None:
+        raise FileNotFoundError("interactions file is missing")
+
+    monkeypatch.setattr(cli, "load_and_validate_interactions", fail_to_load_data)
+
+    result = runner.invoke(cli.app, ["evaluate", "--no-use-gpu"])
+
+    assert result.exit_code == 1
+    assert "Error: interactions file is missing" in result.output
+    assert result.exception is not None
