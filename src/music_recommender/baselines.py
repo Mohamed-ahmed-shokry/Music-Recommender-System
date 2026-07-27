@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from music_recommender.ranking import validate_ranking_parameters
+
 Recommendation = dict[str, str | float | int]
 
 
@@ -13,8 +15,7 @@ def popular_artists(
     exclude_artist_ids: set[str] | None = None,
 ) -> list[Recommendation]:
     """Return artists ranked by training-set popularity."""
-    if top_k <= 0:
-        raise ValueError("top_k must be greater than 0.")
+    validate_ranking_parameters(top_k)
 
     excluded = exclude_artist_ids or set()
     ranked_stats = sorted(

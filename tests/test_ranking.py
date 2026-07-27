@@ -8,13 +8,30 @@ from music_recommender.ranking import (
 )
 
 
-def test_invalid_ranking_parameters_raise_value_error() -> None:
+@pytest.mark.parametrize("top_k", [0, -1, True, 1.5])
+def test_invalid_top_k_raises_value_error(top_k) -> None:
     with pytest.raises(ValueError, match="top_k"):
-        validate_ranking_parameters(top_k=0)
-    with pytest.raises(ValueError, match="diversity"):
-        validate_ranking_parameters(top_k=1, diversity=1.2)
-    with pytest.raises(ValueError, match="popularity_penalty"):
-        validate_ranking_parameters(top_k=1, popularity_penalty=-0.1)
+        validate_ranking_parameters(top_k=top_k)
+
+
+@pytest.mark.parametrize(
+    ("parameter", "value"),
+    [
+        ("diversity", -0.1),
+        ("diversity", 1.2),
+        ("diversity", float("nan")),
+        ("diversity", True),
+        ("popularity_penalty", -0.1),
+        ("popularity_penalty", float("inf")),
+        ("popularity_penalty", False),
+    ],
+)
+def test_invalid_unit_interval_ranking_parameter_raises_value_error(
+    parameter: str,
+    value,
+) -> None:
+    with pytest.raises(ValueError, match=parameter):
+        validate_ranking_parameters(top_k=1, **{parameter: value})
 
 
 def test_popularity_penalty_reduces_popular_artist_score() -> None:

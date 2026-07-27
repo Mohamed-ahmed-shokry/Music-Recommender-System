@@ -13,12 +13,20 @@ def validate_ranking_parameters(
     popularity_penalty: float = 0.0,
 ) -> None:
     """Validate common recommendation ranking parameters."""
-    if top_k <= 0:
-        raise ValueError("top_k must be greater than 0.")
-    if not 0 <= diversity <= 1:
-        raise ValueError("diversity must be between 0 and 1.")
-    if not 0 <= popularity_penalty <= 1:
-        raise ValueError("popularity_penalty must be between 0 and 1.")
+    if type(top_k) is not int or top_k < 1:
+        raise ValueError("top_k must be a positive integer.")
+    _validate_unit_interval(diversity, name="diversity")
+    _validate_unit_interval(popularity_penalty, name="popularity_penalty")
+
+
+def _validate_unit_interval(value: float, *, name: str) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float, np.number))
+        or not np.isfinite(value)
+        or not 0 <= value <= 1
+    ):
+        raise ValueError(f"{name} must be a finite number between 0 and 1.")
 
 
 def apply_popularity_penalty(
