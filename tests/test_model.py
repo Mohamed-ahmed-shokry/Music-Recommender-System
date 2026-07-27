@@ -4,7 +4,12 @@ import numpy as np
 import pytest
 from scipy.sparse import csr_matrix
 
-from music_recommender.model import load_model, save_model, train_als_model
+from music_recommender.model import (
+    load_model,
+    save_model,
+    train_als_model,
+    train_and_save_model,
+)
 
 
 def tiny_matrix() -> csr_matrix:
@@ -102,3 +107,29 @@ def test_als_training_rejects_invalid_interaction_matrix(
             alpha=10.0,
             use_gpu=False,
         )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"factors": 0}, "factors"),
+        ({"content_weight": float("nan")}, "content_weight"),
+    ],
+)
+def test_train_and_save_validates_configuration_before_reading_data(
+    tmp_path: Path,
+    overrides: dict[str, object],
+    message: str,
+) -> None:
+    parameters = {
+        "raw_data_path": tmp_path / "missing-interactions.csv",
+        "metadata_path": tmp_path / "missing-metadata.csv",
+        "model_path": tmp_path / "model.joblib",
+        "mappings_path": tmp_path / "mappings.joblib",
+        "artifact_path": tmp_path / "artifact.joblib",
+        "use_gpu": False,
+        **overrides,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        train_and_save_model(**parameters)

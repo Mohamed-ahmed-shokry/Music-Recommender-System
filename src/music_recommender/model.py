@@ -26,7 +26,7 @@ from music_recommender.config import (
     RAW_DATA_PATH,
     RAW_METADATA_PATH,
 )
-from music_recommender.content import build_content_artifacts
+from music_recommender.content import build_content_artifacts, validate_content_weight
 from music_recommender.metadata import load_and_validate_artist_metadata
 from music_recommender.preprocessing import Mappings, prepare_training_data
 from music_recommender.utils import atomic_joblib_dump
@@ -149,6 +149,23 @@ def _validate_als_training_inputs(
             "user_item_matrix must be a non-empty CSR matrix with finite, "
             "positive interaction weights."
         )
+    _validate_als_hyperparameters(
+        factors=factors,
+        regularization=regularization,
+        iterations=iterations,
+        alpha=alpha,
+        use_gpu=use_gpu,
+    )
+
+
+def _validate_als_hyperparameters(
+    *,
+    factors: int,
+    regularization: float,
+    iterations: int,
+    alpha: float,
+    use_gpu: bool,
+) -> None:
     if type(factors) is not int or factors < 1:
         raise ValueError("factors must be a positive integer.")
     if type(iterations) is not int or iterations < 1:
@@ -195,6 +212,14 @@ def train_and_save_model(
     content_weight: float = DEFAULT_CONTENT_WEIGHT,
 ) -> tuple[AlternatingLeastSquares, csr_matrix, Mappings]:
     """Prepare data, train ALS, and save model artifacts."""
+    _validate_als_hyperparameters(
+        factors=factors,
+        regularization=regularization,
+        iterations=iterations,
+        alpha=alpha,
+        use_gpu=use_gpu,
+    )
+    validate_content_weight(content_weight)
     filtered_df, user_item_matrix, mappings = prepare_training_data(
         raw_data_path=raw_data_path,
         mappings_path=mappings_path,
