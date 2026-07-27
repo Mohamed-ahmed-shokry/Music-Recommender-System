@@ -239,8 +239,13 @@ def hybrid_scores(
 
 def validate_content_weight(content_weight: float) -> None:
     """Validate hybrid content weight."""
-    if not 0 <= content_weight <= 1:
-        raise ValueError("content_weight must be between 0 and 1.")
+    if (
+        isinstance(content_weight, bool)
+        or not isinstance(content_weight, (int, float, np.number))
+        or not np.isfinite(content_weight)
+        or not 0 <= content_weight <= 1
+    ):
+        raise ValueError("content_weight must be a finite number between 0 and 1.")
 
 
 def build_content_recommendation(

@@ -135,6 +135,10 @@ def test_hybrid_weight_extremes_match_expected_scores() -> None:
     assert content_only[0] > content_only[1]
 
 
-def test_invalid_content_weight_raises_value_error() -> None:
+@pytest.mark.parametrize(
+    "content_weight",
+    [-0.1, 1.5, float("nan"), float("inf"), True],
+)
+def test_invalid_content_weight_raises_value_error(content_weight) -> None:
     with pytest.raises(ValueError, match="content_weight"):
-        validate_content_weight(1.5)
+        validate_content_weight(content_weight)
