@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 import pytest
 from scipy.sparse import csr_matrix
@@ -129,6 +130,38 @@ def test_inconsistent_artifact_mappings_are_rejected(
     save_artifact(artifact, artifact_path)
 
     with pytest.raises(ValueError, match="mapping|artist names"):
+        load_artifact(artifact_path)
+
+
+@pytest.mark.parametrize(
+    "corrupt_artifact",
+    [
+        lambda artifact: artifact.model.user_factors.__setitem__(
+            (0, 0),
+            np.nan,
+        ),
+        lambda artifact: artifact.user_item_matrix.data.__setitem__(0, np.inf),
+        lambda artifact: artifact.content_artifacts.content_matrix.data.__setitem__(
+            0,
+            np.nan,
+        ),
+        lambda artifact: setattr(
+            artifact.model,
+            "item_factors",
+            artifact.model.item_factors[:, :-1],
+        ),
+    ],
+)
+def test_non_finite_or_inconsistent_numeric_artifacts_are_rejected(
+    tmp_path: Path,
+    corrupt_artifact,
+) -> None:
+    artifact = create_test_artifact(tmp_path)
+    corrupt_artifact(artifact)
+    artifact_path = tmp_path / "invalid-numeric-data.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="finite|latent dimensions"):
         load_artifact(artifact_path)
 
 

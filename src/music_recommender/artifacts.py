@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import joblib
+import numpy as np
 import pandas as pd
 from scipy.sparse import csr_matrix
 
@@ -223,25 +224,56 @@ def _validate_loaded_artifact(artifact: Any) -> RecommenderArtifact:
 
     num_users = len(artifact.mappings["user_id_to_index"])
     num_artists = len(artifact.mappings["artist_id_to_index"])
+    if not isinstance(artifact.user_item_matrix, csr_matrix):
+        raise ValueError(
+            "Artifact interaction matrix is not CSR sparse data. Retrain the model."
+        )
+    if not isinstance(artifact.content_artifacts, ContentArtifacts):
+        raise ValueError(
+            "Artifact content data has an invalid structure. Retrain the model."
+        )
     if artifact.user_item_matrix.shape != (num_users, num_artists):
         raise ValueError(
             "Artifact interaction matrix dimensions do not match its mappings. "
             "Retrain the model."
         )
-    if artifact.model.user_factors.shape[0] != num_artists:
+    artist_factors = getattr(artifact.model, "user_factors", None)
+    user_factors = getattr(artifact.model, "item_factors", None)
+    if (
+        not isinstance(artist_factors, np.ndarray)
+        or not isinstance(user_factors, np.ndarray)
+        or artist_factors.ndim != 2
+        or user_factors.ndim != 2
+    ):
+        raise ValueError(
+            "Artifact collaborative factors have an invalid structure. "
+            "Retrain the model."
+        )
+    if artist_factors.shape[0] != num_artists:
         raise ValueError(
             "Artifact artist factors do not match its artist mappings. "
             "Retrain the model."
         )
-    if artifact.model.item_factors.shape[0] != num_users:
+    if user_factors.shape[0] != num_users:
         raise ValueError(
             "Artifact user factors do not match its user mappings. Retrain the model."
+        )
+    if artist_factors.shape[1] == 0 or artist_factors.shape[1] != user_factors.shape[1]:
+        raise ValueError(
+            "Artifact collaborative factors have inconsistent latent dimensions. "
+            "Retrain the model."
         )
     if artifact.content_artifacts.content_matrix.shape[0] != num_artists:
         raise ValueError(
             "Artifact content matrix does not match its artist mappings. "
             "Retrain the model."
         )
+    _validate_numeric_artifacts(
+        artifact.user_item_matrix,
+        artifact.content_artifacts.content_matrix,
+        artist_factors,
+        user_factors,
+    )
 
     content_artist_ids = set(artifact.content_artifacts.artist_id_to_content_index)
     if artist_ids != content_artist_ids or artist_ids != set(artifact.artist_stats):
@@ -304,5 +336,37 @@ def _validate_mapping_pair(
     ):
         raise ValueError(
             f"Artifact {entity} mappings are not a contiguous bijection. "
+            "Retrain the model."
+        )
+
+
+def _validate_numeric_artifacts(
+    user_item_matrix: csr_matrix,
+    content_matrix: csr_matrix,
+    artist_factors: np.ndarray,
+    user_factors: np.ndarray,
+) -> None:
+    if (
+        not np.issubdtype(user_item_matrix.dtype, np.number)
+        or not np.all(np.isfinite(user_item_matrix.data))
+        or np.any(user_item_matrix.data <= 0)
+    ):
+        raise ValueError(
+            "Artifact interaction weights must be finite and positive. "
+            "Retrain the model."
+        )
+    if (
+        not isinstance(content_matrix, csr_matrix)
+        or not np.issubdtype(content_matrix.dtype, np.number)
+        or not np.all(np.isfinite(content_matrix.data))
+        or np.any(content_matrix.data < 0)
+    ):
+        raise ValueError(
+            "Artifact content values must be finite and non-negative. "
+            "Retrain the model."
+        )
+    if not np.all(np.isfinite(artist_factors)) or not np.all(np.isfinite(user_factors)):
+        raise ValueError(
+            "Artifact collaborative factors must contain finite values. "
             "Retrain the model."
         )
