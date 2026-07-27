@@ -274,12 +274,14 @@ def _validate_loaded_artifact(artifact: Any) -> RecommenderArtifact:
         artist_factors,
         user_factors,
     )
-
-    content_artist_ids = set(artifact.content_artifacts.artist_id_to_content_index)
-    if artist_ids != content_artist_ids or artist_ids != set(artifact.artist_stats):
+    _validate_content_artifacts(
+        artifact.content_artifacts,
+        artist_ids,
+        artist_id_to_name,
+    )
+    if artist_ids != set(artifact.artist_stats):
         raise ValueError(
-            "Artifact artist data is inconsistent across mappings, content, and "
-            "statistics. Retrain the model."
+            "Artifact artist statistics do not match its mappings. Retrain the model."
         )
 
     required_metadata_fields = {"num_users", "num_artists", "num_interactions"}
@@ -370,3 +372,111 @@ def _validate_numeric_artifacts(
             "Artifact collaborative factors must contain finite values. "
             "Retrain the model."
         )
+
+
+def _validate_content_artifacts(
+    content_artifacts: ContentArtifacts,
+    artist_ids: set[str],
+    artist_id_to_name: dict[Any, Any],
+) -> None:
+    _validate_mapping_pair(
+        content_artifacts.artist_id_to_content_index,
+        content_artifacts.content_index_to_artist_id,
+        entity="content artist",
+    )
+    if set(content_artifacts.artist_id_to_content_index) != artist_ids:
+        raise ValueError(
+            "Artifact content artists do not match its artist mappings. "
+            "Retrain the model."
+        )
+
+    feature_names = content_artifacts.feature_names
+    if (
+        not isinstance(feature_names, list)
+        or any(not isinstance(name, str) or not name for name in feature_names)
+        or len(set(feature_names)) != len(feature_names)
+        or content_artifacts.content_matrix.shape
+        != (len(artist_ids), len(feature_names))
+    ):
+        raise ValueError(
+            "Artifact content features do not match its content matrix. "
+            "Retrain the model."
+        )
+    vectorizer_feature_names = (
+        content_artifacts.vectorizer.get_feature_names_out().tolist()
+    )
+    if feature_names != vectorizer_feature_names:
+        raise ValueError(
+            "Artifact content features do not match its vectorizer. Retrain the model."
+        )
+
+    metadata = content_artifacts.metadata
+    required_columns = {
+        "artist_id",
+        "artist_name",
+        "genres",
+        "mood_tags",
+        "country",
+        "era",
+    }
+    if not isinstance(metadata, pd.DataFrame) or not required_columns <= set(
+        metadata.columns
+    ):
+        raise ValueError(
+            "Artifact content metadata has an invalid structure. Retrain the model."
+        )
+    if any(
+        not isinstance(value, str) or not value.strip()
+        for column in required_columns
+        for value in metadata[column]
+    ):
+        raise ValueError(
+            "Artifact content metadata contains empty values. Retrain the model."
+        )
+
+    ordered_artist_ids = [
+        content_artifacts.content_index_to_artist_id[index]
+        for index in range(len(artist_ids))
+    ]
+    metadata_artist_ids = metadata["artist_id"].tolist()
+    if metadata_artist_ids != ordered_artist_ids or any(
+        metadata.loc[index, "artist_name"] != artist_id_to_name[artist_id]
+        for index, artist_id in enumerate(ordered_artist_ids)
+    ):
+        raise ValueError(
+            "Artifact content metadata is not aligned with its artist mappings. "
+            "Retrain the model."
+        )
+
+    metadata_lookup = content_artifacts.metadata_lookup
+    if not isinstance(metadata_lookup, dict) or set(metadata_lookup) != artist_ids:
+        raise ValueError(
+            "Artifact content metadata lookup does not match its artists. "
+            "Retrain the model."
+        )
+    for row in metadata.itertuples(index=False):
+        artist_id = str(row.artist_id)
+        lookup = metadata_lookup[artist_id]
+        expected_values = {
+            field: _split_metadata_values(getattr(row, field))
+            for field in ("genres", "mood_tags", "country", "era")
+        }
+        expected_tokens = {
+            value for values in expected_values.values() for value in values
+        }
+        if (
+            not isinstance(lookup, dict)
+            or lookup.get("artist_id") != artist_id
+            or lookup.get("artist_name") != str(row.artist_name)
+            or any(
+                lookup.get(field) != values for field, values in expected_values.items()
+            )
+            or lookup.get("token_values") != expected_tokens
+        ):
+            raise ValueError(
+                "Artifact content metadata lookup is inconsistent. Retrain the model."
+            )
+
+
+def _split_metadata_values(value: str) -> list[str]:
+    return [item.strip().lower() for item in value.split(";") if item.strip()]

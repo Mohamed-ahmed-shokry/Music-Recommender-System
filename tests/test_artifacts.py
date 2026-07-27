@@ -165,6 +165,36 @@ def test_non_finite_or_inconsistent_numeric_artifacts_are_rejected(
         load_artifact(artifact_path)
 
 
+@pytest.mark.parametrize(
+    "corrupt_content",
+    [
+        lambda artifact: artifact.content_artifacts.artist_id_to_content_index.update(
+            {"artist_2": 0}
+        ),
+        lambda artifact: setattr(
+            artifact.content_artifacts,
+            "metadata",
+            artifact.content_artifacts.metadata.iloc[::-1].reset_index(drop=True),
+        ),
+        lambda artifact: artifact.content_artifacts.feature_names.pop(),
+        lambda artifact: artifact.content_artifacts.metadata_lookup["artist_1"].update(
+            {"genres": ["wrong"]}
+        ),
+    ],
+)
+def test_inconsistent_content_artifacts_are_rejected(
+    tmp_path: Path,
+    corrupt_content,
+) -> None:
+    artifact = create_test_artifact(tmp_path)
+    corrupt_content(artifact)
+    artifact_path = tmp_path / "invalid-content-data.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="content"):
+        load_artifact(artifact_path)
+
+
 def test_artist_stats_include_popularity_rank() -> None:
     stats = build_artist_stats(artifact_dataframe())
 
