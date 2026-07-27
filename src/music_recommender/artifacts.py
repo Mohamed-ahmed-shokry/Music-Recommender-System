@@ -181,6 +181,8 @@ def _validate_loaded_artifact(artifact: Any) -> RecommenderArtifact:
             f"compatible with required version {ARTIFACT_VERSION}. Retrain the model."
         )
 
+    if not isinstance(artifact.mappings, dict):
+        raise ValueError("Artifact mappings are not a dictionary. Retrain the model.")
     required_mapping_fields = {
         "user_id_to_index",
         "index_to_user_id",
@@ -193,6 +195,30 @@ def _validate_loaded_artifact(artifact: Any) -> RecommenderArtifact:
         raise ValueError(
             f"Artifact mappings are missing fields {missing_mapping_fields}. "
             "Retrain the model."
+        )
+
+    _validate_mapping_pair(
+        artifact.mappings["user_id_to_index"],
+        artifact.mappings["index_to_user_id"],
+        entity="user",
+    )
+    _validate_mapping_pair(
+        artifact.mappings["artist_id_to_index"],
+        artifact.mappings["index_to_artist_id"],
+        entity="artist",
+    )
+    artist_ids = set(artifact.mappings["artist_id_to_index"])
+    artist_id_to_name = artifact.mappings["artist_id_to_name"]
+    if (
+        not isinstance(artist_id_to_name, dict)
+        or set(artist_id_to_name) != artist_ids
+        or any(
+            not isinstance(name, str) or not name.strip()
+            for name in artist_id_to_name.values()
+        )
+    ):
+        raise ValueError(
+            "Artifact artist names do not match its artist mappings. Retrain the model."
         )
 
     num_users = len(artifact.mappings["user_id_to_index"])
@@ -217,7 +243,6 @@ def _validate_loaded_artifact(artifact: Any) -> RecommenderArtifact:
             "Retrain the model."
         )
 
-    artist_ids = {str(value) for value in artifact.mappings["artist_id_to_index"]}
     content_artist_ids = set(artifact.content_artifacts.artist_id_to_content_index)
     if artist_ids != content_artist_ids or artist_ids != set(artifact.artist_stats):
         raise ValueError(
@@ -244,3 +269,40 @@ def _validate_loaded_artifact(artifact: Any) -> RecommenderArtifact:
             "Retrain the model."
         )
     return artifact
+
+
+def _validate_mapping_pair(
+    forward: Any,
+    reverse: Any,
+    *,
+    entity: str,
+) -> None:
+    if not isinstance(forward, dict) or not isinstance(reverse, dict):
+        raise ValueError(
+            f"Artifact {entity} mappings are not dictionaries. Retrain the model."
+        )
+
+    expected_indices = set(range(len(forward)))
+    has_valid_identifiers = all(
+        isinstance(identifier, str)
+        and bool(identifier.strip())
+        and identifier == identifier.strip()
+        for identifier in forward
+    )
+    has_integer_indices = all(type(index) is int for index in forward.values())
+    has_integer_reverse_indices = all(type(index) is int for index in reverse)
+    is_contiguous_bijection = (
+        set(forward.values()) == expected_indices
+        and set(reverse) == expected_indices
+        and all(reverse[index] == identifier for identifier, index in forward.items())
+    )
+    if not (
+        has_valid_identifiers
+        and has_integer_indices
+        and has_integer_reverse_indices
+        and is_contiguous_bijection
+    ):
+        raise ValueError(
+            f"Artifact {entity} mappings are not a contiguous bijection. "
+            "Retrain the model."
+        )

@@ -110,6 +110,28 @@ def test_inconsistent_artifact_dimensions_are_rejected(tmp_path: Path) -> None:
         load_artifact(artifact_path)
 
 
+@pytest.mark.parametrize(
+    "corrupt_mappings",
+    [
+        lambda mappings: mappings["index_to_user_id"].pop(0),
+        lambda mappings: mappings["artist_id_to_index"].update({"artist_2": 0}),
+        lambda mappings: mappings["artist_id_to_name"].pop("artist_1"),
+        lambda mappings: mappings["user_id_to_index"].update({" user_1 ": 0}),
+    ],
+)
+def test_inconsistent_artifact_mappings_are_rejected(
+    tmp_path: Path,
+    corrupt_mappings,
+) -> None:
+    artifact = create_test_artifact(tmp_path)
+    corrupt_mappings(artifact.mappings)
+    artifact_path = tmp_path / "inconsistent-mappings.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="mapping|artist names"):
+        load_artifact(artifact_path)
+
+
 def test_artist_stats_include_popularity_rank() -> None:
     stats = build_artist_stats(artifact_dataframe())
 
