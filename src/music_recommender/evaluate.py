@@ -26,6 +26,7 @@ from music_recommender.content import (
 from music_recommender.data import normalize_interactions
 from music_recommender.model import train_als_model
 from music_recommender.preprocessing import build_user_item_matrix, create_id_mappings
+from music_recommender.ranking import validate_ranking_parameters
 from music_recommender.recommend import recommend_artists_for_user
 
 
@@ -225,8 +226,15 @@ def train_test_split_by_user(
     random_state: int = 42,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Split interactions per user while keeping train interactions when possible."""
-    if not 0 < test_ratio < 1:
+    if (
+        isinstance(test_ratio, bool)
+        or not isinstance(test_ratio, (int, float, np.number))
+        or not np.isfinite(test_ratio)
+        or not 0 < test_ratio < 1
+    ):
         raise ValueError("test_ratio must be between 0 and 1.")
+    if type(random_state) is not int:
+        raise ValueError("random_state must be an integer.")
     df = normalize_interactions(df)
     rng = np.random.default_rng(random_state)
     train_indices: list[int] = []
@@ -278,10 +286,15 @@ def evaluate_repeated_holdout(
     metadata_df: pd.DataFrame | None = None,
 ) -> dict[str, float] | dict[str, dict[str, float]]:
     """Evaluate ALS and optionally compare it with popularity/content/hybrid."""
-    if top_k <= 0:
-        raise ValueError("top_k must be greater than 0.")
-    if folds <= 0:
-        raise ValueError("folds must be greater than 0.")
+    validate_ranking_parameters(top_k)
+    if type(folds) is not int or folds < 1:
+        raise ValueError("folds must be a positive integer.")
+    if type(use_gpu) is not bool:
+        raise ValueError("use_gpu must be a boolean.")
+    if type(compare_baseline) is not bool:
+        raise ValueError("compare_baseline must be a boolean.")
+    if type(compare_all) is not bool:
+        raise ValueError("compare_all must be a boolean.")
 
     als_fold_metrics: list[dict[str, float]] = []
     popularity_fold_metrics: list[dict[str, float]] = []

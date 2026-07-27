@@ -82,7 +82,10 @@ def test_train_test_split_aggregates_duplicates_before_holdout() -> None:
     assert train_df["play_count"].sum() + test_df["play_count"].sum() == 6
 
 
-@pytest.mark.parametrize("test_ratio", [0.0, 1.0, -0.1, 1.1])
+@pytest.mark.parametrize(
+    "test_ratio",
+    [0.0, 1.0, -0.1, 1.1, float("nan"), float("inf"), True],
+)
 def test_train_test_split_rejects_invalid_ratio(test_ratio: float) -> None:
     with pytest.raises(ValueError, match="test_ratio must be between 0 and 1"):
         train_test_split_by_user(
@@ -96,6 +99,50 @@ def test_train_test_split_rejects_invalid_ratio(test_ratio: float) -> None:
             ),
             test_ratio=test_ratio,
         )
+
+
+def test_train_test_split_rejects_invalid_random_state() -> None:
+    with pytest.raises(ValueError, match="random_state"):
+        train_test_split_by_user(
+            pd.DataFrame(
+                {
+                    "user_id": ["user_1", "user_1"],
+                    "artist_id": ["a", "b"],
+                    "artist_name": ["A", "B"],
+                    "play_count": [1, 2],
+                }
+            ),
+            random_state=True,
+        )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"top_k": True}, "top_k"),
+        ({"folds": 0}, "folds"),
+        ({"folds": 1.5}, "folds"),
+        ({"use_gpu": 1}, "use_gpu"),
+        ({"compare_baseline": 1}, "compare_baseline"),
+        ({"compare_all": "yes"}, "compare_all"),
+    ],
+)
+def test_repeated_holdout_rejects_invalid_parameters(
+    overrides: dict[str, object],
+    message: str,
+) -> None:
+    parameters = {
+        "df": pd.DataFrame(),
+        "top_k": 1,
+        "folds": 1,
+        "use_gpu": False,
+        "compare_baseline": False,
+        "compare_all": False,
+        **overrides,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        evaluate_repeated_holdout(**parameters)
 
 
 def test_catalog_coverage_works_on_known_example() -> None:
