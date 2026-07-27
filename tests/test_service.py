@@ -62,7 +62,18 @@ def create_service(tmp_path: Path) -> RecommenderService:
         content_artifacts=content_artifacts,
         raw_data_path=tmp_path / "missing.csv",
         metadata_path=tmp_path / "metadata.csv",
-        training_config={"factors": 4},
+        training_config={
+            "raw_data_path": str(tmp_path / "missing.csv"),
+            "metadata_path": str(tmp_path / "metadata.csv"),
+            "min_user_interactions": 1,
+            "min_artist_interactions": 1,
+            "factors": 4,
+            "regularization": 0.01,
+            "iterations": 1,
+            "alpha": 10.0,
+            "use_gpu": False,
+            "content_weight": 0.25,
+        },
         hybrid_config={"default_content_weight": 0.25},
     )
     artifact_path = tmp_path / "artifact.joblib"

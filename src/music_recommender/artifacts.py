@@ -284,6 +284,11 @@ def _validate_loaded_artifact(artifact: Any) -> RecommenderArtifact:
         artist_ids,
         artist_id_to_name,
     )
+    _validate_artifact_configuration(
+        artifact.training_config,
+        artifact.hybrid_config,
+        latent_factors=artist_factors.shape[1],
+    )
 
     _validate_artifact_metadata(
         artifact.metadata,
@@ -601,6 +606,84 @@ def _validate_artifact_metadata(
         expected_rows=num_artists,
         label="artist metadata dataset",
     )
+
+
+def _validate_artifact_configuration(
+    training_config: Any,
+    hybrid_config: Any,
+    *,
+    latent_factors: int,
+) -> None:
+    required_training_fields = {
+        "raw_data_path",
+        "metadata_path",
+        "min_user_interactions",
+        "min_artist_interactions",
+        "factors",
+        "regularization",
+        "iterations",
+        "alpha",
+        "use_gpu",
+        "content_weight",
+    }
+    if not isinstance(training_config, dict) or not required_training_fields <= set(
+        training_config
+    ):
+        raise ValueError(
+            "Artifact training configuration has an invalid structure. "
+            "Retrain the model."
+        )
+
+    if any(
+        not isinstance(training_config[field], str)
+        or not training_config[field].strip()
+        for field in ("raw_data_path", "metadata_path")
+    ):
+        raise ValueError(
+            "Artifact training configuration has invalid data paths. Retrain the model."
+        )
+    if any(
+        type(training_config[field]) is not int or training_config[field] < 1
+        for field in (
+            "min_user_interactions",
+            "min_artist_interactions",
+            "factors",
+            "iterations",
+        )
+    ):
+        raise ValueError(
+            "Artifact training configuration has invalid integer parameters. "
+            "Retrain the model."
+        )
+    if training_config["factors"] != latent_factors:
+        raise ValueError(
+            "Artifact training factor count does not match its model. "
+            "Retrain the model."
+        )
+    if (
+        not _is_finite_number(training_config["regularization"])
+        or training_config["regularization"] < 0
+        or not _is_finite_number(training_config["alpha"])
+        or training_config["alpha"] <= 0
+        or type(training_config["use_gpu"]) is not bool
+    ):
+        raise ValueError(
+            "Artifact training configuration has invalid ALS parameters. "
+            "Retrain the model."
+        )
+
+    content_weight = training_config["content_weight"]
+    if (
+        not _is_finite_number(content_weight)
+        or not 0 <= content_weight <= 1
+        or not isinstance(hybrid_config, dict)
+        or set(hybrid_config) != {"default_content_weight"}
+        or hybrid_config["default_content_weight"] != content_weight
+    ):
+        raise ValueError(
+            "Artifact hybrid configuration is invalid or inconsistent. "
+            "Retrain the model."
+        )
 
 
 def _validate_dataset_fingerprint(

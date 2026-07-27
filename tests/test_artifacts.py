@@ -64,7 +64,18 @@ def create_test_artifact(tmp_path: Path) -> RecommenderArtifact:
         content_artifacts=content_artifacts,
         raw_data_path=tmp_path / "missing.csv",
         metadata_path=tmp_path / "metadata.csv",
-        training_config={"factors": 4},
+        training_config={
+            "raw_data_path": str(tmp_path / "missing.csv"),
+            "metadata_path": str(tmp_path / "metadata.csv"),
+            "min_user_interactions": 1,
+            "min_artist_interactions": 1,
+            "factors": 4,
+            "regularization": 0.01,
+            "iterations": 1,
+            "alpha": 10.0,
+            "use_gpu": False,
+            "content_weight": 0.25,
+        },
         hybrid_config={"default_content_weight": 0.25},
     )
 
@@ -245,6 +256,30 @@ def test_inconsistent_artifact_metadata_is_rejected(
     save_artifact(artifact, artifact_path)
 
     with pytest.raises(ValueError, match="metadata|fingerprint"):
+        load_artifact(artifact_path)
+
+
+@pytest.mark.parametrize(
+    "corrupt_configuration",
+    [
+        lambda artifact: artifact.training_config.update({"factors": 99}),
+        lambda artifact: artifact.training_config.update({"alpha": np.nan}),
+        lambda artifact: artifact.training_config.pop("iterations"),
+        lambda artifact: artifact.hybrid_config.update(
+            {"default_content_weight": 0.75}
+        ),
+    ],
+)
+def test_inconsistent_artifact_configuration_is_rejected(
+    tmp_path: Path,
+    corrupt_configuration,
+) -> None:
+    artifact = create_test_artifact(tmp_path)
+    corrupt_configuration(artifact)
+    artifact_path = tmp_path / "invalid-configuration.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="configuration|factor count"):
         load_artifact(artifact_path)
 
 
