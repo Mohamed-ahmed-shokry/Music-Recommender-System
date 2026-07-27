@@ -279,10 +279,11 @@ def _validate_loaded_artifact(artifact: Any) -> RecommenderArtifact:
         artist_ids,
         artist_id_to_name,
     )
-    if artist_ids != set(artifact.artist_stats):
-        raise ValueError(
-            "Artifact artist statistics do not match its mappings. Retrain the model."
-        )
+    _validate_artist_stats(
+        artifact.artist_stats,
+        artist_ids,
+        artist_id_to_name,
+    )
 
     required_metadata_fields = {"num_users", "num_artists", "num_interactions"}
     missing_metadata_fields = sorted(
@@ -480,3 +481,62 @@ def _validate_content_artifacts(
 
 def _split_metadata_values(value: str) -> list[str]:
     return [item.strip().lower() for item in value.split(";") if item.strip()]
+
+
+def _validate_artist_stats(
+    artist_stats: Any,
+    artist_ids: set[str],
+    artist_id_to_name: dict[Any, Any],
+) -> None:
+    if not isinstance(artist_stats, dict) or set(artist_stats) != artist_ids:
+        raise ValueError(
+            "Artifact artist statistics do not match its mappings. Retrain the model."
+        )
+
+    required_fields = {
+        "artist_id",
+        "artist_name",
+        "total_plays",
+        "listener_count",
+        "interaction_count",
+        "popularity_rank",
+    }
+    popularity_ranks: set[int] = set()
+    for artist_id, stats in artist_stats.items():
+        if not isinstance(stats, dict) or not required_fields <= set(stats):
+            raise ValueError(
+                "Artifact artist statistics have an invalid structure. "
+                "Retrain the model."
+            )
+
+        listener_count = stats["listener_count"]
+        interaction_count = stats["interaction_count"]
+        popularity_rank = stats["popularity_rank"]
+        if (
+            stats["artist_id"] != artist_id
+            or stats["artist_name"] != artist_id_to_name[artist_id]
+            or not _is_finite_number(stats["total_plays"])
+            or float(stats["total_plays"]) <= 0
+            or type(listener_count) is not int
+            or listener_count <= 0
+            or type(interaction_count) is not int
+            or interaction_count < listener_count
+            or type(popularity_rank) is not int
+        ):
+            raise ValueError(
+                "Artifact artist statistics contain invalid values. Retrain the model."
+            )
+        popularity_ranks.add(popularity_rank)
+
+    if popularity_ranks != set(range(1, len(artist_ids) + 1)):
+        raise ValueError(
+            "Artifact artist popularity ranks are not contiguous. Retrain the model."
+        )
+
+
+def _is_finite_number(value: Any) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float, np.number))
+        and bool(np.isfinite(value))
+    )

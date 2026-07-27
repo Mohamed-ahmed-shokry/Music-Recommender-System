@@ -195,6 +195,34 @@ def test_inconsistent_content_artifacts_are_rejected(
         load_artifact(artifact_path)
 
 
+@pytest.mark.parametrize(
+    "corrupt_stats",
+    [
+        lambda artifact: artifact.artist_stats["artist_1"].update(
+            {"total_plays": np.nan}
+        ),
+        lambda artifact: artifact.artist_stats["artist_1"].update(
+            {"artist_name": "Wrong artist"}
+        ),
+        lambda artifact: artifact.artist_stats["artist_1"].update(
+            {"popularity_rank": artifact.artist_stats["artist_2"]["popularity_rank"]}
+        ),
+        lambda artifact: artifact.artist_stats["artist_1"].pop("listener_count"),
+    ],
+)
+def test_inconsistent_artist_statistics_are_rejected(
+    tmp_path: Path,
+    corrupt_stats,
+) -> None:
+    artifact = create_test_artifact(tmp_path)
+    corrupt_stats(artifact)
+    artifact_path = tmp_path / "invalid-artist-stats.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="artist statistics|popularity ranks"):
+        load_artifact(artifact_path)
+
+
 def test_artist_stats_include_popularity_rank() -> None:
     stats = build_artist_stats(artifact_dataframe())
 
