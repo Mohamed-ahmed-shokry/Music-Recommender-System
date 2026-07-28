@@ -145,7 +145,8 @@ music-recommender-system/
 |       `-- ci.yml
 |-- api/
 |   |-- __init__.py
-|   `-- main.py
+|   |-- main.py
+|   `-- middleware.py
 |-- artifacts/
 |   |-- mappings/
 |   `-- models/
