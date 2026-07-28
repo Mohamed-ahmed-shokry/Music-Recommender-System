@@ -1,7 +1,11 @@
+import asyncio
+
 import pytest
 from fastapi.testclient import TestClient
+from starlette.types import Message, Receive, Scope, Send
 
 import api.main as api_main
+from api.middleware import RequestSafetyMiddleware
 
 
 class FakeService:
@@ -195,6 +199,89 @@ def test_health_route_uses_loaded_service() -> None:
 
     assert response.status_code == 200
     assert response.json()["artifact_version"] == "4.0"
+
+
+def test_responses_echo_valid_request_id_and_report_process_time() -> None:
+    with TestClient(api_main.app) as client:
+        response = client.get("/", headers={"X-Request-ID": "client-request_123"})
+
+    assert response.headers["x-request-id"] == "client-request_123"
+    assert float(response.headers["x-process-time"]) >= 0.0
+
+
+def test_invalid_request_id_is_replaced() -> None:
+    with TestClient(api_main.app) as client:
+        response = client.get("/", headers={"X-Request-ID": "not valid"})
+
+    request_id = response.headers["x-request-id"]
+    assert request_id != "not valid"
+    assert len(request_id) == 32
+
+
+def test_declared_oversized_request_body_is_rejected() -> None:
+    with TestClient(api_main.app) as client:
+        response = client.post(
+            "/recommend/profile",
+            content=b"x" * (api_main.MAX_REQUEST_BODY_BYTES + 1),
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == (
+        f"Request body exceeds the {api_main.MAX_REQUEST_BODY_BYTES}-byte limit."
+    )
+    assert response.headers["x-request-id"]
+    assert float(response.headers["x-process-time"]) >= 0.0
+
+
+def test_streamed_oversized_request_body_is_rejected() -> None:
+    async def consume_body(
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+    ) -> None:
+        del scope, send
+        while True:
+            message = await receive()
+            if not message.get("more_body", False):
+                return
+
+    middleware = RequestSafetyMiddleware(consume_body, max_body_bytes=4)
+    messages = iter(
+        [
+            {"type": "http.request", "body": b"123", "more_body": True},
+            {"type": "http.request", "body": b"45", "more_body": False},
+        ]
+    )
+    sent_messages: list[Message] = []
+
+    async def receive() -> Message:
+        return next(messages)  # type: ignore[return-value]
+
+    async def send(message: Message) -> None:
+        sent_messages.append(message)
+
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/recommend/profile",
+        "raw_path": b"/recommend/profile",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [],
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+        "state": {},
+    }
+
+    asyncio.run(middleware(scope, receive, send))
+
+    response_start = sent_messages[0]
+    assert response_start["type"] == "http.response.start"
+    assert response_start["status"] == 413
 
 
 def test_recommend_user_route_accepts_hybrid_params() -> None:

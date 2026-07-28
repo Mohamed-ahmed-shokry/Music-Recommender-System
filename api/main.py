@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from api.middleware import RequestSafetyMiddleware
 from music_recommender.config import DEFAULT_CONTENT_WEIGHT
 from music_recommender.service import RecommenderService
 
@@ -15,6 +16,7 @@ service_load_error: str | None = None
 
 MAX_API_RESULTS = 100
 MAX_REQUEST_VALUES = 100
+MAX_REQUEST_BODY_BYTES = 64 * 1024
 PositiveTopK = Annotated[int, Query(ge=1, le=MAX_API_RESULTS)]
 UnitInterval = Annotated[float, Query(ge=0.0, le=1.0)]
 SimilarityMethod = Literal["als", "content", "hybrid"]
@@ -101,6 +103,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Music Recommendation System API", lifespan=lifespan)
+app.add_middleware(
+    RequestSafetyMiddleware,
+    max_body_bytes=MAX_REQUEST_BODY_BYTES,
+)
 
 
 def get_service() -> RecommenderService:

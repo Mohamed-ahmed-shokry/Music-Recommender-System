@@ -13,6 +13,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   release verification.
 - Corruption tests for artifact mappings, numeric model data, content
   alignment, artist statistics, provenance, and training configuration.
+- API request correlation and processing-time response headers.
 
 ### Changed
 
@@ -25,6 +26,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   recorded training settings.
 - CLI training and evaluation workflows now report validation and missing-file
   failures without exposing internal tracebacks.
+- API request bodies are rejected above 64 KiB before unbounded parsing.
 
 ## [0.4.0] - 2026-07-24
 

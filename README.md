@@ -405,7 +405,10 @@ curl -X POST http://127.0.0.1:8000/recommend/session \
 
 Catalog discovery accepts a free-text `query`, exact `genre`, `mood_tag`,
 `country`, and `era` filters, plus `offset` and `limit` pagination. API result
-counts are capped at 100 items per request.
+counts are capped at 100 items per request. Request bodies are limited to 64
+KiB before JSON parsing to bound server resource use. Every API response
+includes an `X-Request-ID` correlation header and an `X-Process-Time` header in
+seconds; a valid client-supplied `X-Request-ID` is echoed back.
 
 ## Dashboard
 
