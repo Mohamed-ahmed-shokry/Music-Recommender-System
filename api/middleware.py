@@ -40,8 +40,13 @@ class RequestSafetyMiddleware:
         request_id = _request_id(headers.get("x-request-id"))
         started_at = perf_counter()
 
+        received_size = 0
+        response_started = False
+
         async def send_with_context(message: Message) -> None:
+            nonlocal response_started
             if message["type"] == "http.response.start":
+                response_started = True
                 response_headers = MutableHeaders(scope=message)
                 response_headers["x-request-id"] = request_id
                 response_headers["x-process-time"] = (
@@ -75,8 +80,6 @@ class RequestSafetyMiddleware:
                 await self._reject_too_large(scope, receive, send_with_context)
                 return
 
-        received_size = 0
-
         async def receive_with_limit() -> Message:
             nonlocal received_size
             message = await receive()
@@ -89,6 +92,8 @@ class RequestSafetyMiddleware:
         try:
             await self.app(scope, receive_with_limit, send_with_context)
         except _RequestBodyTooLarge:
+            if response_started:
+                return
             await self._reject_too_large(scope, receive, send_with_context)
 
     async def _reject_too_large(
