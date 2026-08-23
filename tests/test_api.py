@@ -201,6 +201,27 @@ def test_health_route_uses_loaded_service() -> None:
     assert response.json()["artifact_version"] == "4.0"
 
 
+def test_openapi_document_exposes_project_metadata() -> None:
+    with TestClient(api_main.app) as client:
+        response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    document = response.json()
+    assert document["info"]["version"] == api_main.__version__
+    assert document["info"]["license"]["name"] == "MIT"
+    assert "Hybrid ALS" in document["info"]["description"]
+
+
+def test_cors_exposes_request_context_headers() -> None:
+    with TestClient(api_main.app) as client:
+        response = client.get("/", headers={"Origin": "http://localhost:3000"})
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
+    assert "X-Request-ID" in response.headers["access-control-expose-headers"]
+    assert "X-Process-Time" in response.headers["access-control-expose-headers"]
+
+
 def test_responses_echo_valid_request_id_and_report_process_time() -> None:
     with TestClient(api_main.app) as client:
         response = client.get("/", headers={"X-Request-ID": "client-request_123"})

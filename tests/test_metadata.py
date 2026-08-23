@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from music_recommender.metadata import (
+    load_artist_metadata,
     validate_artist_metadata,
     validate_metadata_coverage,
 )
@@ -22,6 +23,25 @@ def valid_metadata_df() -> pd.DataFrame:
 
 def test_valid_metadata_passes_validation() -> None:
     validate_artist_metadata(valid_metadata_df())
+
+
+def test_metadata_loader_preserves_text_identifiers(tmp_path) -> None:
+    path = tmp_path / "metadata.csv"
+    pd.DataFrame(
+        {
+            "artist_id": ["001"],
+            "artist_name": [" Artist One "],
+            "genres": ["pop"],
+            "mood_tags": ["bright"],
+            "country": ["Canada"],
+            "era": ["2020s"],
+        }
+    ).to_csv(path, index=False)
+
+    loaded = load_artist_metadata(path)
+
+    assert loaded.loc[0, "artist_id"] == "001"
+    assert loaded.loc[0, "artist_name"] == " Artist One "
 
 
 def test_missing_metadata_column_raises_value_error() -> None:
