@@ -1,5 +1,6 @@
 """Shared utility helpers for the music recommender package."""
 
+import contextlib
 import os
 import tempfile
 from pathlib import Path
@@ -22,11 +23,8 @@ def atomic_joblib_dump(value: Any, path: str | Path) -> None:
     try:
         joblib.dump(value, temporary_path)
         # Ensure data is flushed to disk before atomic replacement.
-        with temporary_path.open("rb") as handle:
-            try:
-                os.fsync(handle.fileno())
-            except OSError:
-                pass
+        with temporary_path.open("rb") as handle, contextlib.suppress(OSError):
+            os.fsync(handle.fileno())
         temporary_path.replace(target)
         # Sync parent directory to guarantee rename durability on POSIX.
         dir_fd: int | None = None

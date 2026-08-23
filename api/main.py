@@ -111,7 +111,10 @@ app = FastAPI(
         "ranking, cold-start onboarding, and session-aware mixes."
     ),
     version=__version__,
-    contact={"name": "Music Recommender System", "url": "https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System"},
+    contact={
+        "name": "Music Recommender System",
+        "url": "https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System",
+    },
     license_info={"name": "MIT", "url": "https://opensource.org/licenses/MIT"},
     lifespan=lifespan,
 )

@@ -51,10 +51,7 @@ def apply_popularity_penalty(
             continue
 
         rank = int(stats["popularity_rank"])
-        if max_rank == 1:
-            popularity_weight = 1.0
-        else:
-            popularity_weight = 1 - ((rank - 1) / (max_rank - 1))
+        popularity_weight = 1.0 if max_rank == 1 else 1 - (rank - 1) / (max_rank - 1)
         adjusted_scores[artist_index] -= (
             popularity_penalty * popularity_weight * score_scale
         )
@@ -77,7 +74,7 @@ def rerank_with_diversity(
     score_min = float(candidate_scores.min())
     score_range = float(candidate_scores.max() - score_min)
     if score_range == 0:
-        normalized_scores = {artist_index: 1.0 for artist_index in candidate_indices}
+        normalized_scores = dict.fromkeys(candidate_indices, 1.0)
     else:
         normalized_scores = {
             artist_index: float((scores[artist_index] - score_min) / score_range)

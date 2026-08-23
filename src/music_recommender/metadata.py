@@ -34,7 +34,7 @@ def load_artist_metadata(path: str | Path) -> pd.DataFrame:
     """
     return pd.read_csv(
         path,
-        dtype={column: "string" for column in METADATA_TEXT_COLUMNS},
+        dtype=dict.fromkeys(METADATA_TEXT_COLUMNS, "string"),
         keep_default_na=True,
     )
 

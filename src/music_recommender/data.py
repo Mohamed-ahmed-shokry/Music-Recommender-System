@@ -13,7 +13,7 @@ def load_interactions(path: str | Path) -> pd.DataFrame:
     """Load interaction data from a CSV file."""
     return pd.read_csv(
         path,
-        dtype={column: "string" for column in TEXT_COLUMNS},
+        dtype=dict.fromkeys(TEXT_COLUMNS, "string"),
     )
 
 

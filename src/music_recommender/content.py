@@ -395,10 +395,7 @@ def _weighted_profile(matrix: csr_matrix, weights: np.ndarray) -> csr_matrix:
 
 
 def _average_profile(rows: list[csr_matrix]) -> csr_matrix:
-    if len(rows) == 1:
-        matrix = rows[0]
-    else:
-        matrix = vstack(rows)
+    matrix = rows[0] if len(rows) == 1 else vstack(rows)
     return csr_matrix(matrix.mean(axis=0))
 
 

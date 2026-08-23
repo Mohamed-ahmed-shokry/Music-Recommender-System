@@ -247,7 +247,7 @@ def train_test_split_by_user(
             continue
 
         shuffled_indices = rng.permutation(indices)
-        test_count = max(1, int(round(len(indices) * test_ratio)))
+        test_count = max(1, round(len(indices) * test_ratio))
         test_count = min(test_count, len(indices) - 1)
 
         test_indices.extend(shuffled_indices[:test_count])

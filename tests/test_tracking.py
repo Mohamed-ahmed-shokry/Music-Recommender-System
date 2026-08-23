@@ -180,13 +180,15 @@ def test_tracking_run_marks_failed_body(monkeypatch) -> None:
     fake_mlflow = FakeMlflow()
     monkeypatch.setattr(tracking, "_load_mlflow", lambda: fake_mlflow)
 
-    with pytest.raises(RuntimeError, match="training failed"):
-        with tracking_run(
+    with (
+        pytest.raises(RuntimeError, match="training failed"),
+        tracking_run(
             enabled=True,
             tracking_uri="https://mlflow.example",
             experiment_name="training",
-        ):
-            raise RuntimeError("training failed")
+        ),
+    ):
+        raise RuntimeError("training failed")
 
     assert fake_mlflow.active_run.exit_args is not None
     assert fake_mlflow.active_run.exit_args[0] is RuntimeError

@@ -52,7 +52,7 @@ def create_dataset_fingerprint(
 
     return {
         "path": str(path),
-        "row_count": int(len(df)),
+        "row_count": len(df),
         "sha256": hashlib.sha256(content).hexdigest(),
     }
 

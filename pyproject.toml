@@ -75,7 +75,7 @@ target-version = "py311"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
+select = ["E", "F", "I", "B", "UP", "SIM", "C4"]
 
 [tool.mypy]
 files = ["src", "api"]
