@@ -1,5 +1,7 @@
 """Artist metadata loading and validation."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import pandas as pd
@@ -13,10 +15,28 @@ METADATA_COLUMNS = (
     "era",
 )
 
+METADATA_TEXT_COLUMNS = (
+    "artist_id",
+    "artist_name",
+    "genres",
+    "mood_tags",
+    "country",
+    "era",
+)
+
 
 def load_artist_metadata(path: str | Path) -> pd.DataFrame:
-    """Load artist metadata from a CSV file."""
-    return pd.read_csv(path)
+    """Load artist metadata from a CSV file.
+
+    Identifiers and descriptive fields are loaded as text so values like
+    ``001`` keep leading zeroes and whitespace handling matches the
+    interaction loader.
+    """
+    return pd.read_csv(
+        path,
+        dtype={column: "string" for column in METADATA_TEXT_COLUMNS},
+        keep_default_na=True,
+    )
 
 
 def validate_artist_metadata(df: pd.DataFrame) -> None:
