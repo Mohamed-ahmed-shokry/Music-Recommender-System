@@ -58,6 +58,7 @@ tracking = [
 dev = [
     "httpx2>=2.7.0",
     "mypy>=2.3.0",
+    "pre-commit>=4.3.0",
     "pytest>=9.0.3",
     "pytest-cov>=7.0.0",
     "ruff>=0.15.12",
