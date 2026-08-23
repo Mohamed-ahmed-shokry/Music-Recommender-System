@@ -225,7 +225,7 @@ def artifact_info() -> None:
     """Print details about the saved recommender artifact."""
     try:
         service = RecommenderService.from_artifacts()
-    except FileNotFoundError as error:
+    except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
@@ -567,22 +567,27 @@ def _print_metric_row(name: str, metrics: dict[str, float], top_k: int) -> None:
 @app.command()
 def demo(use_gpu: bool = DEFAULT_USE_GPU) -> None:
     """Train when needed and show example recommendations."""
-    if not ARTIFACT_BUNDLE_PATH.exists():
-        typer.echo("No saved model found. Training on the sample dataset first.")
-        train_and_save_model(use_gpu=use_gpu)
+    try:
+        if not ARTIFACT_BUNDLE_PATH.exists():
+            typer.echo("No saved model found. Training on the sample dataset first.")
+            train_and_save_model(use_gpu=use_gpu)
 
-    service = RecommenderService.from_artifacts()
+        service = RecommenderService.from_artifacts()
+        response = service.recommend_user(user_id="user_1", top_k=5, explain=True)
+        similar_response = service.content_similar_artists(
+            artist_id="artist_2",
+            top_k=5,
+            explain=True,
+        )
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
     typer.echo("Recommendations for user_1:")
-    response = service.recommend_user(user_id="user_1", top_k=5, explain=True)
     typer.echo(f"Strategy: {response['strategy']}")
     typer.echo(format_recommendations(response["recommendations"]))
     typer.echo("")
     typer.echo("Content-similar artists for artist_2:")
-    similar_response = service.content_similar_artists(
-        artist_id="artist_2",
-        top_k=5,
-        explain=True,
-    )
     typer.echo(format_recommendations(similar_response["similar_artists"]))
 
 
