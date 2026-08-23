@@ -495,10 +495,15 @@ class RecommenderService:
             for index in ranked_indices
             if index_to_artist_id[int(index)] not in excluded
         ]
+        diversity_factors = (
+            self.artifact.content_artifacts.content_matrix.toarray()
+            if diversity > 0 and len(candidate_indices) > 1
+            else np.empty((0, 0))
+        )
         final_indices = rerank_with_diversity(
             candidate_indices=candidate_indices,
             scores=adjusted_scores,
-            artist_factors=self.artifact.content_artifacts.content_matrix.toarray(),
+            artist_factors=diversity_factors,
             top_k=top_k,
             diversity=diversity,
         )
