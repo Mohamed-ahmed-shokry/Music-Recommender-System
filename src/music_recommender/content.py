@@ -125,21 +125,23 @@ def user_content_scores(
         raise ValueError(f"Unknown user_id: {user_id}")
 
     user_index = user_id_to_index[user_id]
-    listened_indices = user_item_matrix[user_index].indices
+    user_row = user_item_matrix[user_index]
+    listened_indices = user_row.indices
     listened_artist_ids = [index_to_artist_id[int(index)] for index in listened_indices]
-    content_indices = [
-        content_artifacts.artist_id_to_content_index[artist_id]
-        for artist_id in listened_artist_ids
-        if artist_id in content_artifacts.artist_id_to_content_index
-    ]
+    content_indices: list[int] = []
+    weights: list[float] = []
+    for index, play_count in zip(listened_indices, user_row.data, strict=True):
+        artist_id = index_to_artist_id[int(index)]
+        content_index = content_artifacts.artist_id_to_content_index.get(artist_id)
+        if content_index is None:
+            continue
+        content_indices.append(content_index)
+        weights.append(float(play_count))
     if not content_indices:
         return np.zeros(content_artifacts.content_matrix.shape[0]), listened_artist_ids
 
-    weights = user_item_matrix[user_index].data.astype(float)
-    if len(weights) != len(content_indices):
-        weights = np.ones(len(content_indices))
     profile = _weighted_profile(
-        content_artifacts.content_matrix[content_indices], weights
+        content_artifacts.content_matrix[content_indices], np.asarray(weights)
     )
     scores = cosine_similarity(profile, content_artifacts.content_matrix).ravel()
     return scores, listened_artist_ids
