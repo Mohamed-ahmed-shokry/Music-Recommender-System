@@ -14,6 +14,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Corruption tests for artifact mappings, numeric model data, content
   alignment, artist statistics, provenance, and training configuration.
 - API request correlation and processing-time response headers.
+- OpenAPI metadata, CORS support with exposed request headers, and enriched
+  FastAPI documentation.
+- Makefile, `.editorconfig`, `.pre-commit-config.yaml`, Dependabot, and
+  GitHub issue/PR templates for smoother contributor workflows.
+- `CONTRIBUTING.md` and `SECURITY.md`.
 
 ### Changed
 
@@ -25,8 +30,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   content metadata alignment, popularity statistics, dataset fingerprints, and
   recorded training settings.
 - CLI training and evaluation workflows now report validation and missing-file
-  failures without exposing internal tracebacks.
+  failures without exposing internal tracebacks and route errors to stderr.
 - API request bodies are rejected above 64 KiB before unbounded parsing.
+- Ruff lint now includes `SIM` and `C4` simplifications; `.dockerignore` and
+  `.gitignore` aligned and compose services include healthchecks and resource
+  limits.
+
+### Fixed
+
+- Metadata CSV loader now preserves text types for whitespace handling parity
+  with interaction loading.
+- `MUSIC_RECOMMENDER_ROOT` and MLflow tracking URI resolution now strips
+  surrounding whitespace.
+- Atomic artifact writes now fsync file and parent directory for durability.
 
 ## [0.4.0] - 2026-07-24
 
