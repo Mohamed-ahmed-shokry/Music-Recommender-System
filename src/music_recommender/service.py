@@ -20,6 +20,9 @@ from music_recommender.content import (
     user_content_scores,
     validate_content_weight,
 )
+from music_recommender.content import (
+    listened_artist_ids as content_listened_artist_ids,
+)
 from music_recommender.ranking import (
     apply_popularity_penalty,
     rerank_with_diversity,
@@ -229,11 +232,10 @@ class RecommenderService:
                     content_scores=session_scores,
                     content_weight=content_weight,
                 )
-                _, listened_artist_ids = user_content_scores(
+                listened_artist_ids = content_listened_artist_ids(
                     user_id=user_id,
                     user_item_matrix=self.artifact.user_item_matrix,
                     mappings=self.artifact.mappings,
-                    content_artifacts=self.artifact.content_artifacts,
                 )
                 reference_artist_ids = list(
                     dict.fromkeys(selected_artist_ids + listened_artist_ids)

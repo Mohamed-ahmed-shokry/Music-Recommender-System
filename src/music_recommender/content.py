@@ -112,6 +112,23 @@ def content_similar_artists(
     return recommendations
 
 
+def listened_artist_ids(
+    user_id: str,
+    user_item_matrix: csr_matrix,
+    mappings: Mappings,
+) -> list[str]:
+    """Return the artist IDs a user listened to from the training matrix."""
+    user_id_to_index = mappings["user_id_to_index"]
+    index_to_artist_id = mappings["index_to_artist_id"]
+    if user_id not in user_id_to_index:
+        raise ValueError(f"Unknown user_id: {user_id}")
+    user_index = user_id_to_index[user_id]
+    return [
+        index_to_artist_id[int(index)]
+        for index in user_item_matrix[user_index].indices
+    ]
+
+
 def user_content_scores(
     user_id: str,
     user_item_matrix: csr_matrix,
