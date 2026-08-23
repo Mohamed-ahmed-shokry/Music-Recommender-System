@@ -40,7 +40,11 @@ def flatten_metrics(
 
 def resolve_tracking_uri(tracking_uri: str | None = None) -> str:
     """Resolve an explicit remote MLflow tracking URI."""
-    resolved_uri = tracking_uri or os.getenv(MLFLOW_TRACKING_URI_ENV_VAR)
+    candidate = tracking_uri.strip() if isinstance(tracking_uri, str) else tracking_uri
+    env_uri = os.getenv(MLFLOW_TRACKING_URI_ENV_VAR)
+    if isinstance(env_uri, str):
+        env_uri = env_uri.strip()
+    resolved_uri = candidate or env_uri
     if not resolved_uri:
         raise ExperimentTrackingError(
             "Experiment tracking requires --tracking-uri or the "
