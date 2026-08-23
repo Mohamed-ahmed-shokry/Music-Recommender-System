@@ -93,6 +93,22 @@ def test_known_user_returns_hybrid_strategy(tmp_path: Path) -> None:
     assert "reasons" in response["recommendations"][0]
 
 
+def test_recommendations_without_diversity_do_not_densify_content_matrix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = create_service(tmp_path)
+
+    def fail_if_densified(*args, **kwargs) -> None:
+        raise AssertionError("content matrix should remain sparse")
+
+    monkeypatch.setattr("scipy.sparse.csr_matrix.toarray", fail_if_densified)
+
+    response = service.recommend_user("user_1", top_k=1)
+
+    assert response["recommendations"]
+
+
 def test_unknown_user_returns_popular_fallback(tmp_path: Path) -> None:
     service = create_service(tmp_path)
 
