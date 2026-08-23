@@ -5,9 +5,11 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from api.middleware import RequestSafetyMiddleware
+from music_recommender import __version__
 from music_recommender.config import DEFAULT_CONTENT_WEIGHT
 from music_recommender.service import RecommenderService
 
@@ -102,7 +104,24 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="Music Recommendation System API", lifespan=lifespan)
+app = FastAPI(
+    title="Music Recommendation System API",
+    description=(
+        "Hybrid ALS + content-based artist recommendations with explainable "
+        "ranking, cold-start onboarding, and session-aware mixes."
+    ),
+    version=__version__,
+    contact={"name": "Music Recommender System", "url": "https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System"},
+    license_info={"name": "MIT", "url": "https://opensource.org/licenses/MIT"},
+    lifespan=lifespan,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-Request-ID", "X-Process-Time"],
+)
 app.add_middleware(
     RequestSafetyMiddleware,
     max_body_bytes=MAX_REQUEST_BODY_BYTES,
