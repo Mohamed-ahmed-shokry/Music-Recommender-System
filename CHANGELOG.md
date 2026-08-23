@@ -19,6 +19,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Makefile, `.editorconfig`, `.pre-commit-config.yaml`, Dependabot, and
   GitHub issue/PR templates for smoother contributor workflows.
 - `CONTRIBUTING.md` and `SECURITY.md`.
+- Locked pre-commit tooling in the development dependency group.
+- Regression coverage for metadata text preservation, API metadata/CORS headers,
+  sparse recommendation serving, and path validation.
 
 ### Changed
 
@@ -35,6 +38,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Ruff lint now includes `SIM` and `C4` simplifications; `.dockerignore` and
   `.gitignore` aligned and compose services include healthchecks and resource
   limits.
+- CI validates `compose.yaml` before building containers.
+- Pre-commit uses the project’s locked environment for strict mypy checks.
 
 ### Fixed
 
@@ -43,6 +48,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `MUSIC_RECOMMENDER_ROOT` and MLflow tracking URI resolution now strips
   surrounding whitespace.
 - Atomic artifact writes now fsync file and parent directory for durability.
+- Serving no longer densifies content vectors unless diversity reranking is
+  requested.
+- API user and artist path identifiers now reject blank or oversized values.
 
 ## [0.4.0] - 2026-07-24
 
