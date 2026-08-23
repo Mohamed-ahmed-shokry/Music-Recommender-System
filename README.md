@@ -760,6 +760,18 @@ mood fields, and interaction artists that are not covered by metadata.
 
 ## Development
 
+Use the Makefile for common workflows:
+
+```bash
+make install   # uv sync with dashboard + tracking + dev
+make ci        # lint + typecheck + tests
+make train     # train on CPU
+make api       # run FastAPI with reload
+make dashboard # run Streamlit
+```
+
+Or run the underlying commands directly:
+
 Run tests:
 
 ```bash
@@ -789,6 +801,15 @@ Check formatting:
 ```bash
 uv run ruff format --check .
 ```
+
+Enable pre-commit hooks:
+
+```bash
+uv run pre-commit install
+uv run pre-commit run --all-files
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) for workflow and disclosure details.
 
 Every push to `main` and every pull request runs the same locked dashboard,
 tracking, and development install, formatting, lint, test, and package-build
