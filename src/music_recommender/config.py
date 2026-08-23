@@ -9,8 +9,8 @@ PROJECT_ROOT_ENV_VAR = "MUSIC_RECOMMENDER_ROOT"
 def resolve_project_root() -> Path:
     """Resolve the runtime root for data and model artifacts."""
     configured_root = os.getenv(PROJECT_ROOT_ENV_VAR)
-    if configured_root:
-        return Path(configured_root).expanduser().resolve()
+    if configured_root and configured_root.strip():
+        return Path(configured_root.strip()).expanduser().resolve()
     return Path(__file__).resolve().parents[2]
 
 
