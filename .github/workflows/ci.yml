@@ -60,6 +60,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
       - name: Build image
         run: docker build --tag music-recommender-api:ci .
 
