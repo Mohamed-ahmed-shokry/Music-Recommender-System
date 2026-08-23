@@ -103,7 +103,7 @@ def prepare_metadata(
         interactions_df = load_and_validate_interactions(data_path)
         metadata_df = load_and_validate_artist_metadata(metadata_path, interactions_df)
     except ValueError as error:
-        typer.echo(f"Error: {error}")
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
     typer.echo("Metadata validated successfully.")
@@ -200,7 +200,7 @@ def train(
                     artifact_path="serving",
                 )
     except (ExperimentTrackingError, FileNotFoundError, ValueError) as error:
-        typer.echo(f"Error: {error}")
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
     typer.echo("Model trained successfully.")
@@ -226,7 +226,7 @@ def artifact_info() -> None:
     try:
         service = RecommenderService.from_artifacts()
     except FileNotFoundError as error:
-        typer.echo(f"Error: {error}")
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
     metadata = service.metadata()
@@ -282,7 +282,7 @@ def recommend_user(
             explain=explain,
         )
     except (FileNotFoundError, ValueError) as error:
-        typer.echo(f"Error: {error}")
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
     typer.echo(f"Recommendations for {user_id}:")
@@ -320,7 +320,7 @@ def recommend_profile(
             explain=explain,
         )
     except (FileNotFoundError, ValueError) as error:
-        typer.echo(f"Error: {error}")
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
     typer.echo("Profile recommendations:")
@@ -378,7 +378,7 @@ def recommend_session(
             explain=explain,
         )
     except (FileNotFoundError, ValueError) as error:
-        typer.echo(f"Error: {error}")
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
     typer.echo("Session recommendations:")
@@ -395,7 +395,7 @@ def popular_artists(top_k: int = DEFAULT_TOP_K) -> None:
         service = RecommenderService.from_artifacts()
         response = service.popular_artists(top_k=top_k)
     except (FileNotFoundError, ValueError) as error:
-        typer.echo(f"Error: {error}")
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
     typer.echo("Popular artists:")
@@ -424,7 +424,7 @@ def similar_artists(
             explain=explain,
         )
     except (FileNotFoundError, ValueError) as error:
-        typer.echo(f"Error: {error}")
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
     typer.echo(f"Artists similar to {artist_id}:")
@@ -449,7 +449,7 @@ def content_similar_artists(
             explain=explain,
         )
     except (FileNotFoundError, ValueError) as error:
-        typer.echo(f"Error: {error}")
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
     typer.echo(f"Content-similar artists for {artist_id}:")
@@ -528,7 +528,7 @@ def evaluate(
                 }
             )
     except (ExperimentTrackingError, FileNotFoundError, ValueError) as error:
-        typer.echo(f"Error: {error}")
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
     if compare_all:
