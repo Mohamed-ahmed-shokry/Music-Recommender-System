@@ -196,7 +196,7 @@ def browse_artists(
 
 @app.get("/recommend/user/{user_id}")
 def recommend_user(
-    user_id: str,
+    user_id: RequestText,
     top_k: PositiveTopK = 10,
     include_listened: bool = False,
     diversity: UnitInterval = 0.0,
@@ -257,7 +257,7 @@ def recommend_session(request: SessionRecommendationRequest) -> dict[str, object
 
 @app.get("/similar-artists/{artist_id}")
 def similar_artists(
-    artist_id: str,
+    artist_id: RequestText,
     top_k: PositiveTopK = 10,
     method: SimilarityMethod = "als",
     content_weight: UnitInterval = DEFAULT_CONTENT_WEIGHT,
@@ -278,7 +278,7 @@ def similar_artists(
 
 @app.get("/content-similar-artists/{artist_id}")
 def content_similar_artists(
-    artist_id: str,
+    artist_id: RequestText,
     top_k: PositiveTopK = 10,
     explain: bool = False,
 ) -> dict[str, object]:
