@@ -222,6 +222,17 @@ def test_cors_exposes_request_context_headers() -> None:
     assert "X-Process-Time" in response.headers["access-control-expose-headers"]
 
 
+def test_path_identifiers_reject_oversized_values() -> None:
+    oversized_id = "a" * 101
+
+    with TestClient(api_main.app) as client:
+        user_response = client.get(f"/recommend/user/{oversized_id}")
+        artist_response = client.get(f"/similar-artists/{oversized_id}")
+
+    assert user_response.status_code == 422
+    assert artist_response.status_code == 422
+
+
 def test_responses_echo_valid_request_id_and_report_process_time() -> None:
     with TestClient(api_main.app) as client:
         response = client.get("/", headers={"X-Request-ID": "client-request_123"})
