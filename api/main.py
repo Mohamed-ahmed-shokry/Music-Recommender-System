@@ -1,5 +1,6 @@
 """FastAPI app for serving music recommendations."""
 
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Literal
@@ -12,6 +13,9 @@ from api.middleware import RequestSafetyMiddleware
 from music_recommender import __version__
 from music_recommender.config import DEFAULT_CONTENT_WEIGHT
 from music_recommender.service import RecommenderService
+
+_CORS_ORIGINS_ENV = "CORS_ORIGINS"
+_CORS_ORIGINS_RAW = os.getenv(_CORS_ORIGINS_ENV, "*")
 
 service: RecommenderService | None = None
 service_load_error: str | None = None
@@ -118,9 +122,12 @@ app = FastAPI(
     license_info={"name": "MIT", "url": "https://opensource.org/licenses/MIT"},
     lifespan=lifespan,
 )
+_cors_origins = [
+    origin.strip() for origin in _CORS_ORIGINS_RAW.split(",") if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Request-ID", "X-Process-Time"],
