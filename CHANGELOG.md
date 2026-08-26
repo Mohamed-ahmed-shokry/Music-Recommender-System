@@ -22,6 +22,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Locked pre-commit tooling in the development dependency group.
 - Regression coverage for metadata text preservation, API metadata/CORS headers,
   sparse recommendation serving, and path validation.
+- `py.typed` marker for downstream mypy support.
+- CORS origins are now configurable via the `CORS_ORIGINS` environment variable.
+- `load_model` and `load_mappings` now raise actionable errors on corrupt files.
+- Dataset fingerprinting gracefully handles unreadable source files.
+- Shared `is_finite_number` utility and `_weighted_profile` empty-array guard.
 
 ### Changed
 
@@ -39,7 +44,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `.gitignore` aligned and compose services include healthchecks and resource
   limits.
 - CI validates `compose.yaml` before building containers.
-- Pre-commit uses the project’s locked environment for strict mypy checks.
+- Pre-commit uses the project's locked environment for strict mypy checks.
+- Consistent `from __future__ import annotations` across all source modules.
+- Dockerfiles declare explicit `STOPSIGNAL SIGTERM` for graceful shutdown.
 
 ### Fixed
 
