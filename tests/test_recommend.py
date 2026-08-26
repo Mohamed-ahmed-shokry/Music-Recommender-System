@@ -5,6 +5,7 @@ from music_recommender.model import train_als_model
 from music_recommender.preprocessing import build_user_item_matrix, create_id_mappings
 from music_recommender.recommend import (
     get_similar_artists,
+    load_recommender_artifacts,
     recommend_artists_for_user,
 )
 
@@ -115,4 +116,22 @@ def test_unknown_artist_raises_value_error() -> None:
             artist_id="missing_artist",
             mappings=mappings,
             top_k=1,
+        )
+
+
+def test_load_recommender_artifacts_raises_when_model_missing(tmp_path) -> None:
+    with pytest.raises(FileNotFoundError, match="Model artifact not found"):
+        load_recommender_artifacts(model_path=tmp_path / "missing_model.joblib")
+
+
+def test_load_recommender_artifacts_raises_when_mappings_missing(tmp_path) -> None:
+    import joblib
+
+    model_path = tmp_path / "model.joblib"
+    joblib.dump(object(), model_path)
+
+    with pytest.raises(FileNotFoundError, match="Mappings artifact not found"):
+        load_recommender_artifacts(
+            model_path=model_path,
+            mappings_path=tmp_path / "missing_mappings.joblib",
         )
