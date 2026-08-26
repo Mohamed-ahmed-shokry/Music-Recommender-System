@@ -15,15 +15,6 @@ METADATA_COLUMNS = (
     "era",
 )
 
-METADATA_TEXT_COLUMNS = (
-    "artist_id",
-    "artist_name",
-    "genres",
-    "mood_tags",
-    "country",
-    "era",
-)
-
 
 def load_artist_metadata(path: str | Path) -> pd.DataFrame:
     """Load artist metadata from a CSV file.
@@ -34,7 +25,7 @@ def load_artist_metadata(path: str | Path) -> pd.DataFrame:
     """
     return pd.read_csv(
         path,
-        dtype=dict.fromkeys(METADATA_TEXT_COLUMNS, "string"),
+        dtype=dict.fromkeys(METADATA_COLUMNS, "string"),
         keep_default_na=True,
     )
 
