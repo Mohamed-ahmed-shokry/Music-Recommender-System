@@ -1,5 +1,7 @@
 """Shared utility helpers for the music recommender package."""
 
+from __future__ import annotations
+
 import contextlib
 import os
 import tempfile

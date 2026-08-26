@@ -1,5 +1,7 @@
 """Evaluation helpers for recommendation quality."""
 
+from __future__ import annotations
+
 import math
 from collections.abc import Collection, Mapping, Sequence
 from typing import Any, cast

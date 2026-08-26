@@ -124,8 +124,7 @@ def listened_artist_ids(
         raise ValueError(f"Unknown user_id: {user_id}")
     user_index = user_id_to_index[user_id]
     return [
-        index_to_artist_id[int(index)]
-        for index in user_item_matrix[user_index].indices
+        index_to_artist_id[int(index)] for index in user_item_matrix[user_index].indices
     ]
 
 
