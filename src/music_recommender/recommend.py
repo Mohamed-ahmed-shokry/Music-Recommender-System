@@ -56,9 +56,12 @@ def recommend_artists_for_user(
         raise ValueError(f"Unknown user_id: {user_id}")
 
     user_index = user_id_to_index[user_id]
-    user_factors = model.item_factors
-    artist_factors = model.user_factors
-    scores = artist_factors @ user_factors[user_index]
+    # implicit library naming is inverted after transposing the user-item
+    # matrix: item_factors holds user latent vectors and user_factors holds
+    # artist (item) latent vectors.
+    user_latent = model.item_factors
+    artist_latent = model.user_factors
+    scores = artist_latent @ user_latent[user_index]
     adjusted_scores = apply_popularity_penalty(
         scores=scores,
         index_to_artist_id=index_to_artist_id,
@@ -76,7 +79,7 @@ def recommend_artists_for_user(
     final_artist_indices = rerank_with_diversity(
         candidate_indices=candidate_indices,
         scores=adjusted_scores,
-        artist_factors=artist_factors,
+        artist_factors=artist_latent,
         top_k=top_k,
         diversity=diversity,
     )
@@ -113,16 +116,17 @@ def get_similar_artists(
         raise ValueError(f"Unknown artist_id: {artist_id}")
 
     artist_index = artist_id_to_index[artist_id]
-    artist_factors = model.user_factors
-    query_vector = artist_factors[artist_index]
+    # See recommend_artists_for_user for naming rationale.
+    artist_latent = model.user_factors
+    query_vector = artist_latent[artist_index]
     query_norm = np.linalg.norm(query_vector)
     if query_norm == 0:
         return []
 
-    norms = np.linalg.norm(artist_factors, axis=1)
+    norms = np.linalg.norm(artist_latent, axis=1)
     denominator = norms * query_norm
     scores = np.divide(
-        artist_factors @ query_vector,
+        artist_latent @ query_vector,
         denominator,
         out=np.zeros_like(norms),
         where=denominator != 0,

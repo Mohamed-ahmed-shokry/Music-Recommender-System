@@ -441,9 +441,12 @@ class RecommenderService:
 
     def _collaborative_scores_for_user(self, user_id: str) -> np.ndarray:
         user_index = self.artifact.mappings["user_id_to_index"][user_id]
-        user_factors = self.artifact.model.item_factors
-        artist_factors = self.artifact.model.user_factors
-        return cast(np.ndarray, artist_factors @ user_factors[user_index])
+        # implicit library naming is inverted after transposing the user-item
+        # matrix: item_factors holds user latent vectors and user_factors holds
+        # artist (item) latent vectors.
+        user_latent = self.artifact.model.item_factors
+        artist_latent = self.artifact.model.user_factors
+        return cast(np.ndarray, artist_latent @ user_latent[user_index])
 
     def _collaborative_similarity_scores(self, artist_id: str) -> np.ndarray:
         artist_id_to_index = self.artifact.mappings["artist_id_to_index"]
@@ -451,18 +454,19 @@ class RecommenderService:
             raise ValueError(f"Unknown artist_id: {artist_id}")
 
         artist_index = artist_id_to_index[artist_id]
-        artist_factors = self.artifact.model.user_factors
-        query_vector = artist_factors[artist_index]
+        # See _collaborative_scores_for_user for naming rationale.
+        artist_latent = self.artifact.model.user_factors
+        query_vector = artist_latent[artist_index]
         query_norm = np.linalg.norm(query_vector)
         if query_norm == 0:
-            return np.zeros(artist_factors.shape[0])
+            return np.zeros(artist_latent.shape[0])
 
-        norms = np.linalg.norm(artist_factors, axis=1)
+        norms = np.linalg.norm(artist_latent, axis=1)
         denominator = norms * query_norm
         return cast(
             np.ndarray,
             np.divide(
-                artist_factors @ query_vector,
+                artist_latent @ query_vector,
                 denominator,
                 out=np.zeros_like(norms),
                 where=denominator != 0,
