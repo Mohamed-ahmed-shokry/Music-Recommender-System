@@ -49,7 +49,7 @@ def build_content_artifacts(
     metadata_by_artist = metadata_df.set_index("artist_id", drop=False)
     ordered_metadata = metadata_by_artist.loc[artist_ids].reset_index(drop=True)
     content_text = ordered_metadata.apply(_metadata_row_to_text, axis=1).tolist()
-    vectorizer = TfidfVectorizer(token_pattern=r"(?u)\b[\w_]+\b", lowercase=False)
+    vectorizer = TfidfVectorizer(token_pattern=r"\b[\w_]+\b", lowercase=False)
     content_matrix = vectorizer.fit_transform(content_text).tocsr()
 
     artist_id_to_content_index = {
