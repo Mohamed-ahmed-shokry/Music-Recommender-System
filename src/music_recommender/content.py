@@ -16,6 +16,11 @@ from music_recommender.ranking import validate_ranking_parameters
 
 MetadataLookup = dict[str, dict[str, Any]]
 
+MAX_PREFERENCE_MATCHES = 4
+MAX_REFERENCE_ARTISTS = 3
+MAX_OVERLAP_TOKENS = 3
+MAX_FALLBACK_GENRES = 2
+
 
 @dataclass
 class ContentArtifacts:
@@ -315,22 +320,24 @@ def build_reasons(
         matches = sorted(artist_tokens & preference_tokens)
         if matches:
             reasons.append(
-                f"Matches your selected preferences: {', '.join(matches[:4])}"
+                f"Matches your selected preferences: "
+                f"{', '.join(matches[:MAX_PREFERENCE_MATCHES])}"
             )
 
     if reference_artist_ids:
-        for reference_artist_id in reference_artist_ids[:3]:
+        for reference_artist_id in reference_artist_ids[:MAX_REFERENCE_ARTISTS]:
             if reference_artist_id not in content_artifacts.metadata_lookup:
                 continue
             reference = content_artifacts.metadata_lookup[reference_artist_id]
             overlap = sorted(artist_tokens & set(reference["token_values"]))
             if overlap:
                 reasons.append(
-                    f"Shares {', '.join(overlap[:3])} with {reference['artist_name']}"
+                    f"Shares {', '.join(overlap[:MAX_OVERLAP_TOKENS])} "
+                    f"with {reference['artist_name']}"
                 )
 
     if not reasons:
-        genres = ", ".join(metadata["genres"][:2])
+        genres = ", ".join(metadata["genres"][:MAX_FALLBACK_GENRES])
         if genres:
             reasons.append(f"Recommended from content profile: {genres}")
 
