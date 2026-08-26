@@ -5,8 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from music_recommender.ranking import validate_ranking_parameters
-
-Recommendation = dict[str, str | float | int]
+from music_recommender.recommend import Recommendation
 
 
 def popular_artists(
