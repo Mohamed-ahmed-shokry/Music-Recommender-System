@@ -229,6 +229,20 @@ def test_artist_catalog_searches_and_filters_metadata(tmp_path: Path) -> None:
     ]
 
 
+def test_artist_catalog_all_filters_narrow_results(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    result = service.browse_artists(
+        genre="pop",
+        mood_tag="fun",
+        country="United States",
+        era="2020s",
+    )
+
+    assert result["total"] == 1
+    assert result["artists"][0]["artist_id"] == "artist_2"
+
+
 def test_artist_catalog_prefers_curated_metadata_names(tmp_path: Path) -> None:
     service = create_service(tmp_path)
     service.artifact.artist_stats["artist_1"]["artist_name"] = "Stale interaction name"
