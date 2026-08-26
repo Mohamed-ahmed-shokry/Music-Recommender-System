@@ -103,7 +103,16 @@ def save_mappings(mappings: Mappings, path: str | Path) -> None:
 
 def load_mappings(path: str | Path) -> Mappings:
     """Load ID mappings from disk."""
-    return cast(Mappings, joblib.load(path))
+    mappings_path = Path(path)
+    if not mappings_path.exists():
+        raise FileNotFoundError("Mappings artifact not found. Train the model first.")
+    try:
+        return cast(Mappings, joblib.load(mappings_path))
+    except Exception as error:
+        raise ValueError(
+            f"Mappings artifact at '{mappings_path}' could not be loaded. "
+            "Retrain the model."
+        ) from error
 
 
 def prepare_training_data(

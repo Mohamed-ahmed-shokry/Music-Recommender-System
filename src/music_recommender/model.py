@@ -185,7 +185,16 @@ def save_model(model: AlternatingLeastSquares, path: str | Path) -> None:
 
 def load_model(path: str | Path) -> AlternatingLeastSquares:
     """Load a trained ALS model from disk."""
-    return joblib.load(path)
+    model_path = Path(path)
+    if not model_path.exists():
+        raise FileNotFoundError("Model artifact not found. Train the model first.")
+    try:
+        return joblib.load(model_path)
+    except Exception as error:
+        raise ValueError(
+            f"Model artifact at '{model_path}' could not be loaded. "
+            "Retrain the model."
+        ) from error
 
 
 def train_and_save_model(
