@@ -131,15 +131,15 @@ def get_similar_artists(
 
     similar_artists: list[Recommendation] = []
     for similar_index in ranked_artist_indices:
-        similar_index = int(similar_index)
-        similar_artist_id = index_to_artist_id[int(similar_index)]
+        artist_idx = int(similar_index)
+        similar_artist_id = index_to_artist_id[artist_idx]
         if similar_artist_id == artist_id:
             continue
         similar_artists.append(
             _build_recommendation(
                 artist_id=similar_artist_id,
                 artist_name=artist_id_to_name[similar_artist_id],
-                score=float(scores[similar_index]),
+                score=float(scores[artist_idx]),
                 artist_stats=artist_stats,
             )
         )
