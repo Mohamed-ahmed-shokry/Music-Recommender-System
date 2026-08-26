@@ -18,18 +18,38 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   FastAPI documentation.
 - Makefile, `.editorconfig`, `.pre-commit-config.yaml`, Dependabot, and
   GitHub issue/PR templates for smoother contributor workflows.
+- Type-safe method parameter constrained to `Literal["als", "content", "hybrid"]`.
+- Custom `__repr__` for `RecommenderArtifact` and `ContentArtifacts`.
+- `py.typed` marker for downstream mypy support.
 - `CONTRIBUTING.md` and `SECURITY.md`.
 - Locked pre-commit tooling in the development dependency group.
 - Regression coverage for metadata text preservation, API metadata/CORS headers,
   sparse recommendation serving, and path validation.
-- `py.typed` marker for downstream mypy support.
-- CORS origins are now configurable via the `CORS_ORIGINS` environment variable.
+
+### Fixed
+
+- String dtype loading to preserve leading zeroes in artist identifiers.
+- `MUSIC_RECOMMENDER_ROOT` and MLflow tracking URI resolution now strips
+  surrounding whitespace.
+- `atomic_joblib_dump` fsyncs temporary files and parent directory for durability.
+- Training and evaluation CLI commands report errors without tracebacks.
+- Large request bodies are rejected above 64 KiB before unbounded parsing.
+- API user and artist path identifiers now reject blank or oversized values.
 - `load_model` and `load_mappings` now raise actionable errors on corrupt files.
 - Dataset fingerprinting gracefully handles unreadable source files.
 - Shared `is_finite_number` utility and `_weighted_profile` empty-array guard.
+- `zip()` calls in evaluation now use `strict=True` to catch length mismatches.
+- Eliminated loop variable shadowing in `get_similar_artists`.
 
 ### Changed
 
+- CORS origins now configurable via `CORS_ORIGINS` environment variable.
+- Pre-commit uses the project's locked environment for strict mypy checks.
+- CI validates `compose.yaml` before building containers.
+- Ruff lint expanded with `SIM` and `C4` simplifications.
+- Docker images now use `STOPSIGNAL SIGTERM` for graceful shutdown.
+- Dockerfiles declare explicit `STOPSIGNAL SIGTERM` for graceful shutdown.
+- Consistent `from __future__ import annotations` across all source modules.
 - Recommendation request bodies now reject unknown fields, implicit type
   coercion, blank values, oversized strings, and unbounded preference lists.
 - Training, filtering, ranking, and evaluation parameters now fail fast with
@@ -37,27 +57,14 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Artifact loading now verifies mapping bijections, finite matrices and factors,
   content metadata alignment, popularity statistics, dataset fingerprints, and
   recorded training settings.
-- CLI training and evaluation workflows now report validation and missing-file
-  failures without exposing internal tracebacks and route errors to stderr.
-- API request bodies are rejected above 64 KiB before unbounded parsing.
-- Ruff lint now includes `SIM` and `C4` simplifications; `.dockerignore` and
-  `.gitignore` aligned and compose services include healthchecks and resource
-  limits.
-- CI validates `compose.yaml` before building containers.
-- Pre-commit uses the project's locked environment for strict mypy checks.
-- Consistent `from __future__ import annotations` across all source modules.
-- Dockerfiles declare explicit `STOPSIGNAL SIGTERM` for graceful shutdown.
-
-### Fixed
-
-- Metadata CSV loader now preserves text types for whitespace handling parity
-  with interaction loading.
-- `MUSIC_RECOMMENDER_ROOT` and MLflow tracking URI resolution now strips
-  surrounding whitespace.
-- Atomic artifact writes now fsync file and parent directory for durability.
-- Serving no longer densifies content vectors unless diversity reranking is
-  requested.
-- API user and artist path identifiers now reject blank or oversized values.
+- Sparse content recommendations avoid dense matrix conversion when diversity
+  reranking is disabled.
+- MIME type for content metadata is validated before parsing.
+- Clarified implicit library inverted naming for latent factors.
+- Deduplicated `Recommendation` type alias into `recommend` module.
+- Removed duplicate `METADATA_TEXT_COLUMNS` constant.
+- Extracted magic explanation limits into named constants in `content.py`.
+- Removed redundant `(?u)` regex flag from TF-IDF pattern.
 
 ## [0.4.0] - 2026-07-24
 
