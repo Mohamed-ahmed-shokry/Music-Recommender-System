@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 import music_recommender.cli as cli
 from music_recommender import __version__
+from music_recommender.cli import _format_artifact_age, _parse_csv_option
 from music_recommender.tracking import ExperimentTrackingError
 
 runner = CliRunner()
@@ -235,3 +236,27 @@ def test_evaluate_command_reports_missing_data(monkeypatch) -> None:
     assert result.exit_code == 1
     assert "Error: interactions file is missing" in result.output
     assert result.exception is not None
+
+
+def test_format_artifact_age_returns_hours() -> None:
+    result = _format_artifact_age("2026-01-01T00:00:00+00:00")
+
+    assert result.endswith("h")
+
+
+def test_parse_csv_option_splits_comma_separated_values() -> None:
+    result = _parse_csv_option("artist_1,artist_2,artist_3")
+
+    assert result == ["artist_1", "artist_2", "artist_3"]
+
+
+def test_parse_csv_option_strips_whitespace() -> None:
+    result = _parse_csv_option(" a , b , c ")
+
+    assert result == ["a", "b", "c"]
+
+
+def test_parse_csv_option_returns_empty_list_for_empty_string() -> None:
+    result = _parse_csv_option("")
+
+    assert result == []
