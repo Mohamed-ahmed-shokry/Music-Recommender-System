@@ -89,3 +89,6 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Migrated API tests to HTTPX2 and made the full suite warning-free.
 - Pinned release actions to immutable commits and disabled reusable caches and
   persisted checkout credentials in artifact-publishing jobs.
+
+[Unreleased]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.4.0
