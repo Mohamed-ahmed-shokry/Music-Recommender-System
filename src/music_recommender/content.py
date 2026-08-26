@@ -34,6 +34,12 @@ class ContentArtifacts:
     content_index_to_artist_id: dict[int, str]
     metadata_lookup: MetadataLookup
 
+    def __repr__(self) -> str:
+        return (
+            f"ContentArtifacts(num_artists={self.content_matrix.shape[0]}, "
+            f"num_features={self.content_matrix.shape[1]})"
+        )
+
 
 def build_content_artifacts(
     metadata_df: pd.DataFrame,

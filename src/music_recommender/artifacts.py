@@ -38,6 +38,13 @@ class RecommenderArtifact:
     training_config: dict[str, Any]
     hybrid_config: dict[str, Any]
 
+    def __repr__(self) -> str:
+        return (
+            f"RecommenderArtifact(version={self.version!r}, "
+            f"num_users={self.metadata.get('num_users', '?')}, "
+            f"num_artists={self.metadata.get('num_artists', '?')})"
+        )
+
 
 def create_dataset_fingerprint(
     data_path: str | Path,
