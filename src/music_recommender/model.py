@@ -192,8 +192,7 @@ def load_model(path: str | Path) -> AlternatingLeastSquares:
         return joblib.load(model_path)
     except Exception as error:
         raise ValueError(
-            f"Model artifact at '{model_path}' could not be loaded. "
-            "Retrain the model."
+            f"Model artifact at '{model_path}' could not be loaded. Retrain the model."
         ) from error
 
 
