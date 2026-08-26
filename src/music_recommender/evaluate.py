@@ -94,10 +94,10 @@ def map_at_k(
     scores = [
         average_precision_at_k(recommended_items, relevant_items, k)
         for recommended_items, relevant_items in zip(
-            list_of_recommended_items,
-            list_of_relevant_items,
-            strict=False,
-        )
+                        list_of_recommended_items,
+                        list_of_relevant_items,
+                        strict=True,
+                    )
     ]
     return float(np.mean(scores)) if scores else 0.0
 
@@ -549,7 +549,7 @@ def _summarize_recommendations(
                     for recommended_items, relevant_items in zip(
                         list_of_recommended_items,
                         list_of_relevant_items,
-                        strict=False,
+                        strict=True,
                     )
                 ]
             )
@@ -561,7 +561,7 @@ def _summarize_recommendations(
                     for recommended_items, relevant_items in zip(
                         list_of_recommended_items,
                         list_of_relevant_items,
-                        strict=False,
+                        strict=True,
                     )
                 ]
             )
@@ -578,7 +578,7 @@ def _summarize_recommendations(
                     for recommended_items, relevant_items in zip(
                         list_of_recommended_items,
                         list_of_relevant_items,
-                        strict=False,
+                        strict=True,
                     )
                 ]
             )
