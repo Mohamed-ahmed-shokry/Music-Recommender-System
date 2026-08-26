@@ -527,6 +527,7 @@ def _summarize_recommendations(
     top_k: int,
     list_of_recommendations: Sequence[Sequence[Mapping[str, Any]]] | None = None,
 ) -> dict[str, float]:
+    """Aggregate per-user recommendation lists into summary ranking metrics."""
     if not list_of_recommended_items:
         return {
             "precision_at_k": 0.0,
@@ -608,6 +609,7 @@ def _summarize_recommendations(
 
 
 def _average_metric_dicts(metric_dicts: list[dict[str, float]]) -> dict[str, float]:
+    """Return the element-wise mean of a list of metric dictionaries."""
     if not metric_dicts:
         return {}
 
@@ -619,6 +621,7 @@ def _average_metric_dicts(metric_dicts: list[dict[str, float]]) -> dict[str, flo
 
 
 def _metadata_from_interactions(df: pd.DataFrame) -> pd.DataFrame:
+    """Build a minimal metadata frame from interaction data for content fallback."""
     metadata_df = df[["artist_id", "artist_name"]].drop_duplicates("artist_id").copy()
     metadata_df["genres"] = "unknown"
     metadata_df["mood_tags"] = "unknown"
