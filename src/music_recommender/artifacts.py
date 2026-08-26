@@ -46,7 +46,10 @@ def create_dataset_fingerprint(
     """Create a stable fingerprint for the source interaction data."""
     path = Path(data_path)
     if path.exists():
-        content = path.read_bytes()
+        try:
+            content = path.read_bytes()
+        except OSError:
+            content = df.to_csv(index=False).encode("utf-8")
     else:
         content = df.to_csv(index=False).encode("utf-8")
 
