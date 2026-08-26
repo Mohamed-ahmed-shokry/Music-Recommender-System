@@ -29,7 +29,7 @@ from music_recommender.config import (
 from music_recommender.content import build_content_artifacts, validate_content_weight
 from music_recommender.metadata import load_and_validate_artist_metadata
 from music_recommender.preprocessing import Mappings, prepare_training_data
-from music_recommender.utils import atomic_joblib_dump
+from music_recommender.utils import atomic_joblib_dump, is_finite_number
 
 if TYPE_CHECKING:
     from implicit.als import AlternatingLeastSquares
@@ -170,20 +170,12 @@ def _validate_als_hyperparameters(
         raise ValueError("factors must be a positive integer.")
     if type(iterations) is not int or iterations < 1:
         raise ValueError("iterations must be a positive integer.")
-    if not _is_finite_number(regularization) or regularization < 0:
+    if not is_finite_number(regularization) or regularization < 0:
         raise ValueError("regularization must be finite and non-negative.")
-    if not _is_finite_number(alpha) or alpha <= 0:
+    if not is_finite_number(alpha) or alpha <= 0:
         raise ValueError("alpha must be finite and greater than 0.")
     if type(use_gpu) is not bool:
         raise ValueError("use_gpu must be a boolean.")
-
-
-def _is_finite_number(value: object) -> bool:
-    return (
-        not isinstance(value, bool)
-        and isinstance(value, (int, float, np.number))
-        and bool(np.isfinite(value))
-    )
 
 
 def save_model(model: AlternatingLeastSquares, path: str | Path) -> None:

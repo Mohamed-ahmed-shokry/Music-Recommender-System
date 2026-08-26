@@ -17,7 +17,7 @@ from scipy.sparse import csr_matrix
 from music_recommender.config import ARTIFACT_BUNDLE_PATH
 from music_recommender.content import ContentArtifacts
 from music_recommender.preprocessing import Mappings
-from music_recommender.utils import atomic_joblib_dump
+from music_recommender.utils import atomic_joblib_dump, is_finite_number
 
 ARTIFACT_VERSION = "4.0"
 
@@ -508,7 +508,7 @@ def _validate_artist_stats(
         if (
             stats["artist_id"] != artist_id
             or stats["artist_name"] != artist_id_to_name[artist_id]
-            or not _is_finite_number(stats["total_plays"])
+            or not is_finite_number(stats["total_plays"])
             or float(stats["total_plays"]) <= 0
             or type(listener_count) is not int
             or listener_count <= 0
@@ -525,14 +525,6 @@ def _validate_artist_stats(
         raise ValueError(
             "Artifact artist popularity ranks are not contiguous. Retrain the model."
         )
-
-
-def _is_finite_number(value: Any) -> bool:
-    return (
-        not isinstance(value, bool)
-        and isinstance(value, (int, float, np.number))
-        and bool(np.isfinite(value))
-    )
 
 
 def _validate_artifact_metadata(
@@ -661,9 +653,9 @@ def _validate_artifact_configuration(
             "Retrain the model."
         )
     if (
-        not _is_finite_number(training_config["regularization"])
+        not is_finite_number(training_config["regularization"])
         or training_config["regularization"] < 0
-        or not _is_finite_number(training_config["alpha"])
+        or not is_finite_number(training_config["alpha"])
         or training_config["alpha"] <= 0
         or type(training_config["use_gpu"]) is not bool
     ):
@@ -674,7 +666,7 @@ def _validate_artifact_configuration(
 
     content_weight = training_config["content_weight"]
     if (
-        not _is_finite_number(content_weight)
+        not is_finite_number(content_weight)
         or not 0 <= content_weight <= 1
         or not isinstance(hybrid_config, dict)
         or set(hybrid_config) != {"default_content_weight"}

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import joblib
+import numpy as np
 
 
 def atomic_joblib_dump(value: Any, path: str | Path) -> None:
@@ -43,3 +44,12 @@ def atomic_joblib_dump(value: Any, path: str | Path) -> None:
                     os.close(dir_fd)
     finally:
         temporary_path.unlink(missing_ok=True)
+
+
+def is_finite_number(value: object) -> bool:
+    """Return True if *value* is a finite int or float (not a bool)."""
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float, np.number))
+        and bool(np.isfinite(value))
+    )
