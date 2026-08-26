@@ -366,7 +366,7 @@ def _render_similarity_tab(
             lambda: service.similar_artists(
                 artist_id=artist_choices[selected_artist],
                 top_k=top_k,
-                method=method_labels[method_label],
+                method=method_labels[method_label],  # type: ignore[arg-type]
                 content_weight=content_weight,
                 explain=explain,
             )

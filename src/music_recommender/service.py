@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 
@@ -351,12 +351,11 @@ class RecommenderService:
         self,
         artist_id: str,
         top_k: int,
-        method: str = "als",
+        method: Literal["als", "content", "hybrid"] = "als",
         content_weight: float | None = None,
         explain: bool = False,
     ) -> dict[str, Any]:
         """Find artists similar to a selected artist."""
-        method = method.lower()
         if method == "als":
             recommendations = get_similar_artists(
                 model=self.artifact.model,

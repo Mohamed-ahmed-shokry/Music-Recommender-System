@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import typer
 
@@ -411,7 +411,9 @@ def similar_artists(
         ..., help="Original artist ID, for example artist_2."
     ),
     top_k: int = DEFAULT_TOP_K,
-    method: str = typer.Option("als", help="Similarity method: als, content, hybrid."),
+    method: Literal["als", "content", "hybrid"] = typer.Option(
+        "als", help="Similarity method: als, content, hybrid."
+    ),
     content_weight: float = DEFAULT_CONTENT_WEIGHT,
     explain: bool = False,
 ) -> None:
