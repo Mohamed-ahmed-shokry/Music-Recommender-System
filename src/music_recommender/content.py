@@ -404,6 +404,8 @@ def _preference_tokens(
 
 
 def _weighted_profile(matrix: csr_matrix, weights: np.ndarray) -> csr_matrix:
+    if len(weights) == 0:
+        raise ValueError("weights must not be empty")
     weights = (
         weights / weights.sum()
         if weights.sum()
