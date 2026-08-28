@@ -93,6 +93,7 @@ def test_als_training_rejects_invalid_hyperparameters(
         csr_matrix([[0, 0], [0, 0]], dtype="float32"),
         csr_matrix([[1, np.nan]], dtype="float32"),
         csr_matrix([[1, -1]], dtype="float32"),
+        csr_matrix([[1 + 0j, 2 + 3j]], dtype="complex128"),
     ],
 )
 def test_als_training_rejects_invalid_interaction_matrix(

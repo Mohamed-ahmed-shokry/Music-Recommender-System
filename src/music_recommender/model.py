@@ -142,12 +142,13 @@ def _validate_als_training_inputs(
         or min(user_item_matrix.shape) < 1
         or user_item_matrix.nnz < 1
         or not np.issubdtype(user_item_matrix.dtype, np.number)
+        or np.issubdtype(user_item_matrix.dtype, np.complexfloating)
         or not np.all(np.isfinite(user_item_matrix.data))
         or np.any(user_item_matrix.data <= 0)
     ):
         raise ValueError(
             "user_item_matrix must be a non-empty CSR matrix with finite, "
-            "positive interaction weights."
+            "positive real interaction weights."
         )
     _validate_als_hyperparameters(
         factors=factors,
