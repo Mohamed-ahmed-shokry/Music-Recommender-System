@@ -29,9 +29,18 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   command, including artifact inspection, onboarding profiles, and session mixes.
 - An end-to-end `train_and_save_model` happy-path test that trains on temporary
   CSVs and verifies model, mappings, and artifact bundle persistence.
+- Regression tests confirming a failed training run leaves no partial model or
+  artifact bundle on disk.
+- Missing-value validation coverage for every interaction and artist metadata
+  column, closing the remaining schema-validation gaps.
 
 ### Fixed
 
+- Model persistence is deferred until metadata validation, content build, and
+  artifact construction all succeed, so a failed retraining run no longer leaves
+  a new model file next to an older artifact bundle.
+- CLI demo now surfaces genuine runtime training failures as clean errors with a
+  non-zero exit code, matching the training command.
 - ALS training now rejects complex-valued interaction matrices instead of
   letting them slip through numeric validation.
 - Artifact age formatting treats naive (timezone-less) timestamps as UTC rather
