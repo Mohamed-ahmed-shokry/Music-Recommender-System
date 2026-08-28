@@ -66,6 +66,26 @@ def test_duplicate_artist_ids_raise_value_error() -> None:
         validate_artist_metadata(df)
 
 
+def test_missing_artist_id_values_raise_value_error() -> None:
+    df = valid_metadata_df()
+    df.loc[0, "artist_id"] = None
+
+    with pytest.raises(ValueError, match="artist_id"):
+        validate_artist_metadata(df)
+
+
+@pytest.mark.parametrize(
+    "column",
+    ["artist_name", "genres", "mood_tags", "country", "era"],
+)
+def test_missing_text_column_values_raise_value_error(column: str) -> None:
+    df = valid_metadata_df()
+    df.loc[0, column] = None
+
+    with pytest.raises(ValueError, match=rf"Column '{column}' contains missing values"):
+        validate_artist_metadata(df)
+
+
 def test_missing_genres_raise_value_error() -> None:
     df = valid_metadata_df()
     df.loc[0, "genres"] = ""
