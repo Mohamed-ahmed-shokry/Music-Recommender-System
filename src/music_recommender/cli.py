@@ -595,6 +595,13 @@ def demo(use_gpu: bool = DEFAULT_USE_GPU) -> None:
     except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
+    except RuntimeError as error:
+        typer.secho(
+            f"Error: demo failed: {error}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1) from error
 
     typer.echo("Recommendations for user_1:")
     typer.echo(f"Strategy: {response['strategy']}")

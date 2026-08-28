@@ -580,3 +580,22 @@ def test_train_command_catches_training_runtime_error(monkeypatch) -> None:
     assert result.exit_code == 1
     assert "Error: training failed: implicit training failed" in result.output
     assert result.exception is not None
+
+
+def test_demo_command_catches_training_runtime_error(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli,
+        "ARTIFACT_BUNDLE_PATH",
+        SimpleNamespace(exists=lambda: False),
+    )
+
+    def fail_training(**_: Any) -> None:
+        raise RuntimeError("implicit training failed")
+
+    monkeypatch.setattr(cli, "train_and_save_model", fail_training)
+
+    result = runner.invoke(cli.app, ["demo"])
+
+    assert result.exit_code == 1
+    assert "Error: demo failed: implicit training failed" in result.output
+    assert result.exception is not None
