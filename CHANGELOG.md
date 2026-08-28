@@ -25,9 +25,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Locked pre-commit tooling in the development dependency group.
 - Regression coverage for metadata text preservation, API metadata/CORS headers,
   sparse recommendation serving, and path validation.
+- CLI command tests covering every training, evaluation, serving, and catalog
+  command, including artifact inspection, onboarding profiles, and session mixes.
+- An end-to-end `train_and_save_model` happy-path test that trains on temporary
+  CSVs and verifies model, mappings, and artifact bundle persistence.
 
 ### Fixed
 
+- ALS training now rejects complex-valued interaction matrices instead of
+  letting them slip through numeric validation.
+- Artifact age formatting treats naive (timezone-less) timestamps as UTC rather
+  than crashing on the timestamp subtraction.
+- CLI training now surfaces genuine runtime training failures as clean errors
+  with a non-zero exit code instead of dumping a raw traceback.
 - String dtype loading to preserve leading zeroes in artist identifiers.
 - `MUSIC_RECOMMENDER_ROOT` and MLflow tracking URI resolution now strips
   surrounding whitespace.
