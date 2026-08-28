@@ -235,7 +235,6 @@ def train_and_save_model(
         alpha=alpha,
         use_gpu=use_gpu,
     )
-    save_model(model, model_path)
     metadata_df = load_and_validate_artist_metadata(metadata_path, filtered_df)
     artist_ids = [
         artist_id
@@ -272,4 +271,5 @@ def train_and_save_model(
         hybrid_config=hybrid_config,
     )
     save_artifact(artifact, artifact_path)
+    save_model(model, model_path)
     return model, user_item_matrix, mappings
