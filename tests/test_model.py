@@ -134,3 +134,46 @@ def test_train_and_save_validates_configuration_before_reading_data(
 
     with pytest.raises(ValueError, match=message):
         train_and_save_model(**parameters)
+
+
+def test_train_and_save_persists_model_and_artifact(tmp_path: Path) -> None:
+    interactions = (
+        "user_id,artist_id,artist_name,play_count\n"
+        "user_1,artist_1,artist-one,10\n"
+        "user_1,artist_2,artist-two,8\n"
+        "user_2,artist_1,artist-one,6\n"
+        "user_2,artist_2,artist-two,4\n"
+    )
+    metadata = (
+        "artist_id,artist_name,genres,mood_tags,country,era\n"
+        "artist_1,artist-one,pop;rock,bright;upbeat,US,2020s\n"
+        "artist_2,artist-two,rock;indie,raw;dark,UK,2010s\n"
+    )
+    raw_data_path = tmp_path / "interactions.csv"
+    raw_metadata_path = tmp_path / "metadata.csv"
+    raw_data_path.write_text(interactions)
+    raw_metadata_path.write_text(metadata)
+
+    model, matrix, mappings = train_and_save_model(
+        raw_data_path=raw_data_path,
+        metadata_path=raw_metadata_path,
+        model_path=tmp_path / "model.joblib",
+        mappings_path=tmp_path / "mappings.joblib",
+        artifact_path=tmp_path / "artifact.joblib",
+        min_user_interactions=2,
+        min_artist_interactions=2,
+        factors=4,
+        regularization=0.01,
+        iterations=2,
+        alpha=10.0,
+        use_gpu=False,
+        content_weight=0.25,
+    )
+
+    assert (tmp_path / "model.joblib").exists()
+    assert (tmp_path / "mappings.joblib").exists()
+    assert (tmp_path / "artifact.joblib").exists()
+    assert len(mappings["user_id_to_index"]) == 2
+    assert len(mappings["artist_id_to_index"]) == 2
+    assert matrix.shape == (2, 2)
+    assert model.user_factors.shape == (2, 4)
