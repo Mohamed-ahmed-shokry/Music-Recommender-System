@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -242,6 +243,20 @@ def test_format_artifact_age_returns_hours() -> None:
     result = _format_artifact_age("2026-01-01T00:00:00+00:00")
 
     assert result.endswith("h")
+
+
+def test_format_artifact_age_treats_naive_timestamp_as_utc() -> None:
+    result = _format_artifact_age("2026-01-01T00:00:00")
+
+    assert result.endswith("h") or result.endswith("m") or result.endswith("s")
+
+
+def test_format_artifact_age_returns_seconds_for_recent_timestamp() -> None:
+    created = datetime.now(UTC).isoformat()
+
+    result = _format_artifact_age(created)
+
+    assert result.endswith("s")
 
 
 def test_parse_csv_option_splits_comma_separated_values() -> None:

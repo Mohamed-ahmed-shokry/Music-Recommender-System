@@ -63,6 +63,8 @@ def main(
 
 def _format_artifact_age(created_at: str) -> str:
     created = datetime.fromisoformat(created_at)
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
     age = datetime.now(UTC) - created
     total_seconds = int(age.total_seconds())
     if total_seconds < 60:
