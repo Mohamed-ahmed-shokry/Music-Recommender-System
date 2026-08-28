@@ -82,6 +82,18 @@ def test_conflicting_artist_names_raise_value_error() -> None:
         validate_interactions(df)
 
 
+@pytest.mark.parametrize(
+    "column",
+    ["user_id", "artist_id", "artist_name", "play_count"],
+)
+def test_missing_column_values_raise_value_error(column: str) -> None:
+    df = valid_interactions_df()
+    df.loc[0, column] = None
+
+    with pytest.raises(ValueError, match=rf"Column '{column}' contains missing values"):
+        validate_interactions(df)
+
+
 def test_normalization_trims_text_and_aggregates_duplicate_pairs() -> None:
     df = pd.DataFrame(
         {
