@@ -33,6 +33,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   artifact bundle on disk.
 - Missing-value validation coverage for every interaction and artist metadata
   column, closing the remaining schema-validation gaps.
+- Regression coverage for every FastAPI route happy path and service-error
+  response, raising the API module to full coverage.
+- Edge-case coverage for scoring, ranking, model, preprocessing, content, and
+  tracking modules, including zero-score matrices, degenerate profiles,
+  corrupt artifact loads, and failed experiment-tracking wraps.
+- Regression tests for request-body-limit middleware, the Streamlit dashboard
+  submit flows and fallback/error states, and artifact validation error paths
+  (version, mapping, factor, content, metadata, and fingerprint mismatches).
+- CLI regression tests for metadata preparation, GPU fallback echoes, tracked
+  artifact logging, and per-command service-error exits, plus evaluation
+  empty-input and metadata-fallback paths.
 
 ### Fixed
 
