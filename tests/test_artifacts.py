@@ -6,8 +6,10 @@ import pandas as pd
 import pytest
 from scipy.sparse import csr_matrix
 
+import music_recommender.artifacts as artifacts_module
 from music_recommender.artifacts import (
     RecommenderArtifact,
+    _validate_content_artifacts,
     build_artist_stats,
     build_recommender_artifact,
     create_dataset_fingerprint,
@@ -301,3 +303,245 @@ def test_dataset_fingerprint_changes_when_data_changes(tmp_path: Path) -> None:
     second = create_dataset_fingerprint(second_path, artifact_dataframe())
 
     assert first["sha256"] != second["sha256"]
+
+
+def test_dataset_fingerprint_falls_back_when_path_cannot_be_read(
+    tmp_path: Path,
+) -> None:
+    fingerprint = create_dataset_fingerprint(tmp_path, artifact_dataframe())
+
+    assert fingerprint["path"] == str(tmp_path)
+    assert fingerprint["row_count"] == 4
+    assert len(fingerprint["sha256"]) == 64
+
+
+def test_recommender_artifact_repr_summarizes_bundle() -> None:
+    artifact = create_test_artifact(Path("."))
+
+    text = repr(artifact)
+
+    assert text == ("RecommenderArtifact(version='4.0', num_users=2, num_artists=3)")
+
+
+def test_load_artifact_wraps_unexpected_validation_error(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact_path = tmp_path / "valid.joblib"
+    save_artifact(artifact, artifact_path)
+
+    def explode(_: object) -> None:
+        raise RuntimeError("unexpected failure")
+
+    monkeypatch.setattr(artifacts_module, "_validate_loaded_artifact", explode)
+
+    with pytest.raises(ValueError, match="structure is invalid"):
+        load_artifact(artifact_path)
+
+
+def test_load_artifact_rejects_incompatible_version(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.version = "3.0"
+    artifact_path = tmp_path / "wrong-version.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="not.*compatible with required version"):
+        load_artifact(artifact_path)
+
+
+def test_load_artifact_rejects_non_dict_mappings(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.mappings = ["not-a-mapping"]
+    artifact_path = tmp_path / "bad-mappings.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="mappings are not a dictionary"):
+        load_artifact(artifact_path)
+
+
+def test_load_artifact_rejects_mappings_missing_required_fields(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.mappings.pop("index_to_user_id")
+    artifact_path = tmp_path / "missing-mapping.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="missing fields"):
+        load_artifact(artifact_path)
+
+
+def test_load_artifact_rejects_non_dict_forward_mapping(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.mappings["user_id_to_index"] = "users"
+    artifact_path = tmp_path / "non-dict-mapping.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="user mappings are not dictionaries"):
+        load_artifact(artifact_path)
+
+
+def test_load_artifact_rejects_non_csr_interaction_matrix(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.user_item_matrix = np.zeros((2, 3))
+    artifact_path = tmp_path / "dense-matrix.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="not CSR sparse data"):
+        load_artifact(artifact_path)
+
+
+def test_load_artifact_rejects_invalid_content_artifact_type(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.content_artifacts = {"not": "content"}
+    artifact_path = tmp_path / "bad-content.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="content data has an invalid structure"):
+        load_artifact(artifact_path)
+
+
+def test_load_artifact_rejects_invalid_factor_shapes(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.model.user_factors = np.array([1.0, 2.0])
+    artifact_path = tmp_path / "flat-factors.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="invalid structure"):
+        load_artifact(artifact_path)
+
+
+def test_load_artifact_rejects_artist_factor_row_mismatch(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.model.user_factors = np.zeros((5, 4))
+    artifact_path = tmp_path / "extra-artist-factors.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="artist factors do not match"):
+        load_artifact(artifact_path)
+
+
+def test_load_artifact_rejects_user_factor_row_mismatch(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.model.item_factors = np.zeros((1, 4))
+    artifact_path = tmp_path / "fewer-user-factors.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="user factors do not match"):
+        load_artifact(artifact_path)
+
+
+def test_load_artifact_rejects_content_matrix_row_mismatch(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    feature_count = artifact.content_artifacts.content_matrix.shape[1]
+    artifact.content_artifacts.content_matrix = csr_matrix((2, feature_count))
+    artifact_path = tmp_path / "short-content-matrix.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="content matrix does not match"):
+        load_artifact(artifact_path)
+
+
+@pytest.mark.parametrize(
+    "corrupt_content",
+    [
+        lambda content: setattr(
+            content, "feature_names", content.feature_names[:-1] + ["zzz_new"]
+        ),
+        lambda content: setattr(content, "metadata", "not-a-frame"),
+        lambda content: content.metadata.loc.__setitem__(
+            (0, "genres"),
+            "",
+        ),
+        lambda content: setattr(content, "metadata_lookup", {}),
+    ],
+)
+def test_content_artifacts_validation_rejects_inconsistent_state(
+    corrupt_content,
+) -> None:
+    artifact = create_test_artifact(Path("."))
+    corrupt_content(artifact.content_artifacts)
+    artist_ids = set(artifact.mappings["artist_id_to_index"])
+
+    with pytest.raises(
+        ValueError,
+        match="vectorizer|invalid structure|empty values|metadata lookup",
+    ):
+        _validate_content_artifacts(
+            artifact.content_artifacts,
+            artist_ids,
+            artifact.mappings["artist_id_to_name"],
+        )
+
+
+def test_content_artifacts_validation_rejects_artist_id_mismatch() -> None:
+    artifact = create_test_artifact(Path("."))
+    artist_ids = set(artifact.mappings["artist_id_to_index"])
+
+    with pytest.raises(ValueError, match="content artists do not match"):
+        _validate_content_artifacts(
+            artifact.content_artifacts,
+            artist_ids | {"artist_99"},
+            artifact.mappings["artist_id_to_name"],
+        )
+
+
+def test_load_artifact_rejects_artist_stats_not_matching_mappings(
+    tmp_path: Path,
+) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.artist_stats["artist_99"] = {"total_plays": 1}
+    artifact_path = tmp_path / "extra-stats.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="artist statistics do not match"):
+        load_artifact(artifact_path)
+
+
+def test_load_artifact_rejects_non_dict_metadata(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.metadata = "not-a-dict"
+    artifact_path = tmp_path / "bad-metadata.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="metadata is not a dictionary"):
+        load_artifact(artifact_path)
+
+
+def test_load_artifact_rejects_metadata_missing_required_fields(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.metadata.pop("created_at")
+    artifact_path = tmp_path / "missing-metadata.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="missing fields"):
+        load_artifact(artifact_path)
+
+
+def test_load_artifact_rejects_invalid_configuration_paths(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.training_config["raw_data_path"] = "   "
+    artifact_path = tmp_path / "blank-path.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="invalid data paths"):
+        load_artifact(artifact_path)
+
+
+def test_load_artifact_rejects_invalid_configuration_integers(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.training_config["factors"] = "four"
+    artifact_path = tmp_path / "string-int.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="invalid integer parameters"):
+        load_artifact(artifact_path)
+
+
+def test_load_artifact_rejects_invalid_dataset_fingerprint(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.metadata["dataset"] = "not-a-fingerprint"
+    artifact_path = tmp_path / "bad-fingerprint.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="fingerprint is not a dictionary"):
+        load_artifact(artifact_path)
