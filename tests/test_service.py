@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -190,6 +191,117 @@ def test_content_similar_artists_return_content_strategy(tmp_path: Path) -> None
     assert response["strategy"] == "content_similarity"
     assert response["similar_artists"]
     assert response["similar_artists"][0]["artist_id"] != "artist_1"
+
+
+def test_service_health_reports_counts_and_status(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    health = service.health()
+
+    assert health["status"] == "ok"
+    assert health["artifact_version"] == "4.0"
+    assert health["num_users"] == 3
+    assert health["num_artists"] == 4
+    assert health["num_interactions"] == 6
+
+
+def test_recommend_user_als_returns_als_strategy(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    response = service.recommend_user_als("user_1", top_k=2)
+
+    assert response["strategy"] == "als_personalized"
+    assert response["user_id"] == "user_1"
+    assert response["recommendations"]
+
+
+def test_recommend_user_als_raises_for_unknown_user(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    with pytest.raises(ValueError, match="Unknown user_id"):
+        service.recommend_user_als("missing_user", top_k=2)
+
+
+@pytest.mark.parametrize(
+    ("method", "strategy"),
+    [
+        ("als", "als_similarity"),
+        ("content", "content_similarity"),
+        ("hybrid", "hybrid_similarity"),
+    ],
+)
+def test_similar_artists_supports_all_methods(
+    tmp_path: Path,
+    method: str,
+    strategy: str,
+) -> None:
+    service = create_service(tmp_path)
+
+    response = service.similar_artists("artist_1", top_k=2, method=method)
+
+    assert response["strategy"] == strategy
+    assert response["similar_artists"]
+    assert response["similar_artists"][0]["artist_id"] != "artist_1"
+
+
+def test_similar_artists_rejects_unknown_method(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    with pytest.raises(ValueError, match="method"):
+        service.similar_artists("artist_1", top_k=2, method="hybrd")  # type: ignore[arg-type]
+
+
+def test_hybrid_similar_artists_rejects_unknown_artist(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    with pytest.raises(ValueError, match="Unknown artist_id"):
+        service.similar_artists("missing_artist", top_k=2, method="hybrid")
+
+
+def test_popular_artists_returns_baseline_strategy(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    response = service.popular_artists(top_k=2)
+
+    assert response["strategy"] == "popular_baseline"
+    assert [artist["popularity_rank"] for artist in response["recommendations"]] == [
+        1,
+        2,
+    ]
+
+
+def test_hybrid_similar_artists_zero_norm_returns_zero_scores(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    service.artifact.model.user_factors = np.zeros_like(
+        service.artifact.model.user_factors
+    )
+
+    response = service.similar_artists("artist_1", top_k=2, method="hybrid")
+
+    assert response["strategy"] == "hybrid_similarity"
+
+
+def test_recommend_user_reports_adjusted_score_with_penalty(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    response = service.recommend_user(
+        "user_1",
+        top_k=2,
+        popularity_penalty=0.5,
+        explain=True,
+    )
+
+    score_components = response["recommendations"][0]["score_components"]
+    assert "adjusted_score" in score_components
+
+
+def test_artist_catalog_excludes_country_and_era_mismatches(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    result = service.browse_artists(country="Canada", era="2020s")
+
+    assert result["total"] == 0
+    assert result["artists"] == []
 
 
 def test_service_metadata_is_available(tmp_path: Path) -> None:
