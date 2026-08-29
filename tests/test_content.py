@@ -1,10 +1,16 @@
+import numpy as np
 import pandas as pd
 import pytest
+from scipy.sparse import csr_matrix
 
 from music_recommender.content import (
+    _weighted_profile,
     build_content_artifacts,
     content_similar_artists,
+    content_similarity_scores,
     hybrid_scores,
+    listened_artist_ids,
+    metadata_tokens_for_artist,
     profile_content_scores,
     recommend_from_scores,
     user_content_scores,
@@ -142,3 +148,162 @@ def test_hybrid_weight_extremes_match_expected_scores() -> None:
 def test_invalid_content_weight_raises_value_error(content_weight) -> None:
     with pytest.raises(ValueError, match="content_weight"):
         validate_content_weight(content_weight)
+
+
+def test_content_artifacts_repr_reports_shape() -> None:
+    content = build_content_artifacts(
+        metadata_df(), ["artist_1", "artist_2", "artist_3"]
+    )
+
+    assert "num_artists=3" in repr(content)
+
+
+def test_content_similarity_scores_rejects_unknown_artist() -> None:
+    content = build_content_artifacts(
+        metadata_df(), ["artist_1", "artist_2", "artist_3"]
+    )
+
+    with pytest.raises(ValueError, match="Unknown artist_id"):
+        content_similarity_scores("missing_artist", content)
+
+
+def test_listened_artist_ids_rejects_unknown_user() -> None:
+    df = interactions_df()
+    mappings = create_id_mappings(df)
+    matrix = build_user_item_matrix(
+        df,
+        mappings["user_id_to_index"],
+        mappings["artist_id_to_index"],
+    )
+
+    with pytest.raises(ValueError, match="Unknown user_id"):
+        listened_artist_ids("missing_user", matrix, mappings)
+
+
+def test_user_content_scores_rejects_unknown_user() -> None:
+    df = interactions_df()
+    mappings = create_id_mappings(df)
+    matrix = build_user_item_matrix(
+        df,
+        mappings["user_id_to_index"],
+        mappings["artist_id_to_index"],
+    )
+    content = build_content_artifacts(
+        metadata_df(), ["artist_1", "artist_2", "artist_3"]
+    )
+
+    with pytest.raises(ValueError, match="Unknown user_id"):
+        user_content_scores("missing_user", matrix, mappings, content)
+
+
+def test_user_content_scores_skips_artists_missing_from_content() -> None:
+    df = pd.DataFrame(
+        {
+            "user_id": ["user_1", "user_1", "user_2"],
+            "artist_id": ["artist_1", "artist_4", "artist_3"],
+            "artist_name": ["Pop One", "Untracked", "Rock Three"],
+            "play_count": [10, 5, 7],
+        }
+    )
+    mappings = create_id_mappings(df)
+    matrix = build_user_item_matrix(
+        df,
+        mappings["user_id_to_index"],
+        mappings["artist_id_to_index"],
+    )
+    content = build_content_artifacts(
+        metadata_df(), ["artist_1", "artist_2", "artist_3"]
+    )
+
+    scores, listened = user_content_scores(
+        "user_1",
+        matrix,
+        mappings,
+        content,
+    )
+
+    assert "artist_4" in listened
+    assert scores.shape == (3,)
+    assert np.isfinite(scores).all()
+
+
+def test_user_content_scores_return_zeros_when_no_artists_in_content() -> None:
+    df = pd.DataFrame(
+        {
+            "user_id": ["user_1", "user_2"],
+            "artist_id": ["artist_4", "artist_4"],
+            "artist_name": ["Untracked", "Untracked"],
+            "play_count": [10, 7],
+        }
+    )
+    mappings = create_id_mappings(df)
+    matrix = build_user_item_matrix(
+        df,
+        mappings["user_id_to_index"],
+        mappings["artist_id_to_index"],
+    )
+    content = build_content_artifacts(
+        metadata_df(), ["artist_1", "artist_2", "artist_3"]
+    )
+
+    scores, _ = user_content_scores("user_1", matrix, mappings, content)
+
+    assert (scores == 0).all()
+
+
+def test_profile_content_scores_rejects_empty_inputs() -> None:
+    content = build_content_artifacts(
+        metadata_df(), ["artist_1", "artist_2", "artist_3"]
+    )
+
+    with pytest.raises(ValueError, match="at least one"):
+        profile_content_scores(
+            content,
+            artist_ids=[],
+            genres=[],
+            mood_tags=[],
+        )
+
+
+def test_profile_content_scores_rejects_unknown_artists() -> None:
+    content = build_content_artifacts(
+        metadata_df(), ["artist_1", "artist_2", "artist_3"]
+    )
+
+    with pytest.raises(ValueError, match="Unknown artist IDs"):
+        profile_content_scores(content, artist_ids=["missing_artist"])
+
+
+def test_recommend_from_scores_ignores_unknown_reference_artists() -> None:
+    content = build_content_artifacts(
+        metadata_df(), ["artist_1", "artist_2", "artist_3"]
+    )
+    scores, _, _ = profile_content_scores(content, genres=["pop"])
+
+    recommendations = recommend_from_scores(
+        scores,
+        content,
+        artist_stats=None,
+        top_k=1,
+        exclude_artist_ids=set(),
+        reference_artist_ids=["unknown_reference"],
+        explain=True,
+    )
+
+    assert recommendations
+
+
+def test_metadata_tokens_for_artist_returns_token_set() -> None:
+    content = build_content_artifacts(
+        metadata_df(), ["artist_1", "artist_2", "artist_3"]
+    )
+
+    tokens = metadata_tokens_for_artist("artist_1", content)
+
+    assert "pop" in tokens
+    assert "2020s" in tokens
+
+
+def test_weighted_profile_rejects_empty_weights() -> None:
+    with pytest.raises(ValueError, match="weights must not be empty"):
+        _weighted_profile(csr_matrix([[1.0]]), np.array([]))
