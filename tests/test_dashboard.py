@@ -142,6 +142,41 @@ def dashboard_script(service) -> None:
     render_dashboard(service)
 
 
+class MessageFakeService(FakeDashboardService):
+    def recommend_user(self, **_: Any) -> dict[str, object]:
+        response = self._recommendation_response("popular_fallback")
+        response["message"] = "Unknown listener, returning popular artists."
+        return response
+
+
+class EmptyFakeService(FakeDashboardService):
+    def recommend_user(self, **_: Any) -> dict[str, object]:
+        return {"strategy": "hybrid_personalized", "recommendations": []}
+
+
+class MoreCatalogService(FakeDashboardService):
+    def browse_artists(
+        self,
+        *,
+        query: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, object]:
+        del query, limit
+        artist = self.artifact.content_artifacts.metadata.to_dict("records")[0]
+        artist["genres"] = artist["genres"].split(";")
+        artist["mood_tags"] = artist["mood_tags"].split(";")
+        return {
+            "total": 5,
+            "has_more": True,
+            "artists": [artist],
+        }
+
+
+class RaisingFakeService(FakeDashboardService):
+    def recommend_user(self, **_: Any) -> dict[str, object]:
+        raise ValueError("No artists match those controls.")
+
+
 def test_split_metadata_terms_normalizes_and_sorts_values() -> None:
     values = ["pop; dance", ["bright", "pop"], None, "dance;rock"]
 
@@ -247,3 +282,194 @@ def test_dashboard_artifact_path_accepts_environment_override(
     monkeypatch.setenv(DASHBOARD_ARTIFACT_ENV_VAR, str(artifact_path))
 
     assert resolve_dashboard_artifact_path() == artifact_path.resolve()
+
+
+def test_dashboard_artifact_path_defaults_to_bundle_path(
+    monkeypatch,
+) -> None:
+    from music_recommender.config import ARTIFACT_BUNDLE_PATH
+
+    monkeypatch.delenv(DASHBOARD_ARTIFACT_ENV_VAR, raising=False)
+
+    assert resolve_dashboard_artifact_path() == ARTIFACT_BUNDLE_PATH
+
+
+def test_dashboard_profile_tab_submits_preferences() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(FakeDashboardService(),),
+        default_timeout=10,
+    ).run()
+
+    app.button[1].click().run()
+
+    assert not app.exception
+    assert any(caption.value == "Strategy: Content Profile" for caption in app.caption)
+
+
+def test_dashboard_session_tab_submits_mix() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(FakeDashboardService(),),
+        default_timeout=10,
+    ).run()
+
+    app.button[2].click().run()
+
+    assert not app.exception
+    assert any(caption.value == "Strategy: Session Hybrid" for caption in app.caption)
+
+
+def test_dashboard_similarity_tab_submits() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(FakeDashboardService(),),
+        default_timeout=10,
+    ).run()
+
+    app.button[3].click().run()
+
+    assert not app.exception
+    assert any(
+        caption.value == "Strategy: Hybrid Similarity" for caption in app.caption
+    )
+
+
+def test_dashboard_renders_fallback_message_in_results() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(MessageFakeService(),),
+        default_timeout=10,
+    ).run()
+
+    app.button[0].click().run()
+
+    assert not app.exception
+    assert any(caption.value == "Strategy: Popular Fallback" for caption in app.caption)
+    assert any(info.value.startswith("Unknown listener") for info in app.info)
+
+
+def test_dashboard_warns_when_no_recommendations_match() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(EmptyFakeService(),),
+        default_timeout=10,
+    ).run()
+
+    app.button[0].click().run()
+
+    assert not app.exception
+    assert any(
+        warning.value == "No recommendations matched the selected controls."
+        for warning in app.warning
+    )
+
+
+def test_dashboard_surfaces_service_errors_in_results() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(RaisingFakeService(),),
+        default_timeout=10,
+    ).run()
+
+    app.button[0].click().run()
+
+    assert not app.exception
+    assert any(error.value == "No artists match those controls." for error in app.error)
+
+
+def test_dashboard_catalog_caption_reports_truncated_results() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(MoreCatalogService(),),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(
+        caption.value.startswith("Showing the first 1 of 5") for caption in app.caption
+    )
+
+
+def test_dashboard_entrypoint_renders_with_valid_artifact(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from music_recommender.artifacts import (
+        build_recommender_artifact,
+        save_artifact,
+    )
+    from music_recommender.content import build_content_artifacts
+    from music_recommender.model import train_als_model
+    from music_recommender.preprocessing import (
+        build_user_item_matrix,
+        create_id_mappings,
+    )
+
+    df = pd.DataFrame(
+        {
+            "user_id": ["user_1", "user_1", "user_2"],
+            "artist_id": ["artist_1", "artist_2", "artist_2"],
+            "artist_name": ["A", "B", "B"],
+            "play_count": [10, 5, 7],
+        }
+    )
+    mappings = create_id_mappings(df)
+    matrix = build_user_item_matrix(
+        df,
+        mappings["user_id_to_index"],
+        mappings["artist_id_to_index"],
+    )
+    model = train_als_model(matrix, 4, 0.01, 1, 10.0, use_gpu=False)
+    content = build_content_artifacts(
+        pd.DataFrame(
+            {
+                "artist_id": ["artist_1", "artist_2"],
+                "artist_name": ["A", "B"],
+                "genres": ["pop", "rock"],
+                "mood_tags": ["bright", "raw"],
+                "country": ["Canada", "Canada"],
+                "era": ["2020s", "2020s"],
+            }
+        ),
+        ["artist_1", "artist_2"],
+    )
+    artifact = build_recommender_artifact(
+        model=model,
+        mappings=mappings,
+        user_item_matrix=matrix,
+        filtered_df=df,
+        content_artifacts=content,
+        raw_data_path=tmp_path / "missing.csv",
+        metadata_path=tmp_path / "metadata.csv",
+        training_config={
+            "raw_data_path": str(tmp_path / "missing.csv"),
+            "metadata_path": str(tmp_path / "metadata.csv"),
+            "min_user_interactions": 1,
+            "min_artist_interactions": 1,
+            "factors": 4,
+            "regularization": 0.01,
+            "iterations": 1,
+            "alpha": 10.0,
+            "use_gpu": False,
+            "content_weight": 0.25,
+        },
+        hybrid_config={"default_content_weight": 0.25},
+    )
+    artifact_path = tmp_path / "artifact.joblib"
+    save_artifact(artifact, artifact_path)
+    monkeypatch.setenv(DASHBOARD_ARTIFACT_ENV_VAR, str(artifact_path))
+    load_dashboard_service.clear()
+    entrypoint = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+
+    app = AppTest.from_file(entrypoint, default_timeout=10).run()
+
+    assert not app.exception
+    assert app.title[0].value == "Music Recommender Studio"
+    assert [tab.label for tab in app.tabs] == [
+        "For You",
+        "Taste Profile",
+        "Session Mix",
+        "Similar Artists",
+        "Catalog",
+    ]
