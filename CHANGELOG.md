@@ -44,6 +44,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CLI regression tests for metadata preparation, GPU fallback echoes, tracked
   artifact logging, and per-command service-error exits, plus evaluation
   empty-input and metadata-fallback paths.
+- GPU fallback coverage for ALS training, including failed GPU model creation,
+  failed GPU fitting, and `to_cpu` conversion on CPU-only hardware.
+- Regression tests for the legacy artifacts loader success path, the POSIX
+  parent-directory fsync branch, and the package version fallback when the
+  distribution metadata is unavailable.
 
 ### Fixed
 
