@@ -164,7 +164,16 @@ def test_load_recommender_artifacts_loads_model_matrix_and_mappings(
 
     df = pd.DataFrame(
         {
-            "user_id": ["user_1", "user_1", "user_1", "user_2", "user_2", "user_2", "user_3", "user_3"],
+            "user_id": [
+                "user_1",
+                "user_1",
+                "user_1",
+                "user_2",
+                "user_2",
+                "user_2",
+                "user_3",
+                "user_3",
+            ],
             "artist_id": [
                 "artist_1",
                 "artist_2",
