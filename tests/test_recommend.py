@@ -1,9 +1,11 @@
+import numpy as np
 import pandas as pd
 import pytest
 
 from music_recommender.model import train_als_model
 from music_recommender.preprocessing import build_user_item_matrix, create_id_mappings
 from music_recommender.recommend import (
+    format_recommendations,
     get_similar_artists,
     load_recommender_artifacts,
     recommend_artists_for_user,
@@ -117,6 +119,24 @@ def test_unknown_artist_raises_value_error() -> None:
             mappings=mappings,
             top_k=1,
         )
+
+
+def test_get_similar_artists_returns_empty_for_zero_query_vector() -> None:
+    model, _, mappings = recommender_artifacts()
+    model.user_factors = np.zeros_like(model.user_factors)
+
+    similar_artists = get_similar_artists(
+        model=model,
+        artist_id="artist_1",
+        mappings=mappings,
+        top_k=1,
+    )
+
+    assert similar_artists == []
+
+
+def test_format_recommendations_returns_message_when_empty() -> None:
+    assert format_recommendations([]) == "No recommendations found."
 
 
 def test_load_recommender_artifacts_raises_when_model_missing(tmp_path) -> None:
