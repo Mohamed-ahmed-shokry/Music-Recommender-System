@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
 import pandas as pd
+import pytest
 from scipy.sparse import csr_matrix
 from typer.testing import CliRunner
 
@@ -243,6 +244,14 @@ def test_format_artifact_age_returns_hours() -> None:
     result = _format_artifact_age("2026-01-01T00:00:00+00:00")
 
     assert result.endswith("h")
+
+
+def test_format_artifact_age_returns_minutes() -> None:
+    created = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
+
+    result = _format_artifact_age(created)
+
+    assert result.endswith("m")
 
 
 def test_format_artifact_age_treats_naive_timestamp_as_utc() -> None:
@@ -598,4 +607,197 @@ def test_demo_command_catches_training_runtime_error(monkeypatch) -> None:
 
     assert result.exit_code == 1
     assert "Error: demo failed: implicit training failed" in result.output
+    assert result.exception is not None
+
+
+def test_prepare_metadata_command_validates_metadata(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"user_id": ["u1"], "artist_id": ["a1"]}),
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_artist_metadata",
+        lambda *_: pd.DataFrame({"artist_id": ["a1"]}),
+    )
+
+    result = runner.invoke(cli.app, ["prepare-metadata"])
+
+    assert result.exit_code == 0
+    assert "Metadata validated successfully." in result.output
+    assert "Metadata rows: 1" in result.output
+
+
+def test_prepare_metadata_command_reports_validation_error(monkeypatch) -> None:
+    def fail_to_load(_: Any) -> None:
+        raise ValueError("metadata validation failed")
+
+    monkeypatch.setattr(cli, "load_and_validate_interactions", fail_to_load)
+
+    result = runner.invoke(cli.app, ["prepare-metadata"])
+
+    assert result.exit_code == 1
+    assert "Error: metadata validation failed" in result.output
+
+
+def test_train_command_logs_serving_artifact_when_enabled(monkeypatch) -> None:
+    recorded_run = RecordingRun()
+    tracking_config: dict[str, Any] = {}
+    model = SimpleNamespace(training_device="cpu", gpu_fallback_reason=None)
+    matrix = csr_matrix([[10.0, 0.0], [0.0, 5.0]])
+    mappings = {
+        "user_id_to_index": {"user_1": 0, "user_2": 1},
+        "artist_id_to_index": {"artist_1": 0, "artist_2": 1},
+    }
+    monkeypatch.setattr(
+        cli,
+        "tracking_run",
+        tracking_context(recorded_run, tracking_config),
+    )
+    monkeypatch.setattr(
+        cli,
+        "train_and_save_model",
+        lambda **_: (model, matrix, mappings),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "train",
+            "--no-use-gpu",
+            "--track",
+            "--tracking-uri",
+            "https://mlflow.example",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert recorded_run.artifacts == [(cli.ARTIFACT_BUNDLE_PATH, "serving")]
+
+
+def test_train_command_reports_gpu_fallback_reason(monkeypatch) -> None:
+    model = SimpleNamespace(
+        training_device="cpu",
+        gpu_fallback_reason="cuda unavailable",
+    )
+    monkeypatch.setattr(
+        cli,
+        "train_and_save_model",
+        lambda **_: (
+            model,
+            csr_matrix([[10.0]]),
+            {"user_id_to_index": {"u1": 0}, "artist_id_to_index": {"a1": 0}},
+        ),
+    )
+
+    result = runner.invoke(cli.app, ["train", "--no-use-gpu"])
+
+    assert result.exit_code == 0
+    assert "GPU fallback reason: cuda unavailable" in result.output
+
+
+def test_artifact_info_reports_gpu_fallback_reason(monkeypatch) -> None:
+    class FallbackFakeService(FakeService):
+        def metadata(self) -> dict[str, Any]:
+            metadata = super().metadata()
+            metadata["metadata"]["gpu_fallback_reason"] = "cuda unavailable"
+            return metadata
+
+    install_fake_service(monkeypatch, FallbackFakeService())
+
+    result = runner.invoke(cli.app, ["artifact-info"])
+
+    assert result.exit_code == 0
+    assert "GPU fallback reason: cuda unavailable" in result.output
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (["recommend-user", "--user-id", "user_1"], "service unavailable"),
+        (["recommend-profile", "--artist-ids", "artist_1"], "service unavailable"),
+        (["recommend-session"], "service unavailable"),
+        (["popular-artists"], "service unavailable"),
+        (["similar-artists", "--artist-id", "artist_2"], "service unavailable"),
+        (
+            ["content-similar-artists", "--artist-id", "artist_2"],
+            "service unavailable",
+        ),
+    ],
+)
+def test_recommendation_commands_report_service_errors(
+    monkeypatch,
+    arguments: list[str],
+    message: str,
+) -> None:
+    def fail_load(*_: Any) -> None:
+        raise ValueError(message)
+
+    monkeypatch.setattr(
+        cli,
+        "RecommenderService",
+        SimpleNamespace(from_artifacts=fail_load),
+    )
+
+    result = runner.invoke(cli.app, arguments)
+
+    assert result.exit_code == 1
+    assert f"Error: {message}" in result.output
+    assert result.exception is not None
+
+
+def test_evaluate_command_compare_baseline_prints_both_rows(monkeypatch) -> None:
+    metrics = dict.fromkeys(("als", "popularity"), metric_row())
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+    monkeypatch.setattr(
+        cli,
+        "evaluate_repeated_holdout",
+        lambda *_args, **_kwargs: metrics,
+    )
+
+    result = runner.invoke(cli.app, ["evaluate", "--compare-baseline"])
+
+    assert result.exit_code == 0
+    assert "ALS:" in result.output
+    assert "Popularity:" in result.output
+
+
+def test_evaluate_command_als_only_prints_single_row(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+    monkeypatch.setattr(
+        cli,
+        "evaluate_repeated_holdout",
+        lambda *_args, **_kwargs: metric_row(),
+    )
+
+    result = runner.invoke(cli.app, ["evaluate"])
+
+    assert result.exit_code == 0
+    assert "ALS:" in result.output
+    assert "Popularity:" not in result.output
+
+
+def test_demo_command_reports_service_error(monkeypatch) -> None:
+    def fail_load(*_: Any) -> None:
+        raise ValueError("artifact is invalid")
+
+    monkeypatch.setattr(
+        cli,
+        "RecommenderService",
+        SimpleNamespace(from_artifacts=fail_load),
+    )
+
+    result = runner.invoke(cli.app, ["demo"])
+
+    assert result.exit_code == 1
+    assert "Error: artifact is invalid" in result.output
     assert result.exception is not None
