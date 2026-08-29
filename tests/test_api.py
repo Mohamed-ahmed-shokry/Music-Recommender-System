@@ -583,3 +583,98 @@ def test_recommendation_routes_reject_coerced_or_unknown_fields(
         response = client.post(path, json=payload)
 
     assert response.status_code == 422
+
+
+class RaisingService:
+    def __getattr__(self, _name: str) -> object:
+        def raise_value_error(*_args: object, **_kwargs: object) -> None:
+            raise ValueError("service operation failed")
+
+        return raise_value_error
+
+
+def test_metadata_route_returns_artifact_metadata() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/metadata")
+
+    assert response.status_code == 200
+    assert response.json()["version"] == "4.0"
+
+
+def test_popular_artists_route_returns_recommendations() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/popular-artists", params={"top_k": 1})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["strategy"] == "popular_baseline"
+    assert body["recommendations"][0]["artist_name"] == "A"
+
+
+def test_similar_artists_route_returns_similar_artists() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get(
+            "/similar-artists/artist_1",
+            params={"method": "hybrid", "top_k": 1, "explain": True},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["strategy"] == "hybrid_similarity"
+    assert body["similar_artists"][0]["reasons"]
+
+
+def test_similar_artists_route_returns_404_for_unknown_artist() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = RaisingService()
+        api_main.service_load_error = None
+
+        response = client.get("/similar-artists/missing_artist")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "service operation failed"
+
+
+def test_content_similar_route_returns_404_for_unknown_artist() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = RaisingService()
+        api_main.service_load_error = None
+
+        response = client.get("/content-similar-artists/missing_artist")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "service operation failed"
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "request_kwargs"),
+    [
+        ("get", "/popular-artists", {}),
+        ("get", "/catalog/artists", {}),
+        ("get", "/recommend/user/user_1", {}),
+        ("post", "/recommend/profile", {"json": {}}),
+        ("post", "/recommend/session", {"json": {}}),
+    ],
+)
+def test_service_value_errors_become_http_422(
+    method: str,
+    path: str,
+    request_kwargs: dict[str, object],
+) -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = RaisingService()
+        api_main.service_load_error = None
+
+        response = client.request(method, path, **request_kwargs)
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "service operation failed"
