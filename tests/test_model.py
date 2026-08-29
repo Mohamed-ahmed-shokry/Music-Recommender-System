@@ -55,6 +55,19 @@ def test_saved_model_can_be_loaded(tmp_path: Path) -> None:
     assert loaded_model.item_factors.shape == model.item_factors.shape
 
 
+def test_load_model_raises_when_artifact_is_missing(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="Model artifact not found"):
+        load_model(tmp_path / "missing_model.joblib")
+
+
+def test_load_model_raises_on_corrupt_artifact(tmp_path: Path) -> None:
+    corrupt_path = tmp_path / "corrupt.joblib"
+    corrupt_path.write_bytes(b"not a valid joblib payload")
+
+    with pytest.raises(ValueError, match="could not be loaded"):
+        load_model(corrupt_path)
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
