@@ -1,9 +1,11 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from scipy.sparse import csr_matrix
 
+import music_recommender.model as model_module
 from music_recommender.model import (
     load_model,
     save_model,
@@ -232,3 +234,131 @@ def test_train_and_save_does_not_persist_model_on_metadata_failure(
 
     assert not model_path.exists()
     assert not artifact_path.exists()
+
+
+def test_gpu_model_creation_failure_falls_back_to_cpu(monkeypatch) -> None:
+    def fake_create(factors, regularization, iterations, use_gpu):
+        if use_gpu:
+            raise RuntimeError("cuda unavailable")
+        model = SimpleNamespace()
+        model.training_device = "cpu"
+        model.gpu_fallback_reason = None
+        model.fit = lambda *_args, **_kwargs: None
+        return model
+
+    monkeypatch.setattr(model_module, "_create_als_model", fake_create)
+
+    model = train_als_model(
+        user_item_matrix=tiny_matrix(),
+        factors=4,
+        regularization=0.01,
+        iterations=2,
+        alpha=10.0,
+        use_gpu=True,
+    )
+
+    assert model.training_device == "cpu"
+    assert model.gpu_fallback_reason == "cuda unavailable"
+
+
+def test_gpu_model_creation_failure_without_gpu_raises(monkeypatch) -> None:
+    def fake_create(*_args, **_kwargs) -> None:
+        raise RuntimeError("cuda unavailable")
+
+    monkeypatch.setattr(model_module, "_create_als_model", fake_create)
+
+    with pytest.raises(RuntimeError, match="cuda unavailable"):
+        train_als_model(
+            user_item_matrix=tiny_matrix(),
+            factors=4,
+            regularization=0.01,
+            iterations=2,
+            alpha=10.0,
+            use_gpu=False,
+        )
+
+
+def test_gpu_fit_failure_falls_back_to_cpu(monkeypatch) -> None:
+    def make_model(*_args, use_gpu: bool, **_kwargs):
+        model = SimpleNamespace()
+        model.training_device = "gpu" if use_gpu else "cpu"
+        model.gpu_fallback_reason = None
+
+        def fit(*_fit_args, **_fit_kwargs) -> None:
+            if model.training_device == "gpu":
+                raise RuntimeError("gpu fit failed")
+
+        model.fit = fit
+        return model
+
+    monkeypatch.setattr(model_module, "_create_als_model", make_model)
+
+    model = train_als_model(
+        user_item_matrix=tiny_matrix(),
+        factors=4,
+        regularization=0.01,
+        iterations=2,
+        alpha=10.0,
+        use_gpu=True,
+    )
+
+    assert model.training_device == "cpu"
+    assert model.gpu_fallback_reason == "gpu fit failed"
+
+
+def test_gpu_fit_failure_without_gpu_raises(monkeypatch) -> None:
+    model = SimpleNamespace()
+    model.training_device = "cpu"
+    model.gpu_fallback_reason = None
+
+    def fit(*_args, **_kwargs) -> None:
+        raise RuntimeError("fit exploded")
+
+    model.fit = fit
+
+    monkeypatch.setattr(
+        model_module,
+        "_create_als_model",
+        lambda *_args, **_kwargs: model,
+    )
+
+    with pytest.raises(RuntimeError, match="fit exploded"):
+        train_als_model(
+            user_item_matrix=tiny_matrix(),
+            factors=4,
+            regularization=0.01,
+            iterations=2,
+            alpha=10.0,
+            use_gpu=False,
+        )
+
+
+def test_gpu_model_moves_to_cpu_when_supported(monkeypatch) -> None:
+    class GpuModel:
+        def __init__(self) -> None:
+            self.training_device = "gpu"
+            self.gpu_fallback_reason = None
+
+        def fit(self, *_args, **_kwargs) -> None:
+            return None
+
+        def to_cpu(self) -> "GpuModel":
+            return self
+
+    monkeypatch.setattr(
+        model_module,
+        "_create_als_model",
+        lambda *_args, **_kwargs: GpuModel(),
+    )
+
+    model = train_als_model(
+        user_item_matrix=tiny_matrix(),
+        factors=4,
+        regularization=0.01,
+        iterations=2,
+        alpha=10.0,
+        use_gpu=True,
+    )
+
+    assert model.training_device == "gpu"
+    assert model.gpu_fallback_reason is None
