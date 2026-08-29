@@ -155,3 +155,66 @@ def test_load_recommender_artifacts_raises_when_mappings_missing(tmp_path) -> No
             model_path=model_path,
             mappings_path=tmp_path / "missing_mappings.joblib",
         )
+
+
+def test_load_recommender_artifacts_loads_model_matrix_and_mappings(
+    tmp_path,
+) -> None:
+    import joblib
+
+    df = pd.DataFrame(
+        {
+            "user_id": ["user_1", "user_1", "user_1", "user_2", "user_2", "user_2", "user_3", "user_3"],
+            "artist_id": [
+                "artist_1",
+                "artist_2",
+                "artist_3",
+                "artist_2",
+                "artist_3",
+                "artist_4",
+                "artist_1",
+                "artist_4",
+            ],
+            "artist_name": [
+                "The Weeknd",
+                "Drake",
+                "Kendrick Lamar",
+                "Drake",
+                "Kendrick Lamar",
+                "SZA",
+                "The Weeknd",
+                "SZA",
+            ],
+            "play_count": [10, 8, 7, 9, 8, 6, 5, 4],
+        }
+    )
+    df.to_csv(tmp_path / "interactions.csv", index=False)
+    mappings = create_id_mappings(df)
+    matrix = build_user_item_matrix(
+        df,
+        mappings["user_id_to_index"],
+        mappings["artist_id_to_index"],
+    )
+    model = train_als_model(
+        user_item_matrix=matrix,
+        factors=4,
+        regularization=0.01,
+        iterations=2,
+        alpha=10.0,
+        use_gpu=False,
+    )
+    model_path = tmp_path / "model.joblib"
+    mappings_path = tmp_path / "mappings.joblib"
+    joblib.dump(model, model_path)
+    joblib.dump(mappings, mappings_path)
+
+    loaded_model, loaded_matrix, loaded_mappings = load_recommender_artifacts(
+        model_path=model_path,
+        mappings_path=mappings_path,
+        raw_data_path=tmp_path / "interactions.csv",
+    )
+
+    assert loaded_model.user_factors.shape == model.user_factors.shape
+    assert loaded_matrix.shape == matrix.shape
+    assert loaded_mappings["user_id_to_index"] == mappings["user_id_to_index"]
+    assert loaded_mappings["index_to_artist_id"] == mappings["index_to_artist_id"]
