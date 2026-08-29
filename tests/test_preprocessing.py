@@ -5,6 +5,7 @@ from music_recommender.preprocessing import (
     build_user_item_matrix,
     create_id_mappings,
     filter_interactions,
+    load_mappings,
 )
 
 
@@ -90,3 +91,16 @@ def test_filter_interactions_rejects_empty_result() -> None:
             min_user_interactions=3,
             min_artist_interactions=3,
         )
+
+
+def test_load_mappings_raises_when_artifact_is_missing(tmp_path) -> None:
+    with pytest.raises(FileNotFoundError, match="Mappings artifact not found"):
+        load_mappings(tmp_path / "missing_mappings.joblib")
+
+
+def test_load_mappings_raises_on_corrupt_artifact(tmp_path) -> None:
+    corrupt_path = tmp_path / "corrupt.joblib"
+    corrupt_path.write_bytes(b"not a valid joblib payload")
+
+    with pytest.raises(ValueError, match="could not be loaded"):
+        load_mappings(corrupt_path)
