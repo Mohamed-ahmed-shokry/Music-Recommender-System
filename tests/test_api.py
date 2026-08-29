@@ -316,6 +316,92 @@ def test_streamed_oversized_request_body_is_rejected() -> None:
     assert response_start["status"] == 413
 
 
+def http_scope_with_headers(headers: list[tuple[bytes, bytes]]) -> Scope:
+    return {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/recommend/profile",
+        "raw_path": b"/recommend/profile",
+        "query_string": b"",
+        "root_path": "",
+        "headers": headers,
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+        "state": {},
+    }
+
+
+def test_middleware_rejects_non_positive_body_limit() -> None:
+    with pytest.raises(ValueError, match="max_body_bytes"):
+        RequestSafetyMiddleware(lambda *_: None, max_body_bytes=0)
+
+
+@pytest.mark.parametrize("content_length", [b"not-a-number", b"-5"])
+def test_middleware_rejects_invalid_content_length(content_length: bytes) -> None:
+    middleware = RequestSafetyMiddleware(
+        lambda *_: None,
+        max_body_bytes=100,
+    )
+    sent_messages: list[Message] = []
+
+    async def send(message: Message) -> None:
+        sent_messages.append(message)
+
+    asyncio.run(
+        middleware(
+            http_scope_with_headers([(b"content-length", content_length)]),
+            lambda: {},  # type: ignore[arg-type,return-value]
+            send,
+        )
+    )
+
+    assert sent_messages[0]["status"] == 400
+
+
+def test_body_limit_after_response_start_does_not_reject() -> None:
+    async def app_sends_head_then_reads(
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+    ) -> None:
+        del scope
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        while True:
+            message = await receive()
+            if not message.get("more_body", False):
+                return
+
+    middleware = RequestSafetyMiddleware(app_sends_head_then_reads, max_body_bytes=4)
+    messages = iter(
+        [
+            {"type": "http.request", "body": b"123", "more_body": True},
+            {"type": "http.request", "body": b"45", "more_body": False},
+        ]
+    )
+    sent_messages: list[Message] = []
+
+    async def receive() -> Message:
+        return next(messages)  # type: ignore[return-value]
+
+    async def send(message: Message) -> None:
+        sent_messages.append(message)
+
+    asyncio.run(
+        middleware(
+            http_scope_with_headers([]),
+            receive,
+            send,
+        )
+    )
+
+    assert len(sent_messages) == 1
+    assert sent_messages[0]["type"] == "http.response.start"
+    assert sent_messages[0]["status"] == 200
+
+
 def test_recommend_user_route_accepts_hybrid_params() -> None:
     with TestClient(api_main.app) as client:
         api_main.service = FakeService()
