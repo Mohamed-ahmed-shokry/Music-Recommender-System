@@ -1,9 +1,14 @@
 import pandas as pd
 import pytest
 
+import music_recommender.evaluate as evaluate_module
 from music_recommender.evaluate import (
+    _average_metric_dicts,
+    _summarize_recommendations,
     average_popularity,
+    average_precision_at_k,
     catalog_coverage,
+    evaluate_model,
     evaluate_repeated_holdout,
     explanation_coverage,
     intra_list_diversity,
@@ -291,4 +296,176 @@ def test_repeated_holdout_returns_all_model_comparison() -> None:
 
     assert {"als", "popularity", "content", "hybrid"} <= set(metrics)
     assert "novelty_at_k" in metrics["hybrid"]
+    assert "explanation_coverage" in metrics["content"]
+
+
+def test_precision_at_k_returns_zero_for_non_positive_k() -> None:
+    assert precision_at_k(["a"], {"a"}, k=0) == 0.0
+
+
+def test_recall_at_k_returns_zero_for_empty_relevant() -> None:
+    assert recall_at_k(["a"], set(), k=3) == 0.0
+
+
+def test_average_precision_at_k_returns_zero_for_empty_relevant() -> None:
+    assert average_precision_at_k(["a"], set(), k=3) == 0.0
+
+
+def test_map_at_k_returns_zero_for_empty_input() -> None:
+    assert map_at_k([], [], k=3) == 0.0
+
+
+def test_ndcg_at_k_returns_zero_for_empty_relevant() -> None:
+    assert ndcg_at_k(["a"], set(), k=3) == 0.0
+
+
+def test_catalog_coverage_returns_zero_for_empty_catalog() -> None:
+    assert catalog_coverage([["a"]], set()) == 0.0
+
+
+def test_average_popularity_returns_zero_without_known_artists() -> None:
+    assert average_popularity([["a"]], {}) == 0.0
+
+
+def test_novelty_at_k_returns_zero_for_empty_stats() -> None:
+    assert novelty_at_k([["a"]], {}) == 0.0
+
+
+def test_novelty_at_k_skips_artists_missing_from_stats() -> None:
+    novelty = novelty_at_k(
+        [["b", "unknown"]],
+        {
+            "a": {"popularity_rank": 1},
+            "b": {"popularity_rank": 2},
+        },
+    )
+
+    assert novelty == pytest.approx(1.0)
+
+
+def test_explanation_coverage_returns_zero_for_empty_input() -> None:
+    assert explanation_coverage([]) == 0.0
+
+
+def test_intra_list_diversity_returns_zero_for_single_item() -> None:
+    diversity = intra_list_diversity(
+        ["a"],
+        artist_factors=pd.DataFrame([[1.0, 0.0]]).to_numpy(),
+        artist_id_to_index={"a": 0},
+    )
+
+    assert diversity == 0.0
+
+
+def test_average_metric_dicts_returns_empty_for_empty_input() -> None:
+    assert _average_metric_dicts([]) == {}
+
+
+def test_summarize_recommendations_returns_zeros_for_empty_input() -> None:
+    summary = _summarize_recommendations(
+        list_of_recommended_items=[],
+        list_of_relevant_items=[],
+        catalog_items=set(),
+        artist_stats={},
+        artist_factors=pd.DataFrame().to_numpy(),
+        artist_id_to_index={},
+        top_k=3,
+    )
+
+    assert set(summary) == {
+        "precision_at_k",
+        "recall_at_k",
+        "map_at_k",
+        "ndcg_at_k",
+        "catalog_coverage",
+        "average_popularity",
+        "intra_list_diversity",
+        "novelty_at_k",
+        "explanation_coverage",
+    }
+    assert all(value == 0.0 for value in summary.values())
+
+
+def test_evaluate_model_delegates_to_repeated_holdout(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    def fake_repeated_holdout(**kwargs) -> dict:
+        calls.append(kwargs)
+        return {"precision_at_k": 0.5}
+
+    monkeypatch.setattr(
+        evaluate_module,
+        "evaluate_repeated_holdout",
+        fake_repeated_holdout,
+    )
+    df = pd.DataFrame()
+
+    metrics = evaluate_model(df, top_k=3, use_gpu=False)
+
+    assert metrics == {"precision_at_k": 0.5}
+    assert calls == [
+        {
+            "df": df,
+            "top_k": 3,
+            "folds": 1,
+            "use_gpu": False,
+            "compare_baseline": False,
+        }
+    ]
+
+
+def test_repeated_holdout_als_only_returns_flat_metrics() -> None:
+    df = pd.DataFrame(
+        {
+            "user_id": ["user_1", "user_1", "user_2", "user_2"],
+            "artist_id": ["artist_1", "artist_2", "artist_1", "artist_2"],
+            "artist_name": ["A", "B", "A", "B"],
+            "play_count": [5, 4, 5, 4],
+        }
+    )
+
+    metrics = evaluate_repeated_holdout(df, top_k=1, folds=1, use_gpu=False)
+
+    assert "als" not in metrics
+    assert "popularity" not in metrics
+    assert "precision_at_k" in metrics
+
+
+def test_repeated_holdout_builds_content_from_interactions_when_no_metadata() -> None:
+    df = pd.DataFrame(
+        {
+            "user_id": [
+                "user_1",
+                "user_1",
+                "user_1",
+                "user_2",
+                "user_2",
+                "user_2",
+                "user_3",
+                "user_3",
+            ],
+            "artist_id": [
+                "artist_1",
+                "artist_2",
+                "artist_3",
+                "artist_1",
+                "artist_3",
+                "artist_4",
+                "artist_2",
+                "artist_4",
+            ],
+            "artist_name": ["A", "B", "C", "A", "C", "D", "B", "D"],
+            "play_count": [5, 4, 3, 5, 4, 3, 5, 3],
+        }
+    )
+
+    metrics = evaluate_repeated_holdout(
+        df,
+        top_k=1,
+        folds=1,
+        use_gpu=False,
+        compare_all=True,
+    )
+
+    assert {"als", "popularity", "content", "hybrid"} <= set(metrics)
     assert "explanation_coverage" in metrics["content"]
