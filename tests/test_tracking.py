@@ -146,9 +146,24 @@ def test_disabled_run_is_a_no_op() -> None:
     ) as run:
         run.log_params({"factors": 32})
         run.log_metrics({"recall": 0.5})
+        run.set_tags({"device": "cpu"})
+        run.log_artifact(Path("missing.joblib"))
+        run.log_dict({"recall": 0.5}, "metrics.json")
 
     assert not run.enabled
     assert run.run_id is None
+
+
+def test_tracking_call_wraps_underlying_failures() -> None:
+    class FailingMlflow:
+        def log_metrics(self, metrics: dict[str, float]) -> None:
+            del metrics
+            raise RuntimeError("connection refused")
+
+    run = TrackedRun(enabled=True, _mlflow=FailingMlflow())
+
+    with pytest.raises(ExperimentTrackingError, match="could not log metrics"):
+        run.log_metrics({"recall": 0.5})
 
 
 def test_tracking_run_manages_mlflow_lifecycle(monkeypatch) -> None:
