@@ -72,3 +72,96 @@ def test_diversity_reranking_reduces_near_duplicates() -> None:
     )
 
     assert reranked == [0, 2]
+
+
+def test_popularity_penalty_returns_copy_without_penalty_or_stats() -> None:
+    scores = np.array([1.0, 0.5])
+
+    adjusted = apply_popularity_penalty(
+        scores,
+        {0: "artist_1"},
+        None,
+        popularity_penalty=0.0,
+    )
+
+    assert (adjusted == scores).all()
+    assert adjusted is not scores
+
+
+def test_popularity_penalty_defaults_scale_when_all_scores_are_zero() -> None:
+    scores = np.zeros(2)
+    index_to_artist_id = {0: "artist_1", 1: "artist_2"}
+    artist_stats = {
+        "artist_1": {"popularity_rank": 1},
+        "artist_2": {"popularity_rank": 2},
+    }
+
+    adjusted = apply_popularity_penalty(
+        scores,
+        index_to_artist_id,
+        artist_stats,
+        popularity_penalty=1.0,
+    )
+
+    assert adjusted[0] == -1.0
+    assert adjusted[1] == 0.0
+
+
+def test_popularity_penalty_skips_artists_missing_from_stats() -> None:
+    scores = np.array([1.0, 0.5])
+    index_to_artist_id = {0: "tracked", 1: "untracked"}
+    artist_stats = {"tracked": {"popularity_rank": 1}}
+
+    adjusted = apply_popularity_penalty(
+        scores,
+        index_to_artist_id,
+        artist_stats,
+        popularity_penalty=1.0,
+    )
+
+    assert adjusted[0] < 1.0
+    assert adjusted[1] == 0.5
+
+
+def test_diversity_reranking_handles_identical_scores() -> None:
+    candidate_indices = [0, 1, 2]
+    scores = np.array([0.5, 0.5, 0.5])
+    artist_factors = np.array(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+        ]
+    )
+
+    reranked = rerank_with_diversity(
+        candidate_indices,
+        scores,
+        artist_factors,
+        top_k=2,
+        diversity=0.5,
+    )
+
+    assert len(reranked) == 2
+    assert set(reranked) <= set(candidate_indices)
+
+
+def test_diversity_reranking_handles_zero_norm_vectors() -> None:
+    candidate_indices = [0, 1]
+    scores = np.array([1.0, 0.5])
+    artist_factors = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+        ]
+    )
+
+    reranked = rerank_with_diversity(
+        candidate_indices,
+        scores,
+        artist_factors,
+        top_k=2,
+        diversity=1.0,
+    )
+
+    assert len(reranked) == 2
