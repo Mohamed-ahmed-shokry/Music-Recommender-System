@@ -173,6 +173,13 @@ def novelty_at_k(
     return float(np.mean(novelty_values)) if novelty_values else 0.0
 
 
+def _median_popularity_rank(artist_stats: dict[str, ArtistStats]) -> float:
+    """Return the median popularity rank across the artist catalog."""
+    return float(
+        np.median([int(stats["popularity_rank"]) for stats in artist_stats.values()])
+    )
+
+
 def unexpectedness_at_k(
     list_of_recommended_items: list[list[str]],
     artist_stats: dict[str, ArtistStats],
@@ -181,9 +188,7 @@ def unexpectedness_at_k(
     if not artist_stats:
         return 0.0
 
-    median_rank = float(
-        np.median([int(stats["popularity_rank"]) for stats in artist_stats.values()])
-    )
+    median_rank = _median_popularity_rank(artist_stats)
     unexpected_values = [
         int(artist_stats[item]["popularity_rank"]) > median_rank
         for recommended_items in list_of_recommended_items
@@ -191,6 +196,39 @@ def unexpectedness_at_k(
         if item in artist_stats
     ]
     return float(np.mean(unexpected_values)) if unexpected_values else 0.0
+
+
+def serendipity_at_k(
+    recommended_items: Sequence[str],
+    relevant_items: Collection[str],
+    artist_stats: dict[str, ArtistStats],
+    k: int,
+) -> float:
+    """Calculate the share of relevant top-K items that are also unexpected.
+
+    A serendipitous recommendation both matches the user's relevance set and
+    comes from the popularity long tail (below-median popularity rank).
+    """
+    if k <= 0 or not artist_stats:
+        return 0.0
+
+    relevant_set = set(relevant_items)
+    if not relevant_set:
+        return 0.0
+
+    median_rank = _median_popularity_rank(artist_stats)
+    hits = [
+        item
+        for item in recommended_items[:k]
+        if item in relevant_set and item in artist_stats
+    ]
+    if not hits:
+        return 0.0
+
+    serendipitous_hits = [
+        int(artist_stats[item]["popularity_rank"]) > median_rank for item in hits
+    ]
+    return float(np.mean(serendipitous_hits))
 
 
 def explanation_coverage(
@@ -561,6 +599,7 @@ def _summarize_recommendations(
             "intra_list_diversity": 0.0,
             "novelty_at_k": 0.0,
             "unexpectedness_at_k": 0.0,
+            "serendipity_at_k": 0.0,
             "explanation_coverage": 0.0,
         }
 
@@ -618,6 +657,23 @@ def _summarize_recommendations(
         "unexpectedness_at_k": unexpectedness_at_k(
             list_of_recommended_items,
             artist_stats,
+        ),
+        "serendipity_at_k": float(
+            np.mean(
+                [
+                    serendipity_at_k(
+                        recommended_items,
+                        relevant_items,
+                        artist_stats,
+                        top_k,
+                    )
+                    for recommended_items, relevant_items in zip(
+                        list_of_recommended_items,
+                        list_of_relevant_items,
+                        strict=True,
+                    )
+                ]
+            )
         ),
         "explanation_coverage": explanation_coverage(list_of_recommendations or []),
         "intra_list_diversity": float(

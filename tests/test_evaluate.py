@@ -17,6 +17,7 @@ from music_recommender.evaluate import (
     novelty_at_k,
     precision_at_k,
     recall_at_k,
+    serendipity_at_k,
     train_test_split_by_user,
     unexpectedness_at_k,
 )
@@ -372,6 +373,44 @@ def test_unexpectedness_at_k_returns_zero_without_known_artists() -> None:
     )
 
 
+def test_serendipity_at_k_works_on_known_example() -> None:
+    serendipity = serendipity_at_k(
+        recommended_items=["a", "d"],
+        relevant_items={"a", "d"},
+        artist_stats={
+            "a": {"popularity_rank": 1},
+            "b": {"popularity_rank": 2},
+            "c": {"popularity_rank": 3},
+            "d": {"popularity_rank": 4},
+        },
+        k=4,
+    )
+
+    assert serendipity == pytest.approx(0.5)
+
+
+def test_serendipity_at_k_returns_zero_without_relevant_hits() -> None:
+    serendipity = serendipity_at_k(
+        recommended_items=["a"],
+        relevant_items={"unknown"},
+        artist_stats={
+            "a": {"popularity_rank": 1},
+            "b": {"popularity_rank": 2},
+        },
+        k=1,
+    )
+
+    assert serendipity == 0.0
+
+
+def test_serendipity_at_k_returns_zero_for_empty_inputs() -> None:
+    stats = {"a": {"popularity_rank": 1}, "b": {"popularity_rank": 2}}
+
+    assert serendipity_at_k(["a"], {"a"}, {}, k=1) == 0.0
+    assert serendipity_at_k(["a"], {"a"}, stats, k=0) == 0.0
+    assert serendipity_at_k(["a"], set(), stats, k=1) == 0.0
+
+
 def test_explanation_coverage_returns_zero_for_empty_input() -> None:
     assert explanation_coverage([]) == 0.0
 
@@ -411,6 +450,7 @@ def test_summarize_recommendations_returns_zeros_for_empty_input() -> None:
         "intra_list_diversity",
         "novelty_at_k",
         "unexpectedness_at_k",
+        "serendipity_at_k",
         "explanation_coverage",
     }
     assert all(value == 0.0 for value in summary.values())
