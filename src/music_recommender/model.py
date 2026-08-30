@@ -29,6 +29,7 @@ from music_recommender.config import (
 from music_recommender.content import build_content_artifacts, validate_content_weight
 from music_recommender.metadata import load_and_validate_artist_metadata
 from music_recommender.preprocessing import Mappings, prepare_training_data
+from music_recommender.ranking import validate_ranking_parameters
 from music_recommender.utils import atomic_joblib_dump, is_finite_number
 
 if TYPE_CHECKING:
@@ -211,6 +212,9 @@ def train_and_save_model(
     alpha: float = DEFAULT_ALS_ALPHA,
     use_gpu: bool = DEFAULT_USE_GPU,
     content_weight: float = DEFAULT_CONTENT_WEIGHT,
+    popularity_penalty: float = 0.0,
+    diversity: float = 0.0,
+    include_listened: bool = False,
 ) -> tuple[AlternatingLeastSquares, csr_matrix, Mappings]:
     """Prepare data, train ALS, and save model artifacts."""
     _validate_als_hyperparameters(
@@ -221,6 +225,15 @@ def train_and_save_model(
         use_gpu=use_gpu,
     )
     validate_content_weight(content_weight)
+    # top_k is a placeholder here: the shared validator also guards the two
+    # reranking knobs that are stored on the artifact as champion settings.
+    validate_ranking_parameters(
+        1,
+        diversity=diversity,
+        popularity_penalty=popularity_penalty,
+    )
+    if type(include_listened) is not bool:
+        raise ValueError("include_listened must be a boolean.")
     filtered_df, user_item_matrix, mappings = prepare_training_data(
         raw_data_path=raw_data_path,
         mappings_path=mappings_path,
@@ -259,6 +272,11 @@ def train_and_save_model(
     hybrid_config = {
         "default_content_weight": content_weight,
     }
+    ranking_config = {
+        "include_listened": include_listened,
+        "popularity_penalty": popularity_penalty,
+        "diversity": diversity,
+    }
     artifact = build_recommender_artifact(
         model=model,
         mappings=mappings,
@@ -269,6 +287,7 @@ def train_and_save_model(
         metadata_path=metadata_path,
         training_config=training_config,
         hybrid_config=hybrid_config,
+        ranking_config=ranking_config,
     )
     save_artifact(artifact, artifact_path)
     save_model(model, model_path)

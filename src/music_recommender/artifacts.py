@@ -21,6 +21,12 @@ from music_recommender.utils import atomic_joblib_dump, is_finite_number
 
 ARTIFACT_VERSION = "4.0"
 
+DEFAULT_RANKING_CONFIG: dict[str, Any] = {
+    "include_listened": False,
+    "popularity_penalty": 0.0,
+    "diversity": 0.0,
+}
+
 ArtistStats = dict[str, str | int | float]
 
 
@@ -37,6 +43,7 @@ class RecommenderArtifact:
     metadata: dict[str, Any]
     training_config: dict[str, Any]
     hybrid_config: dict[str, Any]
+    ranking_config: dict[str, Any]
 
     def __repr__(self) -> str:
         return (
@@ -113,6 +120,7 @@ def build_recommender_artifact(
     metadata_path: str | Path,
     training_config: dict[str, Any],
     hybrid_config: dict[str, Any],
+    ranking_config: dict[str, Any],
 ) -> RecommenderArtifact:
     """Build a versioned artifact from trained model state."""
     metadata = {
@@ -139,6 +147,7 @@ def build_recommender_artifact(
         metadata=metadata,
         training_config=training_config,
         hybrid_config=hybrid_config,
+        ranking_config=ranking_config,
     )
 
 
@@ -191,6 +200,10 @@ def _validate_loaded_artifact(artifact: Any) -> RecommenderArtifact:
             f"Artifact version {artifact.version} is not "
             f"compatible with required version {ARTIFACT_VERSION}. Retrain the model."
         )
+
+    artifact.ranking_config = _validate_or_default_ranking_config(
+        getattr(artifact, "ranking_config", None)
+    )
 
     if not isinstance(artifact.mappings, dict):
         raise ValueError("Artifact mappings are not a dictionary. Retrain the model.")
@@ -608,6 +621,26 @@ def _validate_artifact_metadata(
         expected_rows=num_artists,
         label="artist metadata dataset",
     )
+
+
+def _validate_or_default_ranking_config(ranking_config: Any) -> dict[str, Any]:
+    """Validate champion reranking settings, defaulting legacy bundles."""
+    if ranking_config is None:
+        return dict(DEFAULT_RANKING_CONFIG)
+    required_fields = {"include_listened", "popularity_penalty", "diversity"}
+    if (
+        not isinstance(ranking_config, dict)
+        or set(ranking_config) != required_fields
+        or type(ranking_config["include_listened"]) is not bool
+        or not is_finite_number(ranking_config["popularity_penalty"])
+        or not 0 <= ranking_config["popularity_penalty"] <= 1
+        or not is_finite_number(ranking_config["diversity"])
+        or not 0 <= ranking_config["diversity"] <= 1
+    ):
+        raise ValueError(
+            "Artifact ranking configuration is invalid. Retrain the model."
+        )
+    return ranking_config
 
 
 def _validate_artifact_configuration(

@@ -79,6 +79,11 @@ def create_test_artifact(tmp_path: Path) -> RecommenderArtifact:
             "content_weight": 0.25,
         },
         hybrid_config={"default_content_weight": 0.25},
+        ranking_config={
+            "include_listened": False,
+            "popularity_penalty": 0.0,
+            "diversity": 0.0,
+        },
     )
 
 
@@ -94,8 +99,43 @@ def test_artifact_bundle_saves_and_loads(tmp_path: Path) -> None:
     assert loaded_artifact.metadata["num_users"] == 2
     assert loaded_artifact.training_config["factors"] == 4
     assert loaded_artifact.hybrid_config["default_content_weight"] == 0.25
+    assert loaded_artifact.ranking_config == {
+        "include_listened": False,
+        "popularity_penalty": 0.0,
+        "diversity": 0.0,
+    }
     assert loaded_artifact.content_artifacts.content_matrix.shape[0] == 3
     assert "artist_2" in loaded_artifact.artist_stats
+
+
+def test_artifact_without_ranking_config_defaults_to_neutral(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    del artifact.ranking_config
+    artifact_path = tmp_path / "legacy.joblib"
+
+    save_artifact(artifact, artifact_path)
+    loaded_artifact = load_artifact(artifact_path)
+
+    assert loaded_artifact.ranking_config == {
+        "include_listened": False,
+        "popularity_penalty": 0.0,
+        "diversity": 0.0,
+    }
+
+
+def test_artifact_rejects_invalid_ranking_config(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.ranking_config = {
+        "include_listened": "yes",
+        "popularity_penalty": 0.0,
+        "diversity": 0.0,
+    }
+    artifact_path = tmp_path / "invalid-ranking.joblib"
+
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="ranking configuration"):
+        load_artifact(artifact_path)
 
 
 def test_corrupt_artifact_has_actionable_load_error(tmp_path: Path) -> None:

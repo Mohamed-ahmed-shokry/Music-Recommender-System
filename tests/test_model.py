@@ -6,6 +6,7 @@ import pytest
 from scipy.sparse import csr_matrix
 
 import music_recommender.model as model_module
+from music_recommender.artifacts import load_artifact
 from music_recommender.model import (
     load_model,
     save_model,
@@ -130,6 +131,9 @@ def test_als_training_rejects_invalid_interaction_matrix(
     [
         ({"factors": 0}, "factors"),
         ({"content_weight": float("nan")}, "content_weight"),
+        ({"popularity_penalty": 1.5}, "popularity_penalty"),
+        ({"diversity": float("nan")}, "diversity"),
+        ({"include_listened": 1}, "include_listened"),
     ],
 )
 def test_train_and_save_validates_configuration_before_reading_data(
@@ -192,6 +196,51 @@ def test_train_and_save_persists_model_and_artifact(tmp_path: Path) -> None:
     assert len(mappings["artist_id_to_index"]) == 2
     assert matrix.shape == (2, 2)
     assert model.user_factors.shape == (2, 4)
+
+
+def test_train_and_save_stores_champion_ranking_settings(tmp_path: Path) -> None:
+    interactions = (
+        "user_id,artist_id,artist_name,play_count\n"
+        "user_1,artist_1,artist-one,10\n"
+        "user_1,artist_2,artist-two,8\n"
+        "user_2,artist_1,artist-one,6\n"
+        "user_2,artist_2,artist-two,4\n"
+    )
+    metadata = (
+        "artist_id,artist_name,genres,mood_tags,country,era\n"
+        "artist_1,artist-one,pop;rock,bright;upbeat,US,2020s\n"
+        "artist_2,artist-two,rock;indie,raw;dark,UK,2010s\n"
+    )
+    raw_data_path = tmp_path / "interactions.csv"
+    raw_metadata_path = tmp_path / "metadata.csv"
+    raw_data_path.write_text(interactions)
+    raw_metadata_path.write_text(metadata)
+
+    _, _, _ = train_and_save_model(
+        raw_data_path=raw_data_path,
+        metadata_path=raw_metadata_path,
+        model_path=tmp_path / "model.joblib",
+        mappings_path=tmp_path / "mappings.joblib",
+        artifact_path=tmp_path / "artifact.joblib",
+        min_user_interactions=2,
+        min_artist_interactions=2,
+        factors=4,
+        regularization=0.01,
+        iterations=2,
+        alpha=10.0,
+        use_gpu=False,
+        content_weight=0.25,
+        popularity_penalty=0.2,
+        diversity=0.5,
+        include_listened=True,
+    )
+
+    artifact = load_artifact(tmp_path / "artifact.joblib")
+    assert artifact.ranking_config == {
+        "include_listened": True,
+        "popularity_penalty": 0.2,
+        "diversity": 0.5,
+    }
 
 
 def test_train_and_save_does_not_persist_model_on_metadata_failure(
