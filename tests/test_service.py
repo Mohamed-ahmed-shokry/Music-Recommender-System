@@ -42,7 +42,10 @@ def service_metadata_df() -> pd.DataFrame:
     )
 
 
-def create_service(tmp_path: Path) -> RecommenderService:
+def create_service(
+    tmp_path: Path,
+    ranking_config: dict[str, object] | None = None,
+) -> RecommenderService:
     df = service_dataframe()
     mappings = create_id_mappings(df)
     matrix = build_user_item_matrix(
@@ -76,6 +79,12 @@ def create_service(tmp_path: Path) -> RecommenderService:
             "content_weight": 0.25,
         },
         hybrid_config={"default_content_weight": 0.25},
+        ranking_config=ranking_config
+        or {
+            "include_listened": False,
+            "popularity_penalty": 0.0,
+            "diversity": 0.0,
+        },
     )
     artifact_path = tmp_path / "artifact.joblib"
     save_artifact(artifact, artifact_path)
@@ -92,6 +101,60 @@ def test_known_user_returns_hybrid_strategy(tmp_path: Path) -> None:
     assert response["recommendations"]
     assert "score_components" in response["recommendations"][0]
     assert "reasons" in response["recommendations"][0]
+
+
+def test_service_metadata_exposes_ranking_config(tmp_path: Path) -> None:
+    service = create_service(
+        tmp_path,
+        ranking_config={
+            "include_listened": True,
+            "popularity_penalty": 0.2,
+            "diversity": 0.4,
+        },
+    )
+
+    metadata = service.metadata()
+
+    assert metadata["ranking_config"] == {
+        "include_listened": True,
+        "popularity_penalty": 0.2,
+        "diversity": 0.4,
+    }
+
+
+def test_ranking_overrides_fall_back_to_champion_settings(tmp_path: Path) -> None:
+    service = create_service(
+        tmp_path,
+        ranking_config={
+            "include_listened": True,
+            "popularity_penalty": 0.3,
+            "diversity": 0.5,
+        },
+    )
+
+    assert service._ranking_config() == {
+        "include_listened": True,
+        "popularity_penalty": 0.3,
+        "diversity": 0.5,
+    }
+    assert service._ranking_overrides(None, None, None) == (True, 0.3, 0.5)
+    assert service._ranking_overrides(False, None, 0.1) == (False, 0.3, 0.1)
+
+
+def test_recommend_user_als_applies_champion_settings(tmp_path: Path) -> None:
+    service = create_service(
+        tmp_path,
+        ranking_config={
+            "include_listened": True,
+            "popularity_penalty": 0.3,
+            "diversity": 0.5,
+        },
+    )
+
+    response = service.recommend_user_als("user_1", top_k=2)
+
+    assert response["strategy"] == "als_personalized"
+    assert response["recommendations"]
 
 
 def test_recommendations_without_diversity_do_not_densify_content_matrix(

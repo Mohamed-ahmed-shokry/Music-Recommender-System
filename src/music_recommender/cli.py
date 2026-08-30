@@ -131,6 +131,13 @@ def train(
     alpha: float = DEFAULT_ALS_ALPHA,
     use_gpu: bool = DEFAULT_USE_GPU,
     content_weight: float = DEFAULT_CONTENT_WEIGHT,
+    popularity_penalty: float = 0.0,
+    diversity: float = 0.0,
+    include_listened: bool = typer.Option(
+        False,
+        "--include-listened/--no-include-listened",
+        help="Include previously listened artists by default.",
+    ),
     track: bool = typer.Option(
         False,
         "--track/--no-track",
@@ -170,6 +177,9 @@ def train(
                     "alpha": alpha,
                     "use_gpu": use_gpu,
                     "content_weight": content_weight,
+                    "popularity_penalty": popularity_penalty,
+                    "diversity": diversity,
+                    "include_listened": include_listened,
                 }
             )
             model, user_item_matrix, mappings = train_and_save_model(
@@ -181,6 +191,9 @@ def train(
                 alpha=alpha,
                 use_gpu=use_gpu,
                 content_weight=content_weight,
+                popularity_penalty=popularity_penalty,
+                diversity=diversity,
+                include_listened=include_listened,
             )
             matrix_size = user_item_matrix.shape[0] * user_item_matrix.shape[1]
             tracked_run.log_metrics(
@@ -231,6 +244,10 @@ def train(
     typer.echo(f"Users: {len(mappings['user_id_to_index'])}")
     typer.echo(f"Artists: {len(mappings['artist_id_to_index'])}")
     typer.echo(f"Default content weight: {content_weight}")
+    typer.echo(
+        f"Default ranking settings: penalty={popularity_penalty}, "
+        f"diversity={diversity}, include_listened={include_listened}"
+    )
     if tracked_run.enabled:
         typer.echo(f"MLflow run ID: {tracked_run.run_id}")
         typer.echo(f"MLflow tracking URI: {tracked_run.tracking_uri}")
@@ -264,6 +281,13 @@ def artifact_info() -> None:
     typer.echo(f"Iterations: {training_config['iterations']}")
     typer.echo(f"Alpha: {training_config['alpha']}")
     typer.echo(f"Default content weight: {hybrid_config['default_content_weight']}")
+    ranking_config = metadata.get("ranking_config", {})
+    typer.echo(
+        "Default ranking settings: "
+        f"penalty={ranking_config.get('popularity_penalty', 0.0)}, "
+        f"diversity={ranking_config.get('diversity', 0.0)}, "
+        f"include_listened={ranking_config.get('include_listened', False)}"
+    )
     typer.echo(f"Content features: {content_metadata['num_features']}")
     typer.echo(f"Dataset hash: {artifact_metadata['dataset']['sha256']}")
     typer.echo(

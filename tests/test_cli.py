@@ -144,6 +144,55 @@ def test_train_command_logs_configuration_and_dataset_metrics(monkeypatch) -> No
     assert "MLflow run ID: run-123" in result.output
 
 
+def test_train_command_logs_champion_ranking_settings(monkeypatch) -> None:
+    recorded_run = RecordingRun()
+    tracking_config: dict[str, Any] = {}
+    matrix = csr_matrix([[10.0, 0.0], [0.0, 5.0]])
+    mappings = {
+        "user_id_to_index": {"user_1": 0, "user_2": 1},
+        "artist_id_to_index": {"artist_1": 0, "artist_2": 1},
+    }
+    model = SimpleNamespace(training_device="cpu", gpu_fallback_reason=None)
+    trained_settings: dict[str, Any] = {}
+    monkeypatch.setattr(
+        cli,
+        "tracking_run",
+        tracking_context(recorded_run, tracking_config),
+    )
+
+    def record_training(**kwargs: Any) -> tuple[Any, Any, Any]:
+        trained_settings.update(kwargs)
+        return model, matrix, mappings
+
+    monkeypatch.setattr(cli, "train_and_save_model", record_training)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "train",
+            "--no-use-gpu",
+            "--track",
+            "--popularity-penalty",
+            "0.2",
+            "--diversity",
+            "0.5",
+            "--include-listened",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert trained_settings["popularity_penalty"] == 0.2
+    assert trained_settings["diversity"] == 0.5
+    assert trained_settings["include_listened"] is True
+    assert recorded_run.params["popularity_penalty"] == 0.2
+    assert recorded_run.params["diversity"] == 0.5
+    assert recorded_run.params["include_listened"] is True
+    assert (
+        "Default ranking settings: penalty=0.2, diversity=0.5, include_listened=True"
+        in result.output
+    )
+
+
 def test_evaluate_command_logs_all_strategy_metrics(monkeypatch) -> None:
     recorded_run = RecordingRun()
     tracking_config: dict[str, Any] = {}
@@ -456,6 +505,11 @@ class FakeService:
                 "alpha": 40.0,
             },
             "hybrid_config": {"default_content_weight": 0.25},
+            "ranking_config": {
+                "include_listened": True,
+                "popularity_penalty": 0.2,
+                "diversity": 0.4,
+            },
             "content": {"num_features": 5, "feature_names": ["a", "b"]},
         }
 
@@ -522,6 +576,31 @@ def test_artifact_info_command_prints_metadata(monkeypatch) -> None:
     assert "Users: 50" in result.output
     assert "Artists: 100" in result.output
     assert "Factors: 8" in result.output
+    assert (
+        "Default ranking settings: penalty=0.2, diversity=0.4, include_listened=True"
+        in result.output
+    )
+
+
+def test_artifact_info_defaults_ranking_settings_without_config(monkeypatch) -> None:
+    fake = FakeService()
+    original_metadata = fake.metadata
+
+    def metadata_without_ranking() -> dict[str, Any]:
+        metadata = original_metadata()
+        metadata.pop("ranking_config")
+        return metadata
+
+    fake.metadata = metadata_without_ranking
+    install_fake_service(monkeypatch, service=fake)
+
+    result = runner.invoke(cli.app, ["artifact-info"])
+
+    assert result.exit_code == 0
+    assert (
+        "Default ranking settings: penalty=0.0, diversity=0.0, include_listened=False"
+        in result.output
+    )
 
 
 def test_recommend_user_command_prints_recommendations(monkeypatch) -> None:

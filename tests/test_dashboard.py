@@ -455,6 +455,11 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
             "content_weight": 0.25,
         },
         hybrid_config={"default_content_weight": 0.25},
+        ranking_config={
+            "include_listened": False,
+            "popularity_penalty": 0.0,
+            "diversity": 0.0,
+        },
     )
     artifact_path = tmp_path / "artifact.joblib"
     save_artifact(artifact, artifact_path)

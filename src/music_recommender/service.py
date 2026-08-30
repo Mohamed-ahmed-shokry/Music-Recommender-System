@@ -55,6 +55,7 @@ class RecommenderService:
             "metadata": self.artifact.metadata,
             "training_config": self.artifact.training_config,
             "hybrid_config": self.artifact.hybrid_config,
+            "ranking_config": self.artifact.ranking_config,
             "content": {
                 "num_features": len(self.artifact.content_artifacts.feature_names),
                 "feature_names": self.artifact.content_artifacts.feature_names,
@@ -76,14 +77,17 @@ class RecommenderService:
         self,
         user_id: str,
         top_k: int,
-        include_listened: bool = False,
-        popularity_penalty: float = 0.0,
-        diversity: float = 0.0,
+        include_listened: bool | None = None,
+        popularity_penalty: float | None = None,
+        diversity: float | None = None,
         content_weight: float | None = None,
         explain: bool = False,
     ) -> dict[str, Any]:
         """Recommend artists for a user, with a popularity fallback if unknown."""
         content_weight = self._content_weight(content_weight)
+        include_listened, popularity_penalty, diversity = self._ranking_overrides(
+            include_listened, popularity_penalty, diversity
+        )
         if user_id in self.artifact.mappings["user_id_to_index"]:
             collaborative_scores = self._collaborative_scores_for_user(user_id)
             content_scores, listened_artist_ids = user_content_scores(
@@ -133,11 +137,14 @@ class RecommenderService:
         self,
         user_id: str,
         top_k: int,
-        include_listened: bool = False,
-        popularity_penalty: float = 0.0,
-        diversity: float = 0.0,
+        include_listened: bool | None = None,
+        popularity_penalty: float | None = None,
+        diversity: float | None = None,
     ) -> dict[str, Any]:
         """Return the v2-style ALS-only recommendation response."""
+        include_listened, popularity_penalty, diversity = self._ranking_overrides(
+            include_listened, popularity_penalty, diversity
+        )
         recommendations = recommend_artists_for_user(
             model=self.artifact.model,
             user_id=user_id,
@@ -202,14 +209,17 @@ class RecommenderService:
         user_id: str | None = None,
         top_k: int = 10,
         exclude_artist_ids: list[str] | None = None,
-        include_listened: bool = False,
-        popularity_penalty: float = 0.0,
-        diversity: float = 0.0,
+        include_listened: bool | None = None,
+        popularity_penalty: float | None = None,
+        diversity: float | None = None,
         content_weight: float | None = None,
         explain: bool = False,
     ) -> dict[str, Any]:
         """Recommend artists for a short-term listening session."""
         content_weight = self._content_weight(content_weight)
+        include_listened, popularity_penalty, diversity = self._ranking_overrides(
+            include_listened, popularity_penalty, diversity
+        )
         session_scores, selected_artist_ids, preference_tokens = profile_content_scores(
             content_artifacts=self.artifact.content_artifacts,
             artist_ids=artist_ids,
@@ -438,6 +448,33 @@ class RecommenderService:
             )
         validate_content_weight(content_weight)
         return content_weight
+
+    def _ranking_config(self) -> dict[str, Any]:
+        """Return the champion reranking settings stored on the artifact."""
+        ranking_config = self.artifact.ranking_config
+        return {
+            "include_listened": bool(ranking_config["include_listened"]),
+            "popularity_penalty": float(ranking_config["popularity_penalty"]),
+            "diversity": float(ranking_config["diversity"]),
+        }
+
+    def _ranking_overrides(
+        self,
+        include_listened: bool | None,
+        popularity_penalty: float | None,
+        diversity: float | None,
+    ) -> tuple[bool, float, float]:
+        """Resolve reranking knobs, falling back to the champion settings."""
+        champion = self._ranking_config()
+        return (
+            champion["include_listened"]
+            if include_listened is None
+            else include_listened,
+            champion["popularity_penalty"]
+            if popularity_penalty is None
+            else popularity_penalty,
+            champion["diversity"] if diversity is None else diversity,
+        )
 
     def _collaborative_scores_for_user(self, user_id: str) -> np.ndarray:
         user_index = self.artifact.mappings["user_id_to_index"][user_id]
