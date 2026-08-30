@@ -49,6 +49,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Regression tests for the legacy artifacts loader success path, the POSIX
   parent-directory fsync branch, and the package version fallback when the
   distribution metadata is unavailable.
+- A long-tail `unexpectedness_at_k` metric that reports the share of
+  recommendations surfacing from the bottom half of the popularity ranking.
+  It is included in evaluation summaries, the CLI `evaluate` output, and the
+  tracked metrics document, making the popularity bias tradeoff explicit.
 
 ### Fixed
 

@@ -593,6 +593,7 @@ The project reports ranking quality, catalog behavior, and popularity bias:
 | Catalog coverage | Share of the artist catalog recommended at least once |
 | Average popularity | Average total plays of recommended artists |
 | Novelty@K | Average inverse popularity rank of recommended artists |
+| Unexpectedness@K | Share of recommended artists from the popularity long tail (serendipity proxy) |
 | Explanation coverage | Share of recommendations with non-empty reasons |
 | Intra-list diversity | Average dissimilarity within each recommendation list |
 
@@ -614,6 +615,7 @@ ALS:
   Catalog coverage: 0.9444
   Average popularity: 93.2417
   Novelty@5: 0.4520
+  Unexpectedness@5: 0.3611
   Explanation coverage: 0.0000
   Intra-list diversity: 0.5004
 Popularity:
@@ -624,6 +626,7 @@ Popularity:
   Catalog coverage: 0.5833
   Average popularity: 110.9250
   Novelty@5: 0.2387
+  Unexpectedness@5: 0.0833
   Explanation coverage: 0.0000
   Intra-list diversity: 0.4357
 Content:
@@ -634,6 +637,7 @@ Content:
   Catalog coverage: 0.9722
   Average popularity: 86.1667
   Novelty@5: 0.5265
+  Unexpectedness@5: 0.7222
   Explanation coverage: 1.0000
   Intra-list diversity: 0.9009
 Hybrid:
@@ -644,12 +648,16 @@ Hybrid:
   Catalog coverage: 0.9444
   Average popularity: 91.9250
   Novelty@5: 0.4647
+  Unexpectedness@5: 0.5833
   Explanation coverage: 1.0000
   Intra-list diversity: 0.9196
 ```
 
 The comparison is useful because a recommender can look strong by recommending
-only globally popular artists. The baseline makes that tradeoff visible.
+only globally popular artists. The baseline makes that tradeoff visible, and the
+long-tail unexpectedness metric makes the tradeoff explicit: content-only and
+hybrid strategies surface more hard-to-discover artists, while the popularity
+baseline almost never does.
 
 ## Experiment Tracking
 
@@ -861,7 +869,8 @@ Current coverage focus:
 - Add track-level recommendations.
 - Add audio-feature content similarity.
 - Add a learning-to-rank model after candidate generation.
-- Add advanced serendipity metrics.
+- Add relevance-weighted serendipity metrics beyond the long-tail
+  unexpectedness coverage reported today.
 
 ## License
 
