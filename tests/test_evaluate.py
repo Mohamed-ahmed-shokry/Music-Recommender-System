@@ -8,6 +8,7 @@ from music_recommender.evaluate import (
     average_popularity,
     average_precision_at_k,
     catalog_coverage,
+    compare_parameter_settings,
     evaluate_model,
     evaluate_repeated_holdout,
     explanation_coverage,
@@ -499,6 +500,63 @@ def test_repeated_holdout_als_only_returns_flat_metrics() -> None:
     assert "als" not in metrics
     assert "popularity" not in metrics
     assert "precision_at_k" in metrics
+
+
+def test_repeated_holdout_rejects_non_dict_recommend_kwargs() -> None:
+    df = pd.DataFrame()
+
+    with pytest.raises(ValueError):
+        evaluate_repeated_holdout(df, top_k=3, use_gpu=False, recommend_kwargs="x")
+
+
+def test_compare_parameter_settings_returns_labeled_metrics(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    def fake_repeated_holdout(**kwargs) -> dict:
+        calls.append(kwargs)
+        return {"precision_at_k": 0.5}
+
+    monkeypatch.setattr(
+        evaluate_module,
+        "evaluate_repeated_holdout",
+        fake_repeated_holdout,
+    )
+    df = pd.DataFrame()
+
+    metrics = compare_parameter_settings(
+        df,
+        top_k=3,
+        parameter_sets={"control": {}, "diverse": {"diversity": 0.5}},
+        use_gpu=False,
+    )
+
+    assert metrics == {
+        "control": {"precision_at_k": 0.5},
+        "diverse": {"precision_at_k": 0.5},
+    }
+    assert [call["recommend_kwargs"] for call in calls] == [{}, {"diversity": 0.5}]
+    assert all(call["compare_baseline"] is False for call in calls)
+
+
+def test_compare_parameter_settings_rejects_invalid_inputs() -> None:
+    df = pd.DataFrame()
+
+    with pytest.raises(ValueError):
+        compare_parameter_settings(df, top_k=3, parameter_sets={})
+    with pytest.raises(ValueError):
+        compare_parameter_settings(
+            df,
+            top_k=3,
+            parameter_sets={"control": {}},
+            folds=0,
+        )
+    with pytest.raises(ValueError):
+        compare_parameter_settings(
+            df,
+            top_k=3,
+            parameter_sets={"control": {}},
+            use_gpu="x",
+        )
 
 
 def test_repeated_holdout_builds_content_from_interactions_when_no_metadata() -> None:

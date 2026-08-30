@@ -344,8 +344,13 @@ def evaluate_repeated_holdout(
     compare_baseline: bool = False,
     compare_all: bool = False,
     metadata_df: pd.DataFrame | None = None,
+    recommend_kwargs: dict[str, Any] | None = None,
 ) -> dict[str, float] | dict[str, dict[str, float]]:
-    """Evaluate ALS and optionally compare it with popularity/content/hybrid."""
+    """Evaluate ALS and optionally compare it with popularity/content/hybrid.
+
+    ``recommend_kwargs`` are forwarded to ``recommend_artists_for_user`` so the
+    same pipeline can be A/B tested under different reranking settings.
+    """
     validate_ranking_parameters(top_k)
     if type(folds) is not int or folds < 1:
         raise ValueError("folds must be a positive integer.")
@@ -355,6 +360,8 @@ def evaluate_repeated_holdout(
         raise ValueError("compare_baseline must be a boolean.")
     if type(compare_all) is not bool:
         raise ValueError("compare_all must be a boolean.")
+    if recommend_kwargs is not None and type(recommend_kwargs) is not dict:
+        raise ValueError("recommend_kwargs must be a dictionary or None.")
 
     als_fold_metrics: list[dict[str, float]] = []
     popularity_fold_metrics: list[dict[str, float]] = []
@@ -370,6 +377,7 @@ def evaluate_repeated_holdout(
             compare_baseline=compare_baseline or compare_all,
             compare_all=compare_all,
             metadata_df=metadata_df,
+            recommend_kwargs=recommend_kwargs,
         )
         als_fold_metrics.append(fold_result["als"])
         if compare_baseline or compare_all:
@@ -392,6 +400,44 @@ def evaluate_repeated_holdout(
     return comparison
 
 
+def compare_parameter_settings(
+    df: pd.DataFrame,
+    top_k: int,
+    parameter_sets: dict[str, dict[str, Any]],
+    folds: int = 1,
+    use_gpu: bool = DEFAULT_USE_GPU,
+) -> dict[str, dict[str, float]]:
+    """A/B test reranking parameter settings on the same ALS pipeline.
+
+    Each label maps to keyword arguments forwarded to
+    ``recommend_artists_for_user``. Every setting is evaluated on the same
+    holdout scheme, returning averaged summary metrics per label so a control
+    can be tuned against an experiment.
+    """
+    validate_ranking_parameters(top_k)
+    if not parameter_sets:
+        raise ValueError("parameter_sets must not be empty.")
+    if type(folds) is not int or folds < 1:
+        raise ValueError("folds must be a positive integer.")
+    if type(use_gpu) is not bool:
+        raise ValueError("use_gpu must be a boolean.")
+
+    return {
+        label: cast(
+            dict[str, float],
+            evaluate_repeated_holdout(
+                df=df,
+                top_k=top_k,
+                folds=folds,
+                use_gpu=use_gpu,
+                compare_baseline=False,
+                recommend_kwargs=parameter_set,
+            ),
+        )
+        for label, parameter_set in parameter_sets.items()
+    }
+
+
 def _evaluate_single_fold(
     df: pd.DataFrame,
     top_k: int,
@@ -400,6 +446,7 @@ def _evaluate_single_fold(
     compare_baseline: bool,
     compare_all: bool,
     metadata_df: pd.DataFrame | None,
+    recommend_kwargs: dict[str, Any] | None,
 ) -> dict[str, dict[str, float]]:
     train_df, test_df = train_test_split_by_user(df, random_state=random_state)
     mappings = create_id_mappings(train_df)
@@ -457,6 +504,7 @@ def _evaluate_single_fold(
             mappings=mappings,
             top_k=top_k,
             artist_stats=artist_stats,
+            **(recommend_kwargs or {}),
         )
         recommended_items = [
             str(recommendation["artist_id"]) for recommendation in recommendations

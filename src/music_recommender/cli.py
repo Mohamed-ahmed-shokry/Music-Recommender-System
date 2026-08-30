@@ -26,7 +26,10 @@ from music_recommender.config import (
     RAW_METADATA_PATH,
 )
 from music_recommender.data import load_and_validate_interactions
-from music_recommender.evaluate import evaluate_repeated_holdout
+from music_recommender.evaluate import (
+    compare_parameter_settings,
+    evaluate_repeated_holdout,
+)
 from music_recommender.metadata import load_and_validate_artist_metadata
 from music_recommender.model import train_and_save_model
 from music_recommender.preprocessing import prepare_training_data
@@ -491,8 +494,22 @@ def evaluate(
         help="MLflow experiment name.",
     ),
     run_name: str | None = typer.Option(None, help="Optional MLflow run name."),
+    compare_settings: str | None = typer.Option(
+        None,
+        "--compare-settings",
+        help=(
+            "A/B test ALS reranking settings as 'label:key=value,...;label2:...'. "
+            "Same holdout for every label. Example: "
+            "'control:;diversity:popularity_penalty=0.2,diversity=0.5'."
+        ),
+    ),
 ) -> None:
     """Evaluate recommendations with ranking metrics."""
+    if compare_settings is not None and (compare_baseline or compare_all):
+        raise typer.BadParameter(
+            "--compare-settings cannot be combined with"
+            " --compare-baseline or --compare-all."
+        )
     try:
         with tracking_run(
             enabled=track,
@@ -507,6 +524,7 @@ def evaluate(
                     "folds": folds,
                     "compare_baseline": compare_baseline,
                     "compare_all": compare_all,
+                    "compare_settings": compare_settings,
                     "use_gpu": use_gpu,
                     "data_path": str(RAW_DATA_PATH),
                     "metadata_path": str(RAW_METADATA_PATH) if compare_all else None,
@@ -518,33 +536,54 @@ def evaluate(
                 if compare_all
                 else None
             )
-            metrics = evaluate_repeated_holdout(
-                df,
-                top_k=top_k,
-                folds=folds,
-                compare_baseline=compare_baseline,
-                compare_all=compare_all,
-                metadata_df=metadata_df,
-                use_gpu=use_gpu,
-            )
-            tracked_run.log_metrics(metrics)
-            tracked_run.log_dict(metrics, "evaluation/metrics.json")
-            tracked_run.set_tags(
-                {
-                    "strategies": (
-                        "als,popularity,content,hybrid"
-                        if compare_all
-                        else "als,popularity"
-                        if compare_baseline
-                        else "als"
-                    )
-                }
-            )
+            if compare_settings is not None:
+                comparison_metrics = compare_parameter_settings(
+                    df,
+                    top_k=top_k,
+                    parameter_sets=_parse_parameter_settings(compare_settings),
+                    folds=folds,
+                    use_gpu=use_gpu,
+                )
+                tracked_run.log_dict(comparison_metrics, "evaluation/metrics.json")
+                tracked_run.set_tags(
+                    {"strategies": ",".join(comparison_metrics.keys())}
+                )
+                metrics = cast(
+                    dict[str, float] | dict[str, dict[str, float]],
+                    comparison_metrics,
+                )
+            else:
+                metrics = evaluate_repeated_holdout(
+                    df,
+                    top_k=top_k,
+                    folds=folds,
+                    compare_baseline=compare_baseline,
+                    compare_all=compare_all,
+                    metadata_df=metadata_df,
+                    use_gpu=use_gpu,
+                )
+                tracked_run.log_metrics(metrics)
+                tracked_run.log_dict(metrics, "evaluation/metrics.json")
+                tracked_run.set_tags(
+                    {
+                        "strategies": (
+                            "als,popularity,content,hybrid"
+                            if compare_all
+                            else "als,popularity"
+                            if compare_baseline
+                            else "als"
+                        )
+                    }
+                )
     except (ExperimentTrackingError, FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
-    if compare_all:
+    if compare_settings is not None:
+        typer.echo(f"Evaluation over {folds} fold(s):")
+        for label, label_metrics in comparison_metrics.items():
+            _print_metric_row(label, label_metrics, top_k)
+    elif compare_all:
         comparison_metrics = cast(dict[str, dict[str, float]], metrics)
         typer.echo(f"Evaluation over {folds} fold(s):")
         _print_metric_row("ALS", comparison_metrics["als"], top_k)
@@ -577,6 +616,48 @@ def _print_metric_row(name: str, metrics: dict[str, float], top_k: int) -> None:
     typer.echo(f"  Serendipity@{top_k}: {metrics['serendipity_at_k']:.4f}")
     typer.echo(f"  Explanation coverage: {metrics['explanation_coverage']:.4f}")
     typer.echo(f"  Intra-list diversity: {metrics['intra_list_diversity']:.4f}")
+
+
+def _parse_parameter_settings(
+    text: str,
+) -> dict[str, dict[str, float | int | bool | str]]:
+    """Parse 'label:key=value,key2=value2;label2:...' into labeled parameter sets."""
+    parameter_sets: dict[str, dict[str, float | int | bool | str]] = {}
+    for item in text.split(";"):
+        label, separator, config = item.partition(":")
+        label = label.strip()
+        if not label or not separator:
+            raise ValueError(
+                f"Invalid parameter setting '{item}'. Expected 'label:key=value,...'."
+            )
+        if label in parameter_sets:
+            raise ValueError(f"Duplicate parameter setting label: {label}.")
+        kwargs: dict[str, float | int | bool | str] = {}
+        if config.strip():
+            for pair in config.split(","):
+                key, equals, raw_value = pair.partition("=")
+                key = key.strip()
+                raw_value = raw_value.strip()
+                if not key or not equals:
+                    raise ValueError(f"Invalid pair '{pair}'. Expected 'key=value'.")
+                kwargs[key] = _parse_parameter_value(raw_value)
+        parameter_sets[label] = kwargs
+    return parameter_sets
+
+
+def _parse_parameter_value(raw: str) -> float | int | bool | str:
+    """Parse a setting value as bool, then int, then float, else keep a string."""
+    lowered = raw.lower()
+    if lowered in {"true", "false"}:
+        return lowered == "true"
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    try:
+        return float(raw)
+    except ValueError:
+        return raw
 
 
 @app.command()

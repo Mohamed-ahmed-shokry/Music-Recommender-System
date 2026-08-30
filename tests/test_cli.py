@@ -202,6 +202,90 @@ def test_evaluate_command_logs_all_strategy_metrics(monkeypatch) -> None:
     assert "MLflow run ID: run-123" in result.output
 
 
+def test_evaluate_command_with_compare_settings_logs_and_prints_labels(
+    monkeypatch,
+) -> None:
+    recorded_run = RecordingRun()
+    tracking_config: dict[str, Any] = {}
+    comparison = {"control": metric_row(), "diverse": metric_row()}
+    monkeypatch.setattr(
+        cli,
+        "tracking_run",
+        tracking_context(recorded_run, tracking_config),
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+    monkeypatch.setattr(
+        cli,
+        "compare_parameter_settings",
+        lambda *_args, **_kwargs: comparison,
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate",
+            "--top-k",
+            "5",
+            "--no-use-gpu",
+            "--track",
+            "--compare-settings",
+            "control:;diverse:popularity_penalty=0.2,diversity=0.5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert recorded_run.params["compare_settings"] == (
+        "control:;diverse:popularity_penalty=0.2,diversity=0.5"
+    )
+    assert not recorded_run.metrics
+    assert recorded_run.tags["strategies"] == "control,diverse"
+    assert recorded_run.dict_artifacts == [(comparison, "evaluation/metrics.json")]
+    assert "control:" in result.output
+    assert "diverse:" in result.output
+
+
+def test_evaluate_command_rejects_compare_settings_with_all(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["evaluate", "--compare-all", "--compare-settings", "control:;diverse:"],
+    )
+
+    assert result.exit_code == 2
+
+
+def test_parse_parameter_settings_parses_labels_and_values() -> None:
+    parameter_sets = cli._parse_parameter_settings(
+        "control:;diverse:popularity_penalty=0.2,diversity=0.5;flag:include_listened=true,count=5;raw:name=xyz"
+    )
+
+    assert parameter_sets["control"] == {}
+    assert parameter_sets["diverse"] == {
+        "popularity_penalty": 0.2,
+        "diversity": 0.5,
+    }
+    assert parameter_sets["flag"] == {"include_listened": True, "count": 5}
+    assert parameter_sets["raw"] == {"name": "xyz"}
+
+
+def test_parse_parameter_settings_rejects_invalid_input() -> None:
+    with pytest.raises(ValueError):
+        cli._parse_parameter_settings("not-a-setting")
+    with pytest.raises(ValueError):
+        cli._parse_parameter_settings("label:key")
+    with pytest.raises(ValueError):
+        cli._parse_parameter_settings("dup:;dup:")
+
+
 def test_train_command_reports_tracking_configuration_error(monkeypatch) -> None:
     @contextmanager
     def failing_tracking_run(**_: Any) -> Iterator[RecordingRun]:
