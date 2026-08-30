@@ -18,7 +18,9 @@ from music_recommender.evaluate import (
     novelty_at_k,
     precision_at_k,
     recall_at_k,
+    select_winning_strategies,
     serendipity_at_k,
+    strategy_leaderboard,
     train_test_split_by_user,
     unexpectedness_at_k,
 )
@@ -557,6 +559,111 @@ def test_compare_parameter_settings_rejects_invalid_inputs() -> None:
             parameter_sets={"control": {}},
             use_gpu="x",
         )
+
+
+def _comparison() -> dict[str, dict[str, float]]:
+    control: dict[str, float] = {
+        "precision_at_k": 0.5,
+        "recall_at_k": 0.7,
+        "map_at_k": 0.4,
+        "ndcg_at_k": 0.45,
+        "catalog_coverage": 0.8,
+        "average_popularity": 90.0,
+        "novelty_at_k": 0.6,
+        "unexpectedness_at_k": 0.3,
+        "serendipity_at_k": 0.2,
+        "explanation_coverage": 1.0,
+        "intra_list_diversity": 0.7,
+    }
+    diverse = dict(control)
+    diverse.update(
+        {
+            "precision_at_k": 0.8,
+            "recall_at_k": 0.9,
+            "map_at_k": 0.6,
+            "ndcg_at_k": 0.9,
+            "novelty_at_k": 0.7,
+            "intra_list_diversity": 0.9,
+            "average_popularity": 95.0,
+        }
+    )
+    return {"control": control, "diverse": diverse}
+
+
+def test_select_winning_strategies_returns_per_metric_winner() -> None:
+    winners = select_winning_strategies(_comparison())
+
+    assert winners["precision_at_k"] == "diverse"
+    assert winners["catalog_coverage"] == "control"
+    assert winners["unexpectedness_at_k"] == "control"
+    assert "average_popularity" not in winners
+
+
+def test_select_winning_strategies_picks_first_label_on_ties() -> None:
+    comparison = {"a": _comparison()["control"], "b": dict(_comparison()["control"])}
+
+    winners = select_winning_strategies(comparison)
+
+    assert all(label == "a" for label in winners.values())
+
+
+def test_select_winning_strategies_rejects_empty_comparison() -> None:
+    with pytest.raises(ValueError):
+        select_winning_strategies({})
+
+
+def test_select_winning_strategies_skips_metrics_absent_from_all() -> None:
+    comparison = _comparison()
+    for metrics in comparison.values():
+        del metrics["serendipity_at_k"]
+
+    winners = select_winning_strategies(comparison)
+
+    assert "serendipity_at_k" not in winners
+    assert len(winners) == 9
+
+
+def test_strategy_leaderboard_ranks_by_wins_then_ndcg() -> None:
+    comparison = _comparison()
+    comparison["content"] = dict(_comparison()["control"])
+    comparison["content"].update(
+        {"ndcg_at_k": 0.3, "novelty_at_k": 0.9, "serendipity_at_k": 0.9}
+    )
+
+    leaderboard = strategy_leaderboard(comparison)
+
+    assert leaderboard[0] == ("diverse", 5)
+    assert leaderboard[1] == ("control", 3)
+    assert leaderboard[2] == ("content", 2)
+
+
+def test_strategy_leaderboard_breaks_ties_with_ndcg() -> None:
+    comparison = {
+        "a": dict(_comparison()["control"]),
+        "b": dict(_comparison()["control"]),
+    }
+    for metric in (
+        "precision_at_k",
+        "recall_at_k",
+        "map_at_k",
+        "catalog_coverage",
+        "explanation_coverage",
+    ):
+        comparison["a"][metric] = comparison["b"][metric] + 0.1
+    for metric in (
+        "ndcg_at_k",
+        "novelty_at_k",
+        "unexpectedness_at_k",
+        "serendipity_at_k",
+        "intra_list_diversity",
+    ):
+        comparison["b"][metric] = comparison["a"][metric] + 0.1
+
+    leaderboard = strategy_leaderboard(comparison)
+
+    assert leaderboard[0][0] == "b"
+    assert leaderboard[1][0] == "a"
+    assert all(wins == 5 for _, wins in leaderboard)
 
 
 def test_repeated_holdout_builds_content_from_interactions_when_no_metadata() -> None:

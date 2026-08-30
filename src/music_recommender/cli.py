@@ -29,6 +29,8 @@ from music_recommender.data import load_and_validate_interactions
 from music_recommender.evaluate import (
     compare_parameter_settings,
     evaluate_repeated_holdout,
+    select_winning_strategies,
+    strategy_leaderboard,
 )
 from music_recommender.metadata import load_and_validate_artist_metadata
 from music_recommender.model import train_and_save_model
@@ -583,6 +585,12 @@ def evaluate(
         typer.echo(f"Evaluation over {folds} fold(s):")
         for label, label_metrics in comparison_metrics.items():
             _print_metric_row(label, label_metrics, top_k)
+        winners = select_winning_strategies(comparison_metrics)
+        typer.echo("Winners by metric:")
+        for metric, label in winners.items():
+            typer.echo(f"  {metric}: {label}")
+        best_label, wins = strategy_leaderboard(comparison_metrics)[0]
+        typer.echo(f"Overall: {best_label} won {wins} of {len(winners)} metrics.")
     elif compare_all:
         comparison_metrics = cast(dict[str, dict[str, float]], metrics)
         typer.echo(f"Evaluation over {folds} fold(s):")

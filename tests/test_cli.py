@@ -207,7 +207,10 @@ def test_evaluate_command_with_compare_settings_logs_and_prints_labels(
 ) -> None:
     recorded_run = RecordingRun()
     tracking_config: dict[str, Any] = {}
-    comparison = {"control": metric_row(), "diverse": metric_row()}
+    diverse_row = metric_row()
+    diverse_row["ndcg_at_k"] = 0.9
+    diverse_row["precision_at_k"] = 0.8
+    comparison = {"control": metric_row(), "diverse": diverse_row}
     monkeypatch.setattr(
         cli,
         "tracking_run",
@@ -246,6 +249,8 @@ def test_evaluate_command_with_compare_settings_logs_and_prints_labels(
     assert recorded_run.dict_artifacts == [(comparison, "evaluation/metrics.json")]
     assert "control:" in result.output
     assert "diverse:" in result.output
+    assert "  precision_at_k: diverse" in result.output
+    assert "Overall: control won 8 of 10 metrics." in result.output
 
 
 def test_evaluate_command_rejects_compare_settings_with_all(monkeypatch) -> None:

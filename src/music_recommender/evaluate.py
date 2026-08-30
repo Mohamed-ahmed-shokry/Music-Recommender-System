@@ -438,6 +438,61 @@ def compare_parameter_settings(
     }
 
 
+_QUALITY_METRICS: tuple[str, ...] = (
+    "precision_at_k",
+    "recall_at_k",
+    "map_at_k",
+    "ndcg_at_k",
+    "catalog_coverage",
+    "novelty_at_k",
+    "unexpectedness_at_k",
+    "serendipity_at_k",
+    "explanation_coverage",
+    "intra_list_diversity",
+)
+
+
+def select_winning_strategies(
+    comparison: dict[str, dict[str, float]],
+) -> dict[str, str]:
+    """Return the winning comparison label per quality metric.
+
+    ``average_popularity`` is excluded because it reports popularity bias rather
+    than quality. Tied metrics attribute to the first label as inserted.
+    """
+    if not comparison:
+        raise ValueError("comparison must not be empty.")
+    winners: dict[str, str] = {}
+    for metric in _QUALITY_METRICS:
+        contenders = [
+            (label, metrics[metric])
+            for label, metrics in comparison.items()
+            if metric in metrics
+        ]
+        if not contenders:
+            continue
+        winning_label, _ = max(contenders, key=lambda pair: pair[1])
+        winners[metric] = winning_label
+    return winners
+
+
+def strategy_leaderboard(
+    comparison: dict[str, dict[str, float]],
+) -> list[tuple[str, int]]:
+    """Rank comparison labels by metrics won, ties broken by NDCG@K."""
+    wins = dict.fromkeys(comparison, 0)
+    for winning_label in select_winning_strategies(comparison).values():
+        wins[winning_label] += 1
+    return sorted(
+        wins.items(),
+        key=lambda pair: (
+            -pair[1],
+            -comparison[pair[0]].get("ndcg_at_k", 0.0),
+            pair[0],
+        ),
+    )
+
+
 def _evaluate_single_fold(
     df: pd.DataFrame,
     top_k: int,
