@@ -79,6 +79,7 @@ def metric_row() -> dict[str, float]:
         "catalog_coverage": 0.8,
         "average_popularity": 42.0,
         "novelty_at_k": 0.6,
+        "unexpectedness_at_k": 0.3,
         "explanation_coverage": 1.0,
         "intra_list_diversity": 0.7,
     }

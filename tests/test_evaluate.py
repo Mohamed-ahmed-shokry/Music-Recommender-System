@@ -18,6 +18,7 @@ from music_recommender.evaluate import (
     precision_at_k,
     recall_at_k,
     train_test_split_by_user,
+    unexpectedness_at_k,
 )
 
 
@@ -343,6 +344,34 @@ def test_novelty_at_k_skips_artists_missing_from_stats() -> None:
     assert novelty == pytest.approx(1.0)
 
 
+def test_unexpectedness_at_k_works_on_known_example() -> None:
+    unexpectedness = unexpectedness_at_k(
+        [["a", "b", "c", "d"]],
+        {
+            "a": {"popularity_rank": 1},
+            "b": {"popularity_rank": 2},
+            "c": {"popularity_rank": 3},
+            "d": {"popularity_rank": 4},
+        },
+    )
+
+    assert unexpectedness == pytest.approx(0.5)
+
+
+def test_unexpectedness_at_k_returns_zero_for_empty_stats() -> None:
+    assert unexpectedness_at_k([["a"]], {}) == 0.0
+
+
+def test_unexpectedness_at_k_returns_zero_without_known_artists() -> None:
+    assert (
+        unexpectedness_at_k(
+            [["unknown"]],
+            {"a": {"popularity_rank": 1}, "b": {"popularity_rank": 2}},
+        )
+        == 0.0
+    )
+
+
 def test_explanation_coverage_returns_zero_for_empty_input() -> None:
     assert explanation_coverage([]) == 0.0
 
@@ -381,6 +410,7 @@ def test_summarize_recommendations_returns_zeros_for_empty_input() -> None:
         "average_popularity",
         "intra_list_diversity",
         "novelty_at_k",
+        "unexpectedness_at_k",
         "explanation_coverage",
     }
     assert all(value == 0.0 for value in summary.values())

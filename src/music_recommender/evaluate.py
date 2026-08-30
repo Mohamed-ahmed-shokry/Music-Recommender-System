@@ -173,6 +173,28 @@ def novelty_at_k(
     return float(np.mean(novelty_values)) if novelty_values else 0.0
 
 
+def unexpectedness_at_k(
+    list_of_recommended_items: list[list[str]],
+    artist_stats: dict[str, ArtistStats],
+) -> float:
+    """Calculate the share of recommendations from the popularity long tail."""
+    if not artist_stats:
+        return 0.0
+
+    median_rank = float(
+        np.median(
+            [int(stats["popularity_rank"]) for stats in artist_stats.values()]
+        )
+    )
+    unexpected_values = [
+        int(artist_stats[item]["popularity_rank"]) > median_rank
+        for recommended_items in list_of_recommended_items
+        for item in recommended_items
+        if item in artist_stats
+    ]
+    return float(np.mean(unexpected_values)) if unexpected_values else 0.0
+
+
 def explanation_coverage(
     list_of_recommendations: Sequence[Sequence[Mapping[str, Any]]],
 ) -> float:
@@ -538,6 +560,7 @@ def _summarize_recommendations(
             "average_popularity": 0.0,
             "intra_list_diversity": 0.0,
             "novelty_at_k": 0.0,
+            "unexpectedness_at_k": 0.0,
             "explanation_coverage": 0.0,
         }
 
@@ -589,6 +612,10 @@ def _summarize_recommendations(
             artist_stats,
         ),
         "novelty_at_k": novelty_at_k(
+            list_of_recommended_items,
+            artist_stats,
+        ),
+        "unexpectedness_at_k": unexpectedness_at_k(
             list_of_recommended_items,
             artist_stats,
         ),

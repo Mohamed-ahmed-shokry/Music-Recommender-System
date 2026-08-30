@@ -573,6 +573,7 @@ def _print_metric_row(name: str, metrics: dict[str, float], top_k: int) -> None:
     typer.echo(f"  Catalog coverage: {metrics['catalog_coverage']:.4f}")
     typer.echo(f"  Average popularity: {metrics['average_popularity']:.4f}")
     typer.echo(f"  Novelty@{top_k}: {metrics['novelty_at_k']:.4f}")
+    typer.echo(f"  Unexpectedness@{top_k}: {metrics['unexpectedness_at_k']:.4f}")
     typer.echo(f"  Explanation coverage: {metrics['explanation_coverage']:.4f}")
     typer.echo(f"  Intra-list diversity: {metrics['intra_list_diversity']:.4f}")
 
