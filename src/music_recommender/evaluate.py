@@ -182,9 +182,7 @@ def unexpectedness_at_k(
         return 0.0
 
     median_rank = float(
-        np.median(
-            [int(stats["popularity_rank"]) for stats in artist_stats.values()]
-        )
+        np.median([int(stats["popularity_rank"]) for stats in artist_stats.values()])
     )
     unexpected_values = [
         int(artist_stats[item]["popularity_rank"]) > median_rank
