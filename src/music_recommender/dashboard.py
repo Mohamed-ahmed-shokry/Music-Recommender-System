@@ -486,4 +486,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main()  # pragma: no cover - dashboard entry point invoked by Streamlit

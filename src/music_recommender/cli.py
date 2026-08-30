@@ -613,4 +613,4 @@ def demo(use_gpu: bool = DEFAULT_USE_GPU) -> None:
 
 
 if __name__ == "__main__":
-    app()
+    app()  # pragma: no cover - CLI entry point invoked by `python -m`

@@ -403,8 +403,10 @@ def _evaluate_single_fold(
 
     known_artists = set(mappings["artist_id_to_index"])
     for user_id, user_test_df in test_df.groupby("user_id"):
+        # Defensive guard: the per-user splitter keeps one training interaction
+        # per user, so test users always exist in the mappings.
         if user_id not in mappings["user_id_to_index"]:
-            continue
+            continue  # pragma: no cover - unreachable with the project's splitter
 
         relevant_items = set(user_test_df["artist_id"]) & known_artists
         if not relevant_items:
