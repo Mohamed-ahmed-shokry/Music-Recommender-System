@@ -64,6 +64,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   identical holdouts, exposed through `evaluate --compare-settings` with
   `label:key=value,...` parsing and labeled metric rows in the CLI output and
   the tracked metrics document.
+- Batting-average style strategy selection for A/B results:
+  `select_winning_strategies` names the per-metric winner between settings and
+  `strategy_leaderboard` ranks them by metrics won (ties broken by NDCG@K). The
+  `evaluate --compare-settings` output ends with the winner-by-metric list and
+  the overall best setting.
 
 ### Fixed
 

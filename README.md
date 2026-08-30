@@ -686,8 +686,20 @@ uv run python -m music_recommender.cli evaluate \
 
 Each semicolon-separated setting is `label:key=value,...`; an empty value list
 is the control. Values are parsed as booleans, integers, or floats. The harness
-prints one full metric row per label to `evaluation/metrics.json` and to the
-tracking run it is tagged with the labels being compared.
+prints one full metric row per label, then a batting-average style summary that
+names the winner of each quality metric and ranks the settings by metrics won
+(ties broken by NDCG@K):
+
+```text
+Winners by metric:
+  precision_at_k: penalty
+  recall_at_k: control
+  ...
+Overall: penalty won 6 of 10 metrics.
+```
+
+The labeled metrics are written to `evaluation/metrics.json`, and the tracking
+run is tagged with the labels being compared.
 
 ## Experiment Tracking
 
@@ -902,8 +914,8 @@ Current coverage focus:
 - Add track-level recommendations.
 - Add audio-feature content similarity.
 - Add a learning-to-rank model after candidate generation.
-- Add batting-average style strategy selection that promotes the winner of each
-  A/B comparison into the default hybrid blend.
+- Promote the winning reranking settings of each A/B comparison into the hybrid
+  blend used by the serving service.
 
 ## License
 
