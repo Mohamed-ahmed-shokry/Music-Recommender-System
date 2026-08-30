@@ -280,6 +280,12 @@ Train with explicit interaction and metadata files:
 uv run python -m music_recommender.cli train --data-path data/raw/sample_interactions.csv --metadata-path data/raw/sample_artist_metadata.csv
 ```
 
+Train with champion reranking settings (served as defaults unless overridden):
+
+```bash
+uv run python -m music_recommender.cli train --no-use-gpu --popularity-penalty 0.2 --diversity 0.5 --include-listened
+```
+
 Inspect the saved artifact bundle:
 
 ```bash
@@ -701,6 +707,25 @@ Overall: penalty won 6 of 10 metrics.
 The labeled metrics are written to `evaluation/metrics.json`, and the tracking
 run is tagged with the labels being compared.
 
+### Promoting the winner into serving
+
+Reranking knobs are training-time settings, so the winning A/B configuration can
+be packaged with the model. Train with the champion settings and the artifact
+records them as its ranking configuration:
+
+```bash
+uv run python -m music_recommender.cli train --no-use-gpu \
+  --popularity-penalty 0.2 --diversity 0.5 --include-listened
+```
+
+`inspect-artifacts` shows them, and the serving service uses them as defaults:
+`recommend_user`, `recommend_user_als`, and `recommend_session` fall back to the
+champion settings whenever a reranking knob is not explicitly provided, so a
+fresh deployment immediately serves the configuration that won the comparison.
+Callers that pass their own knobs (the dashboard sliders, for example) still
+override it. Legacy artifact bundles without a ranking configuration default to
+neutral settings (`penalty=0`, `diversity=0`, no listened items).
+
 ## Experiment Tracking
 
 The optional tracking integration uses `mlflow-skinny` in the project and a
@@ -914,8 +939,8 @@ Current coverage focus:
 - Add track-level recommendations.
 - Add audio-feature content similarity.
 - Add a learning-to-rank model after candidate generation.
-- Promote the winning reranking settings of each A/B comparison into the hybrid
-  blend used by the serving service.
+- Auto-retrain the serving bundle with the winning A/B reranking configuration
+  after each comparison.
 
 ## License
 

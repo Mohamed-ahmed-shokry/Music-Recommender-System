@@ -69,6 +69,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `strategy_leaderboard` ranks them by metrics won (ties broken by NDCG@K). The
   `evaluate --compare-settings` output ends with the winner-by-metric list and
   the overall best setting.
+- Champion ranking settings promoted into serving: `train` records
+  `popularity_penalty`, `diversity`, and `include_listened` as the artifact's
+  ranking configuration, and `recommend_user`, `recommend_user_als`, and
+  `recommend_session` serve them as defaults whenever the caller does not pass
+  explicit knobs. Legacy bundles without the configuration fall back to neutral
+  settings.
 
 ### Fixed
 
