@@ -1,4 +1,4 @@
-.PHONY: install train demo api dashboard test lint format typecheck ci clean
+.PHONY: install train demo api dashboard test lint format typecheck coverage ci clean
 
 install:
 	uv sync --locked --extra dashboard --extra tracking --dev
@@ -26,6 +26,9 @@ format:
 
 typecheck:
 	uv run mypy
+
+coverage:
+	uv run --extra dashboard --extra tracking pytest --cov --cov-report=term
 
 ci: lint typecheck test
 

@@ -53,6 +53,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   recommendations surfacing from the bottom half of the popularity ranking.
   It is included in evaluation summaries, the CLI `evaluate` output, and the
   tracked metrics document, making the popularity bias tradeoff explicit.
+- Full 100% statement coverage, with the two `__main__` entry points and one
+  defensive guard documented as deliberate exclusions, plus a `make coverage`
+  target for the report.
 
 ### Fixed
 

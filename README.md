@@ -773,6 +773,7 @@ Use the Makefile for common workflows:
 ```bash
 make install   # uv sync with dashboard + tracking + dev
 make ci        # lint + typecheck + tests
+make coverage  # run tests with the statement coverage report
 make train     # train on CPU
 make api       # run FastAPI with reload
 make dashboard # run Streamlit
@@ -828,8 +829,10 @@ Release tags repeat the quality gate without reusable dependency caches before
 publishing the API and dashboard images, then attach registry provenance.
 
 The pytest configuration treats warnings as errors and enforces at least 75%
-statement coverage across the application package and API. The terminal report
-lists uncovered lines so new tests can target meaningful behavior.
+statement coverage across the application package and API. The current suite
+reaches 100% statement coverage; the two `__main__` entry points and one
+defensive guard are marked as deliberate exclusions because they only execute
+under `python -m` or the Streamlit runtime.
 
 Current coverage focus:
 
