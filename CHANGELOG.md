@@ -59,6 +59,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Full 100% statement coverage, with the two `__main__` entry points and one
   defensive guard documented as deliberate exclusions, plus a `make coverage`
   target for the report.
+- An A/B parameter-settings comparison harness (`compare_parameter_settings`)
+  that evaluates the same ALS pipeline under different reranking settings on
+  identical holdouts, exposed through `evaluate --compare-settings` with
+  `label:key=value,...` parsing and labeled metric rows in the CLI output and
+  the tracked metrics document.
 
 ### Fixed
 

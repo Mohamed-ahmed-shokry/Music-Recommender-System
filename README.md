@@ -358,6 +358,13 @@ Compare ALS, popularity, content-only, and hybrid strategies:
 uv run python -m music_recommender.cli evaluate --top-k 10 --folds 5 --compare-all --no-use-gpu
 ```
 
+A/B test reranking settings of the same ALS pipeline on identical holdouts:
+
+```bash
+uv run python -m music_recommender.cli evaluate --top-k 10 --folds 5 \
+  --compare-settings "control:;penalty:popularity_penalty=0.2"
+```
+
 ## API Reference
 
 Train before starting the API:
@@ -665,6 +672,23 @@ hybrid strategies surface more hard-to-discover artists, while the popularity
 baseline almost never does. Serendipity@K adds the relevance dimension, so a
 strategy earns credit only when it is surprising and useful at the same time.
 
+### A/B testing reranking settings
+
+The same ALS pipeline can be A/B tested under different reranking settings on
+identical holdouts, so tuning `popularity_penalty`, `diversity`, and
+`include_listened` happens against a control in one command:
+
+```bash
+uv run python -m music_recommender.cli evaluate \
+  --top-k 5 --folds 2 --no-use-gpu \
+  --compare-settings "control:;penalty:popularity_penalty=0.2;diverse:popularity_penalty=0.2,diversity=0.5"
+```
+
+Each semicolon-separated setting is `label:key=value,...`; an empty value list
+is the control. Values are parsed as booleans, integers, or floats. The harness
+prints one full metric row per label to `evaluation/metrics.json` and to the
+tracking run it is tagged with the labels being compared.
+
 ## Experiment Tracking
 
 The optional tracking integration uses `mlflow-skinny` in the project and a
@@ -878,7 +902,8 @@ Current coverage focus:
 - Add track-level recommendations.
 - Add audio-feature content similarity.
 - Add a learning-to-rank model after candidate generation.
-- Add an online A/B evaluation harness for comparing live candidate strategies.
+- Add batting-average style strategy selection that promotes the winner of each
+  A/B comparison into the default hybrid blend.
 
 ## License
 
