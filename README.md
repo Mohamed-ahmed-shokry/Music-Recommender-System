@@ -594,6 +594,7 @@ The project reports ranking quality, catalog behavior, and popularity bias:
 | Average popularity | Average total plays of recommended artists |
 | Novelty@K | Average inverse popularity rank of recommended artists |
 | Unexpectedness@K | Share of recommended artists from the popularity long tail (serendipity proxy) |
+| Serendipity@K | Share of relevant top-K recommendations that are also from the popularity long tail |
 | Explanation coverage | Share of recommendations with non-empty reasons |
 | Intra-list diversity | Average dissimilarity within each recommendation list |
 
@@ -616,6 +617,7 @@ ALS:
   Average popularity: 93.2417
   Novelty@5: 0.4520
   Unexpectedness@5: 0.3611
+  Serendipity@5: 0.2333
   Explanation coverage: 0.0000
   Intra-list diversity: 0.5004
 Popularity:
@@ -627,6 +629,7 @@ Popularity:
   Average popularity: 110.9250
   Novelty@5: 0.2387
   Unexpectedness@5: 0.0833
+  Serendipity@5: 0.0500
   Explanation coverage: 0.0000
   Intra-list diversity: 0.4357
 Content:
@@ -638,6 +641,7 @@ Content:
   Average popularity: 86.1667
   Novelty@5: 0.5265
   Unexpectedness@5: 0.7222
+  Serendipity@5: 0.6667
   Explanation coverage: 1.0000
   Intra-list diversity: 0.9009
 Hybrid:
@@ -649,6 +653,7 @@ Hybrid:
   Average popularity: 91.9250
   Novelty@5: 0.4647
   Unexpectedness@5: 0.5833
+  Serendipity@5: 0.4833
   Explanation coverage: 1.0000
   Intra-list diversity: 0.9196
 ```
@@ -657,7 +662,8 @@ The comparison is useful because a recommender can look strong by recommending
 only globally popular artists. The baseline makes that tradeoff visible, and the
 long-tail unexpectedness metric makes the tradeoff explicit: content-only and
 hybrid strategies surface more hard-to-discover artists, while the popularity
-baseline almost never does.
+baseline almost never does. Serendipity@K adds the relevance dimension, so a
+strategy earns credit only when it is surprising and useful at the same time.
 
 ## Experiment Tracking
 
@@ -872,8 +878,7 @@ Current coverage focus:
 - Add track-level recommendations.
 - Add audio-feature content similarity.
 - Add a learning-to-rank model after candidate generation.
-- Add relevance-weighted serendipity metrics beyond the long-tail
-  unexpectedness coverage reported today.
+- Add an online A/B evaluation harness for comparing live candidate strategies.
 
 ## License
 
