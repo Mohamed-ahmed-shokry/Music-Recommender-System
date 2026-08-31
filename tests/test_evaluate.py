@@ -17,6 +17,7 @@ from music_recommender.evaluate import (
     ndcg_at_k,
     novelty_at_k,
     precision_at_k,
+    ranking_params_for_training,
     recall_at_k,
     select_winning_strategies,
     serendipity_at_k,
@@ -664,6 +665,27 @@ def test_strategy_leaderboard_breaks_ties_with_ndcg() -> None:
     assert leaderboard[0][0] == "b"
     assert leaderboard[1][0] == "a"
     assert all(wins == 5 for _, wins in leaderboard)
+
+
+def test_ranking_params_for_training_extracts_ranking_keys_only() -> None:
+    params = ranking_params_for_training(
+        {
+            "popularity_penalty": 0.2,
+            "diversity": 0.5,
+            "include_listened": True,
+            "birds": "nope",
+        }
+    )
+
+    assert params == {
+        "popularity_penalty": 0.2,
+        "diversity": 0.5,
+        "include_listened": True,
+    }
+
+
+def test_ranking_params_for_training_returns_empty_for_unknown_keys() -> None:
+    assert ranking_params_for_training({"content_weight": 0.4}) == {}
 
 
 def test_repeated_holdout_builds_content_from_interactions_when_no_metadata() -> None:

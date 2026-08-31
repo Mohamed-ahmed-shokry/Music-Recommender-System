@@ -317,6 +317,143 @@ def test_evaluate_command_rejects_compare_settings_with_all(monkeypatch) -> None
     assert result.exit_code == 2
 
 
+def test_evaluate_command_promotes_winning_setting(monkeypatch) -> None:
+    trained: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+    diverse_row = metric_row()
+    diverse_row["ndcg_at_k"] = 0.9
+    diverse_row["precision_at_k"] = 0.8
+    comparison = {"control": metric_row(), "diverse": diverse_row}
+    monkeypatch.setattr(
+        cli,
+        "compare_parameter_settings",
+        lambda *_args, **_kwargs: comparison,
+    )
+    monkeypatch.setattr(
+        cli,
+        "train_and_save_model",
+        lambda **kwargs: trained.append(kwargs),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate",
+            "--no-use-gpu",
+            "--compare-settings",
+            "control:;diverse:popularity_penalty=0.2,diversity=0.5",
+            "--promote-winner",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Promoting the winning setting" in result.output
+    assert "Promoted 'control' ranking settings" in result.output
+    assert trained == [
+        {
+            "popularity_penalty": 0.0,
+            "diversity": 0.0,
+            "include_listened": False,
+        }
+    ]
+
+
+def test_evaluate_command_promotes_diverse_winner_with_params(monkeypatch) -> None:
+    trained: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+    diverse_row = metric_row()
+    for key, value in diverse_row.items():
+        if isinstance(value, float):
+            diverse_row[key] = value + 0.1
+    comparison = {"control": metric_row(), "diverse": diverse_row}
+    monkeypatch.setattr(
+        cli,
+        "compare_parameter_settings",
+        lambda *_args, **_kwargs: comparison,
+    )
+    monkeypatch.setattr(
+        cli,
+        "train_and_save_model",
+        lambda **kwargs: trained.append(kwargs),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate",
+            "--no-use-gpu",
+            "--compare-settings",
+            "control:;diverse:popularity_penalty=0.2,diversity=0.5",
+            "--promote-winner",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Promoted 'diverse' ranking settings" in result.output
+    assert trained == [
+        {
+            "popularity_penalty": 0.2,
+            "diversity": 0.5,
+            "include_listened": False,
+        }
+    ]
+
+
+def test_evaluate_command_requires_compare_settings_for_promotion(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+
+    result = runner.invoke(cli.app, ["evaluate", "--promote-winner"])
+
+    assert result.exit_code == 2
+    assert "--promote-winner requires --compare-settings" in result.output
+
+
+def test_evaluate_command_promotion_reports_retrain_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+    monkeypatch.setattr(
+        cli,
+        "compare_parameter_settings",
+        lambda *_args, **_kwargs: {"diverse": metric_row()},
+    )
+    monkeypatch.setattr(
+        cli,
+        "train_and_save_model",
+        lambda **_kwargs: (_ for _ in ()).throw(ValueError("retrain boom")),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate",
+            "--no-use-gpu",
+            "--compare-settings",
+            "diverse:popularity_penalty=0.2",
+            "--promote-winner",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "promotion failed: retrain boom" in result.output
+
+
 def test_parse_parameter_settings_parses_labels_and_values() -> None:
     parameter_sets = cli._parse_parameter_settings(
         "control:;diverse:popularity_penalty=0.2,diversity=0.5;flag:include_listened=true,count=5;raw:name=xyz"

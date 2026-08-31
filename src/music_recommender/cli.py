@@ -29,6 +29,7 @@ from music_recommender.data import load_and_validate_interactions
 from music_recommender.evaluate import (
     compare_parameter_settings,
     evaluate_repeated_holdout,
+    ranking_params_for_training,
     select_winning_strategies,
     strategy_leaderboard,
 )
@@ -529,8 +530,18 @@ def evaluate(
             "'control:;diversity:popularity_penalty=0.2,diversity=0.5'."
         ),
     ),
+    promote_winner: bool = typer.Option(
+        False,
+        "--promote-winner/--no-promote-winner",
+        help=(
+            "After an A/B comparison, retrain the model with the winning "
+            "setting's ranking parameters and save the new artifact."
+        ),
+    ),
 ) -> None:
     """Evaluate recommendations with ranking metrics."""
+    if promote_winner and compare_settings is None:
+        raise typer.BadParameter("--promote-winner requires --compare-settings.")
     if compare_settings is not None and (compare_baseline or compare_all):
         raise typer.BadParameter(
             "--compare-settings cannot be combined with"
@@ -563,10 +574,11 @@ def evaluate(
                 else None
             )
             if compare_settings is not None:
+                parameter_sets = _parse_parameter_settings(compare_settings)
                 comparison_metrics = compare_parameter_settings(
                     df,
                     top_k=top_k,
-                    parameter_sets=_parse_parameter_settings(compare_settings),
+                    parameter_sets=parameter_sets,
                     folds=folds,
                     use_gpu=use_gpu,
                 )
@@ -615,6 +627,8 @@ def evaluate(
             typer.echo(f"  {metric}: {label}")
         best_label, wins = strategy_leaderboard(comparison_metrics)[0]
         typer.echo(f"Overall: {best_label} won {wins} of {len(winners)} metrics.")
+        if promote_winner:
+            _promote_ranking_settings(best_label, parameter_sets)
     elif compare_all:
         comparison_metrics = cast(dict[str, dict[str, float]], metrics)
         typer.echo(f"Evaluation over {folds} fold(s):")
@@ -648,6 +662,29 @@ def _print_metric_row(name: str, metrics: dict[str, float], top_k: int) -> None:
     typer.echo(f"  Serendipity@{top_k}: {metrics['serendipity_at_k']:.4f}")
     typer.echo(f"  Explanation coverage: {metrics['explanation_coverage']:.4f}")
     typer.echo(f"  Intra-list diversity: {metrics['intra_list_diversity']:.4f}")
+
+
+def _promote_ranking_settings(
+    label: str,
+    parameter_sets: dict[str, dict[str, float | int | bool | str]],
+) -> None:
+    """Retrain the model with the winning setting's ranking parameters."""
+    typer.echo("Promoting the winning setting into the serving bundle...")
+    params = ranking_params_for_training(parameter_sets[label])
+    try:
+        train_and_save_model(
+            popularity_penalty=float(params.get("popularity_penalty", 0.0)),
+            diversity=float(params.get("diversity", 0.0)),
+            include_listened=bool(params.get("include_listened", False)),
+        )
+    except (FileNotFoundError, ValueError, RuntimeError) as error:
+        typer.secho(
+            f"Error: promotion failed: {error}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1) from error
+    typer.echo(f"Promoted '{label}' ranking settings into the artifact.")
 
 
 def _parse_parameter_settings(

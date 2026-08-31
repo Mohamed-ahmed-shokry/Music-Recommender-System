@@ -451,6 +451,10 @@ _QUALITY_METRICS: tuple[str, ...] = (
     "intra_list_diversity",
 )
 
+_RANKING_PARAM_KEYS: frozenset[str] = frozenset(
+    {"popularity_penalty", "diversity", "include_listened"}
+)
+
 
 def select_winning_strategies(
     comparison: dict[str, dict[str, float]],
@@ -491,6 +495,21 @@ def strategy_leaderboard(
             pair[0],
         ),
     )
+
+
+def ranking_params_for_training(
+    parameter_set: dict[str, Any],
+) -> dict[str, float | bool]:
+    """Extract the training-time ranking keys from a labeled parameter set.
+
+    Only ``popularity_penalty``, ``diversity``, and ``include_listened`` are
+    forwarded to ``train_and_save_model``; other keys are ignored.
+    """
+    params: dict[str, float | bool] = {}
+    for key in _RANKING_PARAM_KEYS:
+        if key in parameter_set:
+            params[key] = parameter_set[key]
+    return params
 
 
 def _evaluate_single_fold(
