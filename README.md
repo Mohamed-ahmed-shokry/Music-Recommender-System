@@ -371,6 +371,21 @@ uv run python -m music_recommender.cli evaluate --top-k 10 --folds 5 \
   --compare-settings "control:;penalty:popularity_penalty=0.2"
 ```
 
+Add a learning-to-rank arm that re-ranks the ALS candidates with a lightweight
+pointwise model trained on the training fold:
+
+```bash
+uv run python -m music_recommender.cli evaluate --top-k 10 --folds 5 --learn-to-rank
+```
+
+`--learn-to-rank` reports an additional `ltr` strategy alongside `als` (and any
+baselines requested with `--compare-baseline`/`--compare-all`). The re-ranker is
+a ridge regressor over interpretable per-candidate features — the ALS
+collaborative score, the artist's log popularity and normalized popularity rank,
+and the user's interaction count — trained on positive interactions paired with
+sampled negatives, then used to re-order the served list. It only re-ranks
+candidates the collaborative model already surfaced, so serving stays cheap.
+
 ## API Reference
 
 Train before starting the API:
@@ -952,7 +967,8 @@ Current coverage focus:
 - Add Spotify API integration.
 - Add track-level recommendations.
 - Add audio-feature content similarity.
-- Add a learning-to-rank model after candidate generation.
+- Serve the learning-to-rank re-ranker in production by persisting it on the
+  artifact alongside the collaborative model.
 - Add ablations / feature-importance reporting for champion ranking settings.
 - Add a CI quality gate that auto-promotes the winning setting when the A/B run
   passes a minimum quality threshold.

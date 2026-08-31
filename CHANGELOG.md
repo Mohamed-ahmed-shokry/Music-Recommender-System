@@ -78,6 +78,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `evaluate --promote-winner`: after an `--compare-settings` A/B run, retrain
   the model with the overall winner's ranking parameters and save the new
   artifact, closing the loop from comparison to serving.
+- `evaluate --learn-to-rank`: a pointwise learning-to-rank re-ranker built on a
+  ridge regressor over collaborative/popularity/user features. It is trained on
+  each fold and used to re-rank the ALS candidates, reported as an additional
+  `ltr` arm in the holdout metrics. The new `music_recommender.ltr` module
+  exposes `train_ltr_ranker` and `rank_with_ltr`.
 
 ### Fixed
 
