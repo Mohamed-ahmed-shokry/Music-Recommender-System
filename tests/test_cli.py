@@ -1093,6 +1093,117 @@ def test_evaluate_command_als_only_prints_single_row(monkeypatch) -> None:
     assert "Popularity:" not in result.output
 
 
+def test_evaluate_command_learn_to_rank_forwards_flag_and_prints_ltr(
+    monkeypatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    metrics = {"als": metric_row(), "ltr": metric_row()}
+
+    def fake_holdout(*args, **kwargs) -> str:
+        captured.update(kwargs)
+        return metrics
+
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+    monkeypatch.setattr(cli, "evaluate_repeated_holdout", fake_holdout)
+
+    result = runner.invoke(
+        cli.app,
+        ["evaluate", "--no-use-gpu", "--learn-to-rank"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["learn_to_rank"] is True
+    assert "ALS:" in result.output
+    assert "LTR:" in result.output
+
+
+def test_evaluate_command_learn_to_rank_tags_ltr_strategy(monkeypatch) -> None:
+    recorded_run = RecordingRun()
+    tracking_config: dict[str, Any] = {}
+    monkeypatch.setattr(
+        cli,
+        "tracking_run",
+        tracking_context(recorded_run, tracking_config),
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+
+    def fake_holdout(*args, **kwargs) -> str:
+        return {"als": metric_row(), "ltr": metric_row()}
+
+    monkeypatch.setattr(cli, "evaluate_repeated_holdout", fake_holdout)
+
+    result = runner.invoke(
+        cli.app,
+        ["evaluate", "--no-use-gpu", "--track", "--learn-to-rank"],
+    )
+
+    assert result.exit_code == 0
+    assert recorded_run.tags["strategies"] == "als,ltr"
+    assert recorded_run.params["learn_to_rank"] is True
+
+
+def test_evaluate_command_learn_to_rank_with_compare_all_prints_ltr(
+    monkeypatch,
+) -> None:
+    metrics = dict.fromkeys(
+        ("als", "popularity", "content", "hybrid", "ltr"), metric_row()
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+
+    def fake_holdout(*args, **kwargs) -> str:
+        return metrics
+
+    monkeypatch.setattr(cli, "evaluate_repeated_holdout", fake_holdout)
+
+    result = runner.invoke(
+        cli.app,
+        ["evaluate", "--no-use-gpu", "--compare-all", "--learn-to-rank"],
+    )
+
+    assert result.exit_code == 0
+    assert "ALS:" in result.output
+    assert "Hybrid:" in result.output
+    assert "LTR:" in result.output
+
+
+def test_evaluate_command_learn_to_rank_with_compare_baseline_prints_ltr(
+    monkeypatch,
+) -> None:
+    metrics = dict.fromkeys(("als", "popularity", "ltr"), metric_row())
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+
+    def fake_holdout(*args, **kwargs) -> str:
+        return metrics
+
+    monkeypatch.setattr(cli, "evaluate_repeated_holdout", fake_holdout)
+
+    result = runner.invoke(
+        cli.app,
+        ["evaluate", "--no-use-gpu", "--compare-baseline", "--learn-to-rank"],
+    )
+
+    assert result.exit_code == 0
+    assert "ALS:" in result.output
+    assert "Popularity:" in result.output
+    assert "LTR:" in result.output
+
+
 def test_demo_command_reports_service_error(monkeypatch) -> None:
     def fail_load(*_: Any) -> None:
         raise ValueError("artifact is invalid")

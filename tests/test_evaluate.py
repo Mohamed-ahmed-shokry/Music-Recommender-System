@@ -512,6 +512,66 @@ def test_repeated_holdout_rejects_non_dict_recommend_kwargs() -> None:
         evaluate_repeated_holdout(df, top_k=3, use_gpu=False, recommend_kwargs="x")
 
 
+def test_repeated_holdout_rejects_non_bool_learn_to_rank() -> None:
+    df = pd.DataFrame()
+
+    with pytest.raises(ValueError, match="learn_to_rank"):
+        evaluate_repeated_holdout(df, top_k=3, use_gpu=False, learn_to_rank="yes")
+
+
+def test_repeated_holdout_with_learn_to_rank_adds_ltr_arm(
+    interactions_df,
+) -> None:
+    metrics = evaluate_repeated_holdout(
+        interactions_df,
+        top_k=2,
+        folds=1,
+        use_gpu=False,
+        learn_to_rank=True,
+    )
+
+    assert "als" in metrics
+    assert "ltr" in metrics
+    assert "precision_at_k" in metrics["als"]
+    assert "precision_at_k" in metrics["ltr"]
+
+
+def test_evaluate_single_fold_forwards_learn_to_rank(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_train_ltr(**kwargs) -> object:
+        captured.update(kwargs)
+        return object()
+
+    def fake_rank_with_ltr(*args, **kwargs) -> list[dict]:
+        return []
+
+    monkeypatch.setattr(evaluate_module, "train_ltr_ranker", fake_train_ltr)
+    monkeypatch.setattr(evaluate_module, "rank_with_ltr", fake_rank_with_ltr)
+    df = pd.DataFrame(
+        {
+            "user_id": ["user_1", "user_1", "user_2", "user_2"],
+            "artist_id": ["artist_1", "artist_2", "artist_1", "artist_2"],
+            "artist_name": ["A", "B", "A", "B"],
+            "play_count": [5, 4, 5, 4],
+        }
+    )
+
+    evaluate_module._evaluate_single_fold(
+        df=df,
+        top_k=1,
+        random_state=42,
+        use_gpu=False,
+        compare_baseline=False,
+        compare_all=False,
+        metadata_df=None,
+        recommend_kwargs=None,
+        learn_to_rank=True,
+    )
+
+    assert captured["random_state"] == 42
+
+
 def test_compare_parameter_settings_returns_labeled_metrics(monkeypatch) -> None:
     calls: list[dict] = []
 

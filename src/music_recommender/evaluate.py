@@ -26,6 +26,7 @@ from music_recommender.content import (
     user_content_scores,
 )
 from music_recommender.data import normalize_interactions
+from music_recommender.ltr import rank_with_ltr, train_ltr_ranker
 from music_recommender.model import train_als_model
 from music_recommender.preprocessing import build_user_item_matrix, create_id_mappings
 from music_recommender.ranking import validate_ranking_parameters
@@ -345,11 +346,16 @@ def evaluate_repeated_holdout(
     compare_all: bool = False,
     metadata_df: pd.DataFrame | None = None,
     recommend_kwargs: dict[str, Any] | None = None,
+    learn_to_rank: bool = False,
 ) -> dict[str, float] | dict[str, dict[str, float]]:
     """Evaluate ALS and optionally compare it with popularity/content/hybrid.
 
     ``recommend_kwargs`` are forwarded to ``recommend_artists_for_user`` so the
     same pipeline can be A/B tested under different reranking settings.
+
+    When ``learn_to_rank`` is set, a lightweight pointwise ranker is trained on
+    each training fold and used to re-rank the ALS candidates. The re-ranked
+    arm is reported under the ``ltr`` key alongside ``als``.
     """
     validate_ranking_parameters(top_k)
     if type(folds) is not int or folds < 1:
@@ -360,6 +366,8 @@ def evaluate_repeated_holdout(
         raise ValueError("compare_baseline must be a boolean.")
     if type(compare_all) is not bool:
         raise ValueError("compare_all must be a boolean.")
+    if type(learn_to_rank) is not bool:
+        raise ValueError("learn_to_rank must be a boolean.")
     if recommend_kwargs is not None and type(recommend_kwargs) is not dict:
         raise ValueError("recommend_kwargs must be a dictionary or None.")
 
@@ -367,6 +375,7 @@ def evaluate_repeated_holdout(
     popularity_fold_metrics: list[dict[str, float]] = []
     content_fold_metrics: list[dict[str, float]] = []
     hybrid_fold_metrics: list[dict[str, float]] = []
+    ltr_fold_metrics: list[dict[str, float]] = []
 
     for fold in range(folds):
         fold_result = _evaluate_single_fold(
@@ -378,6 +387,7 @@ def evaluate_repeated_holdout(
             compare_all=compare_all,
             metadata_df=metadata_df,
             recommend_kwargs=recommend_kwargs,
+            learn_to_rank=learn_to_rank,
         )
         als_fold_metrics.append(fold_result["als"])
         if compare_baseline or compare_all:
@@ -385,18 +395,21 @@ def evaluate_repeated_holdout(
         if compare_all:
             content_fold_metrics.append(fold_result["content"])
             hybrid_fold_metrics.append(fold_result["hybrid"])
+        if learn_to_rank:
+            ltr_fold_metrics.append(fold_result["ltr"])
 
     als_metrics = _average_metric_dicts(als_fold_metrics)
-    if not compare_baseline and not compare_all:
+    if not compare_baseline and not compare_all and not learn_to_rank:
         return als_metrics
 
-    comparison = {
-        "als": als_metrics,
-        "popularity": _average_metric_dicts(popularity_fold_metrics),
-    }
+    comparison: dict[str, dict[str, float]] = {"als": als_metrics}
+    if compare_baseline or compare_all:
+        comparison["popularity"] = _average_metric_dicts(popularity_fold_metrics)
     if compare_all:
         comparison["content"] = _average_metric_dicts(content_fold_metrics)
         comparison["hybrid"] = _average_metric_dicts(hybrid_fold_metrics)
+    if learn_to_rank:
+        comparison["ltr"] = _average_metric_dicts(ltr_fold_metrics)
     return comparison
 
 
@@ -521,6 +534,7 @@ def _evaluate_single_fold(
     compare_all: bool,
     metadata_df: pd.DataFrame | None,
     recommend_kwargs: dict[str, Any] | None,
+    learn_to_rank: bool = False,
 ) -> dict[str, dict[str, float]]:
     train_df, test_df = train_test_split_by_user(df, random_state=random_state)
     mappings = create_id_mappings(train_df)
@@ -538,6 +552,16 @@ def _evaluate_single_fold(
         use_gpu=use_gpu,
     )
     artist_stats = build_artist_stats(train_df)
+    ltr_ranker = None
+    if learn_to_rank:
+        ltr_ranker = train_ltr_ranker(
+            train_df=train_df,
+            mappings=mappings,
+            user_item_matrix=user_item_matrix,
+            model=model,
+            artist_stats=artist_stats,
+            random_state=random_state,
+        )
     content_artifacts = None
     if compare_all:
         train_metadata_df = metadata_df
@@ -556,6 +580,7 @@ def _evaluate_single_fold(
     all_popularity_items: list[list[str]] = []
     all_content_items: list[list[str]] = []
     all_hybrid_items: list[list[str]] = []
+    all_ltr_items: list[list[str]] = []
     all_content_recommendations: list[list[dict[str, Any]]] = []
     all_hybrid_recommendations: list[list[dict[str, Any]]] = []
     all_relevant_items: list[set[str]] = []
@@ -586,6 +611,23 @@ def _evaluate_single_fold(
         all_recommended_items.append(recommended_items)
         all_relevant_items.append(relevant_items)
 
+        if ltr_ranker is not None:
+            ltr_recommendations = rank_with_ltr(
+                ltr_ranker,
+                user_id=user_id,
+                user_item_matrix=user_item_matrix,
+                mappings=mappings,
+                model=model,
+                artist_stats=artist_stats,
+                recommendations=recommendations,
+                top_k=top_k,
+            )
+            all_ltr_items.append(
+                [
+                    str(recommendation["artist_id"])
+                    for recommendation in ltr_recommendations
+                ]
+            )
         if compare_baseline:
             train_artist_ids = set(
                 train_df.loc[train_df["user_id"] == user_id, "artist_id"]
@@ -663,6 +705,16 @@ def _evaluate_single_fold(
             top_k,
         )
     }
+    if ltr_ranker is not None:
+        result["ltr"] = _summarize_recommendations(
+            all_ltr_items,
+            all_relevant_items,
+            known_artists,
+            artist_stats,
+            model.user_factors,
+            mappings["artist_id_to_index"],
+            top_k,
+        )
     if compare_baseline:
         result["popularity"] = _summarize_recommendations(
             all_popularity_items,

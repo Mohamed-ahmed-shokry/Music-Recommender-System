@@ -538,6 +538,14 @@ def evaluate(
             "setting's ranking parameters and save the new artifact."
         ),
     ),
+    learn_to_rank: bool = typer.Option(
+        False,
+        "--learn-to-rank/--no-learn-to-rank",
+        help=(
+            "Fit a lightweight ranking model on the training fold and re-rank "
+            "the ALS candidates, reporting the additional 'ltr' arm."
+        ),
+    ),
 ) -> None:
     """Evaluate recommendations with ranking metrics."""
     if promote_winner and compare_settings is None:
@@ -563,6 +571,7 @@ def evaluate(
                     "compare_all": compare_all,
                     "compare_settings": compare_settings,
                     "use_gpu": use_gpu,
+                    "learn_to_rank": learn_to_rank,
                     "data_path": str(RAW_DATA_PATH),
                     "metadata_path": str(RAW_METADATA_PATH) if compare_all else None,
                 }
@@ -599,20 +608,20 @@ def evaluate(
                     compare_all=compare_all,
                     metadata_df=metadata_df,
                     use_gpu=use_gpu,
+                    learn_to_rank=learn_to_rank,
                 )
                 tracked_run.log_metrics(metrics)
                 tracked_run.log_dict(metrics, "evaluation/metrics.json")
-                tracked_run.set_tags(
-                    {
-                        "strategies": (
-                            "als,popularity,content,hybrid"
-                            if compare_all
-                            else "als,popularity"
-                            if compare_baseline
-                            else "als"
-                        )
-                    }
-                )
+                strategy_list = []
+                if compare_all:
+                    strategy_list = ["als", "popularity", "content", "hybrid"]
+                elif compare_baseline:
+                    strategy_list = ["als", "popularity"]
+                else:
+                    strategy_list = ["als"]
+                if learn_to_rank:
+                    strategy_list.append("ltr")
+                tracked_run.set_tags({"strategies": ",".join(strategy_list)})
     except (ExperimentTrackingError, FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
@@ -636,11 +645,20 @@ def evaluate(
         _print_metric_row("Popularity", comparison_metrics["popularity"], top_k)
         _print_metric_row("Content", comparison_metrics["content"], top_k)
         _print_metric_row("Hybrid", comparison_metrics["hybrid"], top_k)
+        if learn_to_rank:
+            _print_metric_row("LTR", comparison_metrics["ltr"], top_k)
     elif compare_baseline:
         comparison_metrics = cast(dict[str, dict[str, float]], metrics)
         typer.echo(f"Evaluation over {folds} fold(s):")
         _print_metric_row("ALS", comparison_metrics["als"], top_k)
         _print_metric_row("Popularity", comparison_metrics["popularity"], top_k)
+        if learn_to_rank:
+            _print_metric_row("LTR", comparison_metrics["ltr"], top_k)
+    elif learn_to_rank:
+        comparison_metrics = cast(dict[str, dict[str, float]], metrics)
+        typer.echo(f"Evaluation over {folds} fold(s):")
+        _print_metric_row("ALS", comparison_metrics["als"], top_k)
+        _print_metric_row("LTR", comparison_metrics["ltr"], top_k)
     else:
         _print_metric_row("ALS", cast(dict[str, float], metrics), top_k)
 
