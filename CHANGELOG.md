@@ -75,6 +75,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `recommend_session` serve them as defaults whenever the caller does not pass
   explicit knobs. Legacy bundles without the configuration fall back to neutral
   settings.
+- `evaluate --promote-winner`: after an `--compare-settings` A/B run, retrain
+  the model with the overall winner's ranking parameters and save the new
+  artifact, closing the loop from comparison to serving.
 
 ### Fixed
 

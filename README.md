@@ -710,21 +710,35 @@ run is tagged with the labels being compared.
 ### Promoting the winner into serving
 
 Reranking knobs are training-time settings, so the winning A/B configuration can
-be packaged with the model. Train with the champion settings and the artifact
-records them as its ranking configuration:
+be packaged with the model. Ask the compare command to promote the winner
+directly — it retrains with the winning setting's ranking parameters and saves
+the new artifact:
+
+```bash
+uv run python -m music_recommender.cli evaluate --no-use-gpu \
+  --compare-settings "control:;diversity:popularity_penalty=0.2,diversity=0.5" \
+  --top-k 10 --promote-winner
+```
+
+After ranking the labels by metrics won, the command retrains the model, stores
+the winning `popularity_penalty`, `diversity`, and `include_listened` on the
+artifact, and prints which setting was promoted. (Promotion can also be done by
+hand — see below.) `inspect-artifacts` shows the stored settings, and the serving
+service uses them as defaults: `recommend_user`, `recommend_user_als`, and
+`recommend_session` fall back to the champion settings whenever a reranking knob
+is not explicitly provided, so a fresh deployment immediately serves the
+configuration that won the comparison. Callers that pass their own knobs (the
+dashboard sliders, for example) still override it. Legacy artifact bundles
+without a ranking configuration default to neutral settings (`penalty=0`,
+`diversity=0`, no listened items).
+
+To promote manually, train with the champion settings and the artifact records
+them as its ranking configuration:
 
 ```bash
 uv run python -m music_recommender.cli train --no-use-gpu \
   --popularity-penalty 0.2 --diversity 0.5 --include-listened
 ```
-
-`inspect-artifacts` shows them, and the serving service uses them as defaults:
-`recommend_user`, `recommend_user_als`, and `recommend_session` fall back to the
-champion settings whenever a reranking knob is not explicitly provided, so a
-fresh deployment immediately serves the configuration that won the comparison.
-Callers that pass their own knobs (the dashboard sliders, for example) still
-override it. Legacy artifact bundles without a ranking configuration default to
-neutral settings (`penalty=0`, `diversity=0`, no listened items).
 
 ## Experiment Tracking
 
@@ -939,8 +953,9 @@ Current coverage focus:
 - Add track-level recommendations.
 - Add audio-feature content similarity.
 - Add a learning-to-rank model after candidate generation.
-- Auto-retrain the serving bundle with the winning A/B reranking configuration
-  after each comparison.
+- Add ablations / feature-importance reporting for champion ranking settings.
+- Add a CI quality gate that auto-promotes the winning setting when the A/B run
+  passes a minimum quality threshold.
 
 ## License
 
