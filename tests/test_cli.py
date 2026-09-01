@@ -473,7 +473,10 @@ def test_parse_parameter_value_dict_rejects_empty_or_bad_config() -> None:
         cli._parse_parameter_value_dict("popularity_penalty")
 
 
-def test_evaluate_command_ablations_prints_arms_and_importance(monkeypatch) -> None:
+def test_evaluate_command_ablations_prints_arms_and_importance(
+    monkeypatch,
+    tmp_path,
+) -> None:
     diverse = metric_row()
     diverse["ndcg_at_k"] = 0.9
     comparison = {
@@ -501,6 +504,8 @@ def test_evaluate_command_ablations_prints_arms_and_importance(monkeypatch) -> N
             "--no-use-gpu",
             "--ablations",
             "popularity_penalty=0.2,diversity=0.5",
+            "--report-dir",
+            str(tmp_path),
         ],
     )
 
@@ -510,6 +515,10 @@ def test_evaluate_command_ablations_prints_arms_and_importance(monkeypatch) -> N
     assert "no_popularity_penalty:" in result.output
     assert "no_ranking:" in result.output
     assert "Knob importance (absolute per-metric impact vs champion):" in result.output
+    assert f"Ablation report written to: {tmp_path / 'ablation_importance.json'}" in (
+        result.output
+    )
+    assert (tmp_path / "ablation_importance.json").exists()
 
 
 def test_evaluate_command_ablations_tracks_arms(monkeypatch) -> None:

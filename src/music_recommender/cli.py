@@ -24,6 +24,7 @@ from music_recommender.config import (
     MODEL_PATH,
     RAW_DATA_PATH,
     RAW_METADATA_PATH,
+    REPORTS_DIR,
 )
 from music_recommender.data import load_and_validate_interactions
 from music_recommender.evaluate import (
@@ -34,6 +35,7 @@ from music_recommender.evaluate import (
     ranking_params_for_training,
     select_winning_strategies,
     strategy_leaderboard,
+    write_ablation_report,
 )
 from music_recommender.metadata import load_and_validate_artist_metadata
 from music_recommender.model import train_and_save_model
@@ -571,6 +573,11 @@ def evaluate(
             "report per-metric impact plus knob importance."
         ),
     ),
+    report_dir: str = typer.Option(
+        str(REPORTS_DIR),
+        "--report-dir",
+        help="Directory for the persistent ablation-importance report.",
+    ),
 ) -> None:
     """Evaluate recommendations with ranking metrics."""
     if promote_winner and compare_settings is None:
@@ -632,6 +639,10 @@ def evaluate(
                 )
                 tracked_run.log_dict(arm_metrics, "evaluation/metrics.json")
                 tracked_run.set_tags({"strategies": ",".join(arm_metrics.keys())})
+                ablation_report_path = write_ablation_report(
+                    arm_metrics,
+                    Path(report_dir),
+                )
             elif compare_settings is not None:
                 parameter_sets = _parse_parameter_settings(compare_settings)
                 comparison_metrics = compare_parameter_settings(
@@ -678,6 +689,7 @@ def evaluate(
 
     if ablations is not None:
         _print_ablation_report(arm_metrics, top_k, folds)
+        typer.echo(f"Ablation report written to: {ablation_report_path}")
     elif compare_settings is not None:
         typer.echo(f"Evaluation over {folds} fold(s):")
         for label, label_metrics in comparison_metrics.items():
