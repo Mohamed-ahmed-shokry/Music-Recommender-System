@@ -27,6 +27,8 @@ from music_recommender.config import (
 )
 from music_recommender.data import load_and_validate_interactions
 from music_recommender.evaluate import (
+    ablation_importances,
+    build_ablation_settings,
     compare_parameter_settings,
     evaluate_repeated_holdout,
     ranking_params_for_training,
@@ -560,6 +562,15 @@ def evaluate(
             "the ALS candidates, reporting the additional 'ltr' arm."
         ),
     ),
+    ablations: str | None = typer.Option(
+        None,
+        "--ablations",
+        help=(
+            "Ablate each active knob of the champion ranking config "
+            "'key=value,...' (e.g. 'popularity_penalty=0.2,diversity=0.5') and "
+            "report per-metric impact plus knob importance."
+        ),
+    ),
 ) -> None:
     """Evaluate recommendations with ranking metrics."""
     if promote_winner and compare_settings is None:
@@ -568,6 +579,18 @@ def evaluate(
         raise typer.BadParameter(
             "--compare-settings cannot be combined with"
             " --compare-baseline or --compare-all."
+        )
+    if ablations is not None and (
+        compare_settings is not None
+        or compare_baseline
+        or compare_all
+        or promote_winner
+        or learn_to_rank
+    ):
+        raise typer.BadParameter(
+            "--ablations cannot be combined with --compare-settings,"
+            " --compare-baseline, --compare-all, --promote-winner, or"
+            " --learn-to-rank."
         )
     try:
         with tracking_run(
@@ -586,6 +609,7 @@ def evaluate(
                     "compare_settings": compare_settings,
                     "use_gpu": use_gpu,
                     "learn_to_rank": learn_to_rank,
+                    "ablations": str(ablations),
                     "data_path": str(RAW_DATA_PATH),
                     "metadata_path": str(RAW_METADATA_PATH) if compare_all else None,
                 }
@@ -596,7 +620,19 @@ def evaluate(
                 if compare_all
                 else None
             )
-            if compare_settings is not None:
+            if ablations is not None:
+                champion = _parse_parameter_value_dict(ablations)
+                ablation_settings = build_ablation_settings(champion)
+                arm_metrics = compare_parameter_settings(
+                    df,
+                    top_k=top_k,
+                    parameter_sets=ablation_settings,
+                    folds=folds,
+                    use_gpu=use_gpu,
+                )
+                tracked_run.log_dict(arm_metrics, "evaluation/metrics.json")
+                tracked_run.set_tags({"strategies": ",".join(arm_metrics.keys())})
+            elif compare_settings is not None:
                 parameter_sets = _parse_parameter_settings(compare_settings)
                 comparison_metrics = compare_parameter_settings(
                     df,
@@ -640,7 +676,9 @@ def evaluate(
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
-    if compare_settings is not None:
+    if ablations is not None:
+        _print_ablation_report(arm_metrics, top_k, folds)
+    elif compare_settings is not None:
         typer.echo(f"Evaluation over {folds} fold(s):")
         for label, label_metrics in comparison_metrics.items():
             _print_metric_row(label, label_metrics, top_k)
@@ -694,6 +732,25 @@ def _print_metric_row(name: str, metrics: dict[str, float], top_k: int) -> None:
     typer.echo(f"  Serendipity@{top_k}: {metrics['serendipity_at_k']:.4f}")
     typer.echo(f"  Explanation coverage: {metrics['explanation_coverage']:.4f}")
     typer.echo(f"  Intra-list diversity: {metrics['intra_list_diversity']:.4f}")
+
+
+def _print_ablation_report(
+    arm_metrics: dict[str, dict[str, float]],
+    top_k: int,
+    folds: int,
+) -> None:
+    """Print the champion-first arm rows and the knob importance ranking."""
+    typer.echo(f"Ablation over {folds} fold(s):")
+    champion = arm_metrics["champion"]
+    _print_metric_row("Champion", champion, top_k)
+    for label, label_metrics in arm_metrics.items():
+        if label == "champion":
+            continue
+        _print_metric_row(label, label_metrics, top_k)
+    _, ranking = ablation_importances(arm_metrics)
+    typer.echo("Knob importance (absolute per-metric impact vs champion):")
+    for knob, impact in ranking:
+        typer.echo(f"  {knob}: {impact:.4f}")
 
 
 def _promote_ranking_settings(
@@ -759,6 +816,21 @@ def _parse_parameter_value(raw: str) -> float | int | bool | str:
         return float(raw)
     except ValueError:
         return raw
+
+
+def _parse_parameter_value_dict(text: str) -> dict[str, float | int | bool | str]:
+    """Parse 'key=value,key2=value2' into a setting dictionary."""
+    settings: dict[str, float | int | bool | str] = {}
+    if not text.strip():
+        raise ValueError("--ablations requires a non-empty 'key=value,...' config.")
+    for pair in text.split(","):
+        key, equals, raw_value = pair.partition("=")
+        key = key.strip()
+        raw_value = raw_value.strip()
+        if not key or not equals:
+            raise ValueError(f"Invalid pair '{pair}'. Expected 'key=value'.")
+        settings[key] = _parse_parameter_value(raw_value)
+    return settings
 
 
 @app.command()

@@ -454,6 +454,141 @@ def test_evaluate_command_promotion_reports_retrain_failure(monkeypatch) -> None
     assert "promotion failed: retrain boom" in result.output
 
 
+def test_parse_parameter_value_dict_parses_rank_values() -> None:
+    assert cli._parse_parameter_value_dict(
+        "popularity_penalty=0.2,diversity=0.5,include_listened=true,count=5,raw=xyz"
+    ) == {
+        "popularity_penalty": 0.2,
+        "diversity": 0.5,
+        "include_listened": True,
+        "count": 5,
+        "raw": "xyz",
+    }
+
+
+def test_parse_parameter_value_dict_rejects_empty_or_bad_config() -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        cli._parse_parameter_value_dict("  ")
+    with pytest.raises(ValueError, match="Invalid pair"):
+        cli._parse_parameter_value_dict("popularity_penalty")
+
+
+def test_evaluate_command_ablations_prints_arms_and_importance(monkeypatch) -> None:
+    diverse = metric_row()
+    diverse["ndcg_at_k"] = 0.9
+    comparison = {
+        "champion": metric_row(),
+        "no_popularity_penalty": metric_row(),
+        "no_ranking": metric_row(),
+    }
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+    monkeypatch.setattr(
+        cli,
+        "compare_parameter_settings",
+        lambda *_args, **_kwargs: comparison,
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate",
+            "--top-k",
+            "5",
+            "--no-use-gpu",
+            "--ablations",
+            "popularity_penalty=0.2,diversity=0.5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Ablation over 1 fold(s):" in result.output
+    assert result.output.count("Champion:") == 1
+    assert "no_popularity_penalty:" in result.output
+    assert "no_ranking:" in result.output
+    assert "Knob importance (absolute per-metric impact vs champion):" in result.output
+
+
+def test_evaluate_command_ablations_tracks_arms(monkeypatch) -> None:
+    recorded_run = RecordingRun()
+    tracking_config: dict[str, Any] = {}
+    comparison = {
+        "champion": metric_row(),
+        "no_popularity_penalty": metric_row(),
+    }
+    monkeypatch.setattr(
+        cli,
+        "tracking_run",
+        tracking_context(recorded_run, tracking_config),
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+    monkeypatch.setattr(
+        cli,
+        "compare_parameter_settings",
+        lambda *_args, **_kwargs: comparison,
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate",
+            "--no-use-gpu",
+            "--track",
+            "--ablations",
+            "popularity_penalty=0.2",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert recorded_run.params["ablations"] == "popularity_penalty=0.2"
+    assert recorded_run.tags["strategies"] == "champion,no_popularity_penalty"
+    assert recorded_run.dict_artifacts == [(comparison, "evaluation/metrics.json")]
+
+
+def test_evaluate_command_ablations_rejects_combined_flags() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate",
+            "--ablations",
+            "popularity_penalty=0.2",
+            "--compare-baseline",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--ablations cannot be combined" in result.output
+
+
+def test_evaluate_command_ablations_reports_neutral_champion_error(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate",
+            "--ablations",
+            "popularity_penalty=0.0",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "already neutral; nothing to ablate" in result.output
+
+
 def test_parse_parameter_settings_parses_labels_and_values() -> None:
     parameter_sets = cli._parse_parameter_settings(
         "control:;diverse:popularity_penalty=0.2,diversity=0.5;flag:include_listened=true,count=5;raw:name=xyz"
