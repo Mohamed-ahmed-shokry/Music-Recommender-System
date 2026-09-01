@@ -4,8 +4,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from music_recommender.artifacts import build_recommender_artifact, save_artifact
+from music_recommender.artifacts import (
+    build_artist_stats,
+    build_recommender_artifact,
+    save_artifact,
+)
 from music_recommender.content import build_content_artifacts
+from music_recommender.ltr import train_ltr_ranker
 from music_recommender.model import train_als_model
 from music_recommender.preprocessing import build_user_item_matrix, create_id_mappings
 from music_recommender.service import RecommenderService
@@ -45,6 +50,7 @@ def service_metadata_df() -> pd.DataFrame:
 def create_service(
     tmp_path: Path,
     ranking_config: dict[str, object] | None = None,
+    ltr_model: object | None = None,
 ) -> RecommenderService:
     df = service_dataframe()
     mappings = create_id_mappings(df)
@@ -85,6 +91,7 @@ def create_service(
             "popularity_penalty": 0.0,
             "diversity": 0.0,
         },
+        ltr_model=ltr_model,
     )
     artifact_path = tmp_path / "artifact.joblib"
     save_artifact(artifact, artifact_path)
@@ -154,6 +161,63 @@ def test_recommend_user_als_applies_champion_settings(tmp_path: Path) -> None:
     response = service.recommend_user_als("user_1", top_k=2)
 
     assert response["strategy"] == "als_personalized"
+    assert response["recommendations"]
+
+
+def test_recommend_user_ltr_reranks_with_bundled_model(tmp_path: Path) -> None:
+    df = service_dataframe()
+    mappings = create_id_mappings(df)
+    matrix = build_user_item_matrix(
+        df,
+        mappings["user_id_to_index"],
+        mappings["artist_id_to_index"],
+    )
+    model = train_als_model(matrix, 4, 0.01, 1, 10.0, use_gpu=False)
+    stats = build_artist_stats(df)
+    ranker = train_ltr_ranker(
+        train_df=df,
+        mappings=mappings,
+        user_item_matrix=matrix,
+        model=model,
+        artist_stats=stats,
+        random_state=9,
+    )
+    service = create_service(tmp_path, ltr_model=ranker)
+
+    response = service.recommend_user_ltr("user_1", top_k=2)
+
+    assert response["strategy"] == "ltr_personalized"
+    assert response["recommendations"]
+    assert service.metadata()["ltr"]["available"] is True
+    assert service.health()["ltr_available"] is True
+
+
+def test_recommend_user_ltr_falls_back_when_no_ranker_bundled(
+    tmp_path: Path,
+) -> None:
+    service = create_service(tmp_path)
+
+    response = service.recommend_user_ltr("user_1", top_k=2)
+
+    assert response["strategy"] == "ltr_personalized"
+    assert response["recommendations"]
+    assert service.metadata()["ltr"]["available"] is False
+    assert service.health()["ltr_available"] is False
+
+
+def test_recommend_user_ltr_forwards_champion_ranking_settings(tmp_path: Path) -> None:
+    service = create_service(
+        tmp_path,
+        ranking_config={
+            "include_listened": True,
+            "popularity_penalty": 0.3,
+            "diversity": 0.5,
+        },
+    )
+
+    response = service.recommend_user_ltr("user_1", top_k=2)
+
+    assert response["strategy"] == "ltr_personalized"
     assert response["recommendations"]
 
 

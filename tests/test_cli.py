@@ -653,6 +653,11 @@ class FakeService:
     def recommend_user(self, **_: Any) -> dict[str, Any]:
         return self.user_response
 
+    def recommend_user_ltr(self, **_: Any) -> dict[str, Any]:
+        response = dict(self.user_response)
+        response["strategy"] = "ltr_personalized"
+        return response
+
     def recommend_profile(self, **_: Any) -> dict[str, Any]:
         return self.profile_response
 
@@ -774,6 +779,19 @@ def test_recommend_user_command_reports_unknown_user(monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert "Unknown user_id 'new_user'." in result.output
+
+
+def test_recommend_user_command_with_ltr_uses_ltr_strategy(monkeypatch) -> None:
+    fake = FakeService()
+    install_fake_service(monkeypatch, fake)
+
+    result = runner.invoke(
+        cli.app,
+        ["recommend-user", "--user-id", "user_1", "--top-k", "5", "--ltr"],
+    )
+
+    assert result.exit_code == 0
+    assert "Strategy: ltr_personalized" in result.output
 
 
 def test_recommend_profile_command_prints_recommendations(monkeypatch) -> None:

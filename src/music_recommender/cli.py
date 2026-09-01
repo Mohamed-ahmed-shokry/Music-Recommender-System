@@ -309,19 +309,33 @@ def recommend_user(
     diversity: float = 0.0,
     content_weight: float = DEFAULT_CONTENT_WEIGHT,
     explain: bool = False,
+    ltr: bool = typer.Option(
+        False,
+        "--ltr/--no-ltr",
+        help="Re-rank the ALS candidates with the bundled learning-to-rank model.",
+    ),
 ) -> None:
     """Recommend artists for a user."""
     try:
         service = RecommenderService.from_artifacts()
-        response = service.recommend_user(
-            user_id=user_id,
-            top_k=top_k,
-            include_listened=include_listened,
-            popularity_penalty=popularity_penalty,
-            diversity=diversity,
-            content_weight=content_weight,
-            explain=explain,
-        )
+        if ltr:
+            response = service.recommend_user_ltr(
+                user_id=user_id,
+                top_k=top_k,
+                include_listened=include_listened,
+                popularity_penalty=popularity_penalty,
+                diversity=diversity,
+            )
+        else:
+            response = service.recommend_user(
+                user_id=user_id,
+                top_k=top_k,
+                include_listened=include_listened,
+                popularity_penalty=popularity_penalty,
+                diversity=diversity,
+                content_weight=content_weight,
+                explain=explain,
+            )
     except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error

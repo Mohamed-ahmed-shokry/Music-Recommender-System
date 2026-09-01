@@ -23,6 +23,7 @@ from music_recommender.content import (
 from music_recommender.content import (
     listened_artist_ids as content_listened_artist_ids,
 )
+from music_recommender.ltr import rank_with_ltr
 from music_recommender.ranking import (
     apply_popularity_penalty,
     rerank_with_diversity,
@@ -56,6 +57,9 @@ class RecommenderService:
             "training_config": self.artifact.training_config,
             "hybrid_config": self.artifact.hybrid_config,
             "ranking_config": self.artifact.ranking_config,
+            "ltr": {
+                "available": self.artifact.ltr_model is not None,
+            },
             "content": {
                 "num_features": len(self.artifact.content_artifacts.feature_names),
                 "feature_names": self.artifact.content_artifacts.feature_names,
@@ -71,6 +75,7 @@ class RecommenderService:
             "num_artists": self.artifact.metadata["num_artists"],
             "num_interactions": self.artifact.metadata["num_interactions"],
             "content_features": len(self.artifact.content_artifacts.feature_names),
+            "ltr_available": self.artifact.ltr_model is not None,
         }
 
     def recommend_user(
@@ -159,6 +164,51 @@ class RecommenderService:
         return {
             "user_id": user_id,
             "strategy": "als_personalized",
+            "recommendations": recommendations,
+        }
+
+    def recommend_user_ltr(
+        self,
+        user_id: str,
+        top_k: int,
+        include_listened: bool | None = None,
+        popularity_penalty: float | None = None,
+        diversity: float | None = None,
+    ) -> dict[str, Any]:
+        """Recommend artists re-ranked by the learning-to-rank model.
+
+        Requires an artifact trained with an LTR re-ranker. If no ranker is
+        bundled, the ALS recommendations are returned unchanged.
+        """
+        include_listened, popularity_penalty, diversity = self._ranking_overrides(
+            include_listened, popularity_penalty, diversity
+        )
+        recommendations = recommend_artists_for_user(
+            model=self.artifact.model,
+            user_id=user_id,
+            user_item_matrix=self.artifact.user_item_matrix,
+            mappings=self.artifact.mappings,
+            top_k=top_k,
+            include_listened=include_listened,
+            artist_stats=self.artifact.artist_stats,
+            popularity_penalty=popularity_penalty,
+            diversity=diversity,
+        )
+        ranker = self.artifact.ltr_model
+        if ranker is not None:
+            recommendations = rank_with_ltr(
+                ranker,
+                user_id=user_id,
+                user_item_matrix=self.artifact.user_item_matrix,
+                mappings=self.artifact.mappings,
+                model=self.artifact.model,
+                artist_stats=self.artifact.artist_stats,
+                recommendations=recommendations,
+                top_k=top_k,
+            )
+        return {
+            "user_id": user_id,
+            "strategy": "ltr_personalized",
             "recommendations": recommendations,
         }
 
