@@ -10,7 +10,11 @@ import joblib
 import numpy as np
 from scipy.sparse import csr_matrix
 
-from music_recommender.artifacts import build_recommender_artifact, save_artifact
+from music_recommender.artifacts import (
+    build_artist_stats,
+    build_recommender_artifact,
+    save_artifact,
+)
 from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
     DEFAULT_ALS_ALPHA,
@@ -27,6 +31,7 @@ from music_recommender.config import (
     RAW_METADATA_PATH,
 )
 from music_recommender.content import build_content_artifacts, validate_content_weight
+from music_recommender.ltr import train_ltr_ranker
 from music_recommender.metadata import load_and_validate_artist_metadata
 from music_recommender.preprocessing import Mappings, prepare_training_data
 from music_recommender.ranking import validate_ranking_parameters
@@ -288,6 +293,13 @@ def train_and_save_model(
         training_config=training_config,
         hybrid_config=hybrid_config,
         ranking_config=ranking_config,
+        ltr_model=train_ltr_ranker(
+            train_df=filtered_df,
+            mappings=mappings,
+            user_item_matrix=user_item_matrix,
+            model=model,
+            artist_stats=build_artist_stats(filtered_df),
+        ),
     )
     save_artifact(artifact, artifact_path)
     save_model(model, model_path)

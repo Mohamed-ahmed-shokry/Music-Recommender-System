@@ -138,6 +138,28 @@ def test_artifact_rejects_invalid_ranking_config(tmp_path: Path) -> None:
         load_artifact(artifact_path)
 
 
+def test_artifact_without_ltr_model_defaults_to_none(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    del artifact.ltr_model
+    artifact_path = tmp_path / "legacy-ltr.joblib"
+
+    save_artifact(artifact, artifact_path)
+    loaded_artifact = load_artifact(artifact_path)
+
+    assert loaded_artifact.ltr_model is None
+
+
+def test_artifact_bundle_round_trips_ltr_model(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.ltr_model = {"kind": "ridge"}
+    artifact_path = tmp_path / "ltr.joblib"
+
+    save_artifact(artifact, artifact_path)
+    loaded_artifact = load_artifact(artifact_path)
+
+    assert loaded_artifact.ltr_model == {"kind": "ridge"}
+
+
 def test_corrupt_artifact_has_actionable_load_error(tmp_path: Path) -> None:
     artifact_path = tmp_path / "corrupt.joblib"
     artifact_path.write_bytes(b"not a joblib artifact")

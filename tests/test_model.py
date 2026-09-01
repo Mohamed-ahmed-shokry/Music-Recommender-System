@@ -241,6 +241,7 @@ def test_train_and_save_stores_champion_ranking_settings(tmp_path: Path) -> None
         "popularity_penalty": 0.2,
         "diversity": 0.5,
     }
+    assert artifact.ltr_model is not None
 
 
 def test_train_and_save_does_not_persist_model_on_metadata_failure(

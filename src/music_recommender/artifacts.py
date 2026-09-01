@@ -44,6 +44,7 @@ class RecommenderArtifact:
     training_config: dict[str, Any]
     hybrid_config: dict[str, Any]
     ranking_config: dict[str, Any]
+    ltr_model: Any = None
 
     def __repr__(self) -> str:
         return (
@@ -121,6 +122,7 @@ def build_recommender_artifact(
     training_config: dict[str, Any],
     hybrid_config: dict[str, Any],
     ranking_config: dict[str, Any],
+    ltr_model: Any = None,
 ) -> RecommenderArtifact:
     """Build a versioned artifact from trained model state."""
     metadata = {
@@ -148,6 +150,7 @@ def build_recommender_artifact(
         training_config=training_config,
         hybrid_config=hybrid_config,
         ranking_config=ranking_config,
+        ltr_model=ltr_model,
     )
 
 
