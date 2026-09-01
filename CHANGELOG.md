@@ -89,6 +89,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (falling back to the standard hybrid list when no ranker is bundled), and it
   is exposed through `recommend-user --ltr`. Champion ranking settings still
   apply to the underlying candidates.
+- `evaluate --ablations`: ablation / feature-importance reporting for the
+  champion ranking configuration. `build_ablation_settings` derives a
+  `no_<knob>` arm for every active knob plus a fully neutral `no_ranking` arm,
+  `ablation_importances` reports each arm's signed per-metric delta versus the
+  champion, and the CLI prints a knob importance ranking by total absolute
+  impact. It is an alternative to `--compare-settings`/`--promote-winner` and
+  cannot be combined with them.
 
 ### Fixed
 

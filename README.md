@@ -398,6 +398,21 @@ and the user's interaction count — trained on positive interactions paired wit
 sampled negatives, then used to re-order the served list. It only re-ranks
 candidates the collaborative model already surfaced, so serving stays cheap.
 
+Ablate each active knob of a champion ranking configuration to see its
+per-metric contribution:
+
+```bash
+uv run python -m music_recommender.cli evaluate --top-k 10 --folds 5 \
+  --ablations "popularity_penalty=0.2,diversity=0.5"
+```
+
+`--ablations` evaluates the champion config plus a `no_<knob>` arm for every
+active knob and a fully neutral `no_ranking` arm on the same holdout, then
+reports each arm's signed per-metric delta versus the champion and a knob
+importance ranking by total absolute impact. It is an alternative to
+`--compare-settings` (and the other compare/`--promote-winner` flags) and
+cannot be combined with them.
+
 ## API Reference
 
 Train before starting the API:
@@ -979,11 +994,12 @@ Current coverage focus:
 - Add Spotify API integration.
 - Add track-level recommendations.
 - Add audio-feature content similarity.
-- Add ablations / feature-importance reporting for champion ranking settings.
-- Add a CI quality gate that auto-promotes the winning setting when the A/B run
-  passes a minimum quality threshold.
 - Expose the learning-to-rank re-ranked recommendations through the API and
   dashboard with a configurable toggle.
+- Add ablation / feature-importance reporting for champion ranking settings,
+  including a persistent importance report over multiple datasets.
+- Add a CI quality gate that auto-promotes the winning setting when the A/B run
+  passes a minimum quality threshold.
 
 ## License
 
