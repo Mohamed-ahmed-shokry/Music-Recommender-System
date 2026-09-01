@@ -413,6 +413,17 @@ importance ranking by total absolute impact. It is an alternative to
 `--compare-settings` (and the other compare/`--promote-winner` flags) and
 cannot be combined with them.
 
+The ablation result is also persisted as a JSON report (with the arm metrics,
+signed deltas, and importance ranking under a stable schema) so runs over
+different datasets can be compared side by side. It is written to `reports/`
+(override with `--report-dir`):
+
+```bash
+uv run python -m music_recommender.cli evaluate --top-k 10 \
+  --ablations "popularity_penalty=0.2,diversity=0.5" \
+  --report-dir reports/round-1
+```
+
 ## API Reference
 
 Train before starting the API:
@@ -996,8 +1007,8 @@ Current coverage focus:
 - Add audio-feature content similarity.
 - Expose the learning-to-rank re-ranked recommendations through the API and
   dashboard with a configurable toggle.
-- Add ablation / feature-importance reporting for champion ranking settings,
-  including a persistent importance report over multiple datasets.
+- Aggregate persisted ablation reports across datasets to surface stable knob
+  importance signals.
 - Add a CI quality gate that auto-promotes the winning setting when the A/B run
   passes a minimum quality threshold.
 

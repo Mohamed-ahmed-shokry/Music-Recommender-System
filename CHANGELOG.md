@@ -96,6 +96,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   champion, and the CLI prints a knob importance ranking by total absolute
   impact. It is an alternative to `--compare-settings`/`--promote-winner` and
   cannot be combined with them.
+- Persistent ablation reports: `evaluate --ablations` also writes a JSON report
+  (arm metrics, signed deltas, and knob importance ranking under a stable
+  schema) to `reports/`, overridden with `--report-dir`, so runs over different
+  datasets produce comparable importance signals.
 
 ### Fixed
 
