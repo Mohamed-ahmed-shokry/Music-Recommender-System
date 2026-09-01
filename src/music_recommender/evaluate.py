@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Collection, Mapping, Sequence
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -612,6 +615,40 @@ def _ablation_knob_name(label: str) -> str:
 def _total_impact(deltas: Mapping[str, float]) -> float:
     """Sum the absolute per-metric deltas as a single impact score."""
     return float(sum(abs(value) for value in deltas.values()))
+
+
+def write_ablation_report(
+    comparison: Mapping[str, Mapping[str, float]],
+    report_dir: Path,
+    *,
+    report_name: str | None = None,
+    champion_label: str = ABLATION_CHAMPION_LABEL,
+) -> Path:
+    """Persist an ablation-importance report as a JSON file.
+
+    The report combines the per-arm signed metric deltas, the knob importance
+    ranking, and the raw arm metrics under a stable schema. It is written to
+    ``report_dir`` as ``<report_name>.json`` (defaults to
+    ``ablation_importance.json``), so results from different datasets or runs
+    can be compared side by side. The parent directory is created if needed.
+    """
+    importance, ranked_impacts = ablation_importances(comparison, champion_label)
+    report_path = report_dir / f"{report_name or 'ablation_importance'}.json"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report = {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "champion_label": champion_label,
+        "arms": {label: dict(arm_metrics) for label, arm_metrics in comparison.items()},
+        "importance": importance,
+        "ranking": [
+            {"knob": knob, "impact": impact} for knob, impact in ranked_impacts
+        ],
+    }
+    report_path.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return report_path
 
 
 def _evaluate_single_fold(

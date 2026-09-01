@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -876,3 +879,45 @@ def test_ablation_importances_ranks_single_knob_first_on_ties() -> None:
 
 def test_ablation_knob_name_passes_through_unknown_labels() -> None:
     assert evaluate_module._ablation_knob_name("champion_extra") == "champion_extra"
+
+
+def test_write_ablation_report_persists_stable_json(tmp_path: Path) -> None:
+    champion = dict(_comparison()["control"])
+    lowered = dict(champion)
+    lowered["ndcg_at_k"] -= 0.1
+    comparison = {
+        "champion": champion,
+        "no_popularity_penalty": lowered,
+    }
+
+    report_path = evaluate_module.write_ablation_report(
+        comparison,
+        tmp_path,
+        report_name="round-1",
+    )
+
+    assert report_path == tmp_path / "round-1.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["champion_label"] == "champion"
+    assert set(report["arms"]) == {"champion", "no_popularity_penalty"}
+    assert report["importance"]["popularity_penalty"]["ndcg_at_k"] == pytest.approx(0.1)
+    assert report["ranking"] == [
+        {"knob": "popularity_penalty", "impact": pytest.approx(0.1)}
+    ]
+    assert "generated_at" in report
+
+
+def test_write_ablation_report_creates_parent_and_uses_default_name(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "nested" / "output"
+    champion = dict(_comparison()["control"])
+    comparison = {
+        "champion": champion,
+        "no_popularity_penalty": champion,
+    }
+    report_path = evaluate_module.write_ablation_report(comparison, report_dir)
+
+    assert report_path == report_dir / "ablation_importance.json"
+    assert report_path.exists()
+    json.loads(report_path.read_text(encoding="utf-8"))
