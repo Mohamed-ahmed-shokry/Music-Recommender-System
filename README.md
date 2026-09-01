@@ -316,6 +316,18 @@ Include artists the user already listened to:
 uv run python -m music_recommender.cli recommend-user --user-id user_1 --include-listened
 ```
 
+Re-rank the recommendations with the bundled learning-to-rank model (trained
+during `train` and persisted on the artifact):
+
+```bash
+uv run python -m music_recommender.cli recommend-user --user-id user_1 --top-k 10 --ltr
+```
+
+`--ltr` asks the service for the `ltr_personalized` strategy, which re-orders the
+ALS candidates with the ridge re-ranker described below. If the artifact has no
+bundled ranker it falls back to the standard hybrid list. Champion ranking
+settings still apply to the underlying candidates.
+
 Show popular artists:
 
 ```bash
@@ -967,11 +979,11 @@ Current coverage focus:
 - Add Spotify API integration.
 - Add track-level recommendations.
 - Add audio-feature content similarity.
-- Serve the learning-to-rank re-ranker in production by persisting it on the
-  artifact alongside the collaborative model.
 - Add ablations / feature-importance reporting for champion ranking settings.
 - Add a CI quality gate that auto-promotes the winning setting when the A/B run
   passes a minimum quality threshold.
+- Expose the learning-to-rank re-ranked recommendations through the API and
+  dashboard with a configurable toggle.
 
 ## License
 

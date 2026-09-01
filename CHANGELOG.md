@@ -83,6 +83,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   each fold and used to re-rank the ALS candidates, reported as an additional
   `ltr` arm in the holdout metrics. The new `music_recommender.ltr` module
   exposes `train_ltr_ranker` and `rank_with_ltr`.
+- Learning-to-rank in serving: `train` trains the re-ranker and persists it on
+  the artifact bundle alongside the collaborative model. `recommend_user_ltr`
+  serves it, re-ranking the ALS candidates with the `ltr_personalized` strategy
+  (falling back to the standard hybrid list when no ranker is bundled), and it
+  is exposed through `recommend-user --ltr`. Champion ranking settings still
+  apply to the underlying candidates.
 
 ### Fixed
 
