@@ -5,8 +5,10 @@ import music_recommender.evaluate as evaluate_module
 from music_recommender.evaluate import (
     _average_metric_dicts,
     _summarize_recommendations,
+    ablation_importances,
     average_popularity,
     average_precision_at_k,
+    build_ablation_settings,
     catalog_coverage,
     compare_parameter_settings,
     evaluate_model,
@@ -786,3 +788,91 @@ def test_repeated_holdout_builds_content_from_interactions_when_no_metadata() ->
 
     assert {"als", "popularity", "content", "hybrid"} <= set(metrics)
     assert "explanation_coverage" in metrics["content"]
+
+
+def test_build_ablation_settings_keeps_champion_and_turns_active_knobs_off() -> None:
+    settings = build_ablation_settings(
+        {
+            "popularity_penalty": 0.2,
+            "diversity": 0.5,
+            "include_listened": False,
+        }
+    )
+
+    assert set(settings) == {
+        "champion",
+        "no_popularity_penalty",
+        "no_diversity",
+        "no_ranking",
+    }
+    assert settings["champion"] == {
+        "popularity_penalty": 0.2,
+        "diversity": 0.5,
+        "include_listened": False,
+    }
+    assert settings["no_popularity_penalty"]["popularity_penalty"] == 0.0
+    assert settings["no_diversity"]["diversity"] == 0.0
+    assert settings["no_ranking"] == {
+        "popularity_penalty": 0.0,
+        "diversity": 0.0,
+        "include_listened": False,
+    }
+
+
+def test_build_ablation_settings_rejects_unknown_key() -> None:
+    with pytest.raises(ValueError, match="Unknown ranking parameter 'birds'"):
+        build_ablation_settings({"popularity_penalty": 0.2, "birds": 1})
+
+
+def test_build_ablation_settings_rejects_already_neutral_champion() -> None:
+    with pytest.raises(ValueError, match="already neutral"):
+        build_ablation_settings(
+            {
+                "popularity_penalty": 0.0,
+                "diversity": 0.0,
+                "include_listened": False,
+            }
+        )
+
+
+def test_ablation_importances_reports_signed_deltas_and_ranks_by_impact() -> None:
+    champion = dict(_comparison()["control"])
+    lowered = dict(champion)
+    lowered["ndcg_at_k"] -= 0.1
+    lowered["novelty_at_k"] -= 0.2
+    lowered["intra_list_diversity"] -= 0.3
+    comparison = {
+        "champion": champion,
+        "no_popularity_penalty": lowered,
+        "no_ranking": lowered,
+    }
+
+    importance, ranking = ablation_importances(comparison)
+
+    assert importance["popularity_penalty"]["ndcg_at_k"] == pytest.approx(0.1)
+    assert importance["ranking_settings"]["ndcg_at_k"] == pytest.approx(0.1)
+    assert importance["ranking_settings"]["novelty_at_k"] == pytest.approx(0.2)
+    assert ranking[0][0] == "popularity_penalty"
+    assert ranking[0][1] == pytest.approx(abs(-0.1) + abs(-0.2) + abs(-0.3))
+
+
+def test_ablation_importances_requires_champion_arm() -> None:
+    with pytest.raises(ValueError, match="must contain the 'champion' arm"):
+        ablation_importances({"als": _comparison()["control"]})
+
+
+def test_ablation_importances_ranks_single_knob_first_on_ties() -> None:
+    champion = dict(_comparison()["control"])
+    comparison = {
+        "champion": champion,
+        "no_popularity_penalty": champion,
+        "no_ranking": champion,
+    }
+
+    _, ranking = ablation_importances(comparison)
+
+    assert ranking == [("popularity_penalty", 0.0), ("ranking_settings", 0.0)]
+
+
+def test_ablation_knob_name_passes_through_unknown_labels() -> None:
+    assert evaluate_module._ablation_knob_name("champion_extra") == "champion_extra"

@@ -525,6 +525,95 @@ def ranking_params_for_training(
     return params
 
 
+ABLATION_CHAMPION_LABEL: str = "champion"
+ABLATION_ALL_NEUTRAL_LABEL: str = "no_ranking"
+
+_RANKING_NEUTRAL_VALUES: dict[str, float | bool] = {
+    "popularity_penalty": 0.0,
+    "diversity": 0.0,
+    "include_listened": False,
+}
+
+
+def build_ablation_settings(
+    champion: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Build labelled ablation arms from a champion ranking configuration.
+
+    The ``champion`` arm keeps every knob. Each active knob — one set to a
+    non-neutral value — also gets a ``no_<knob>`` arm that turns it off, and the
+    ``no_ranking`` arm turns every knob off so the collective contribution is
+    visible. The labels are stable so results can be compared across runs.
+    """
+    for key in champion:
+        if key not in _RANKING_PARAM_KEYS:
+            raise ValueError(
+                f"Unknown ranking parameter '{key}'. Supported: "
+                + ", ".join(sorted(_RANKING_PARAM_KEYS))
+                + "."
+            )
+    active_knobs = [
+        key
+        for key in _RANKING_PARAM_KEYS
+        if key in champion and champion[key] != _RANKING_NEUTRAL_VALUES[key]
+    ]
+    if not active_knobs:
+        raise ValueError(
+            "Champion ranking settings are already neutral; nothing to ablate."
+        )
+    settings: dict[str, dict[str, Any]] = {ABLATION_CHAMPION_LABEL: dict(champion)}
+    for knob in active_knobs:
+        settings[f"no_{knob}"] = {
+            **champion,
+            knob: _RANKING_NEUTRAL_VALUES[knob],
+        }
+    settings[ABLATION_ALL_NEUTRAL_LABEL] = {**champion, **_RANKING_NEUTRAL_VALUES}
+    return settings
+
+
+def ablation_importances(
+    comparison: Mapping[str, Mapping[str, float]],
+    champion_label: str = ABLATION_CHAMPION_LABEL,
+) -> tuple[dict[str, dict[str, float]], list[tuple[str, float]]]:
+    """Measure each ablation arm's per-metric impact relative to the champion.
+
+    Signed deltas are reported per quality metric: a positive delta means the
+    arm's knob contributes to that metric. Arms are ranked by total absolute
+    impact across the quality metrics, ties broken by name.
+    """
+    if champion_label not in comparison:
+        raise ValueError(f"Comparison must contain the '{champion_label}' arm.")
+    champion = comparison[champion_label]
+    importance: dict[str, dict[str, float]] = {}
+    for label, arm_metrics in comparison.items():
+        if label == champion_label:
+            continue
+        deltas: dict[str, float] = {}
+        for metric in _QUALITY_METRICS:
+            if metric in champion and metric in arm_metrics:
+                deltas[metric] = float(champion[metric] - arm_metrics[metric])
+        importance[_ablation_knob_name(label)] = deltas
+    ranked_impacts = sorted(
+        ((name, _total_impact(deltas)) for name, deltas in importance.items()),
+        key=lambda pair: (-pair[1], pair[0]),
+    )
+    return importance, ranked_impacts
+
+
+def _ablation_knob_name(label: str) -> str:
+    """Human-readable name for an ablation arm label."""
+    if label == ABLATION_ALL_NEUTRAL_LABEL:
+        return "ranking_settings"
+    if label.startswith("no_"):
+        return label[len("no_") :]
+    return label
+
+
+def _total_impact(deltas: Mapping[str, float]) -> float:
+    """Sum the absolute per-metric deltas as a single impact score."""
+    return float(sum(abs(value) for value in deltas.values()))
+
+
 def _evaluate_single_fold(
     df: pd.DataFrame,
     top_k: int,
