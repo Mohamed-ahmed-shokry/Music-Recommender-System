@@ -100,6 +100,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (arm metrics, signed deltas, and knob importance ranking under a stable
   schema) to `reports/`, overridden with `--report-dir`, so runs over different
   datasets produce comparable importance signals.
+- `ablation-summary`: aggregates every persisted ablation report in a directory
+  and reports, per knob, the mean/median/std of the total impact across runs
+  plus the run count, ranked by mean impact. This surfaces which knobs stay
+  important across datasets versus whose effect depends on the data.
 
 ### Fixed
 

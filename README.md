@@ -424,6 +424,19 @@ uv run python -m music_recommender.cli evaluate --top-k 10 \
   --report-dir reports/round-1
 ```
 
+Aggregate many persisted reports (e.g. one per dataset) to surface which knobs
+stay important across runs:
+
+```bash
+uv run python -m music_recommender.cli ablation-summary --report-dir reports/
+```
+
+`ablation-summary` loads every generated report in the directory and prints,
+per knob, the mean and standard deviation of the total impact across runs plus
+how many reports contributed, ranked by mean impact. A small standard deviation
+relative to the mean flags a stable knob, while a large one suggests the knob's
+effect depends on the dataset.
+
 ## API Reference
 
 Train before starting the API:
@@ -1007,8 +1020,8 @@ Current coverage focus:
 - Add audio-feature content similarity.
 - Expose the learning-to-rank re-ranked recommendations through the API and
   dashboard with a configurable toggle.
-- Aggregate persisted ablation reports across datasets to surface stable knob
-  importance signals.
+- Write an aggregated ablation summary as a persistent JSON report, not just CLI
+  output, for downstream dashboards or CI.
 - Add a CI quality gate that auto-promotes the winning setting when the A/B run
   passes a minimum quality threshold.
 
