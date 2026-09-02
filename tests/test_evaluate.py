@@ -9,6 +9,7 @@ from music_recommender.evaluate import (
     _average_metric_dicts,
     _summarize_recommendations,
     ablation_importances,
+    aggregate_ablation_reports,
     average_popularity,
     average_precision_at_k,
     build_ablation_settings,
@@ -18,6 +19,7 @@ from music_recommender.evaluate import (
     evaluate_repeated_holdout,
     explanation_coverage,
     intra_list_diversity,
+    load_ablation_report,
     map_at_k,
     ndcg_at_k,
     novelty_at_k,
@@ -921,3 +923,83 @@ def test_write_ablation_report_creates_parent_and_uses_default_name(
     assert report_path == report_dir / "ablation_importance.json"
     assert report_path.exists()
     json.loads(report_path.read_text(encoding="utf-8"))
+
+
+def test_load_ablation_report_round_trips_written_report(tmp_path: Path) -> None:
+    champion = dict(_comparison()["control"])
+    comparison = {"champion": champion, "no_popularity_penalty": champion}
+    written = evaluate_module.write_ablation_report(comparison, tmp_path)
+
+    report = load_ablation_report(written)
+
+    assert report["champion_label"] == "champion"
+    assert set(report["importance"]) == {"popularity_penalty"}
+    assert report["arms"]["champion"]["ndcg_at_k"] == champion["ndcg_at_k"]
+
+
+def test_load_ablation_report_rejects_missing_file(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="not found"):
+        load_ablation_report(tmp_path / "missing.json")
+
+
+def test_load_ablation_report_rejects_invalid_json(tmp_path: Path) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Failed to parse ablation report"):
+        load_ablation_report(bad)
+
+
+def test_load_ablation_report_rejects_non_ablation_schema(tmp_path: Path) -> None:
+    unrelated = tmp_path / "other.json"
+    unrelated.write_text(json.dumps({"foo": 1}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="not a valid ablation report"):
+        load_ablation_report(unrelated)
+
+
+def test_aggregate_ablation_reports_averages_impacts_across_runs(
+    tmp_path: Path,
+) -> None:
+    champion = dict(_comparison()["control"])
+    first = {"champion": champion, "no_popularity_penalty": champion}
+    second = {"champion": champion, "no_popularity_penalty": champion}
+    evaluate_module.write_ablation_report(first, tmp_path, report_name="run-a")
+    evaluate_module.write_ablation_report(second, tmp_path, report_name="run-b")
+
+    summary = aggregate_ablation_reports(tmp_path)
+
+    assert summary["reports_loaded"] == 2
+    knob = summary["knobs"]["popularity_penalty"]
+    assert knob["count"] == 2
+    assert knob["mean_impact"] == pytest.approx(0.0)
+    assert knob["median_impact"] == pytest.approx(0.0)
+    assert knob["std_impact"] == pytest.approx(0.0)
+    assert summary["ranking"] == [{"knob": "popularity_penalty", "mean_impact": 0.0}]
+
+
+def test_aggregate_ablation_reports_combines_multiple_knobs_sorted_by_impact(
+    tmp_path: Path,
+) -> None:
+    champion = dict(_comparison()["control"])
+    lowered = dict(champion)
+    lowered["ndcg_at_k"] -= 0.5
+    lowered["novelty_at_k"] -= 0.3
+    comparison = {
+        "champion": champion,
+        "no_popularity_penalty": lowered,
+        "no_diversity": lowered,
+    }
+    evaluate_module.write_ablation_report(comparison, tmp_path, report_name="run")
+
+    summary = aggregate_ablation_reports(tmp_path)
+
+    impacts = {item["knob"]: item["mean_impact"] for item in summary["ranking"]}
+    assert impacts["popularity_penalty"] == pytest.approx(0.8)
+    assert impacts["diversity"] == pytest.approx(0.8)
+    assert summary["ranking"][0]["knob"] == "diversity"
+
+
+def test_aggregate_ablation_reports_raises_when_no_reports(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="No ablation reports found"):
+        aggregate_ablation_reports(tmp_path)

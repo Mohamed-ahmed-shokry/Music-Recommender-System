@@ -651,6 +651,71 @@ def write_ablation_report(
     return report_path
 
 
+def load_ablation_report(report_path: Path) -> dict[str, Any]:
+    """Load and validate a single persisted ablation-importance report.
+
+    Returns the parsed JSON, raising ``ValueError`` with an actionable message
+    if the file is missing or does not look like an ablation report (no
+    ``importance`` map).
+    """
+    if not report_path.exists():
+        raise FileNotFoundError(f"Ablation report not found: {report_path}")
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            f"Failed to parse ablation report '{report_path}': {error}"
+        ) from error
+    if not isinstance(report, dict) or "importance" not in report:
+        raise ValueError(
+            f"'{report_path}' is not a valid ablation report (missing 'importance')."
+        )
+    return report
+
+
+def aggregate_ablation_reports(
+    report_dir: Path,
+) -> dict[str, Any]:
+    """Aggregate per-knob importance across every ablation report in a directory.
+
+    Loads all ``*.json`` reports directly under ``report_dir`` and, for each
+    knob, collects the total-impact scores reported by each run. Returns their
+    mean and median impact, the standard deviation (a stability signal), the
+    number of runs, and a ranking by mean impact. Knobs are only present if at
+    least one report mentioned them.
+    """
+    report_files = sorted(report_dir.glob("*.json"))
+    if not report_files:
+        raise FileNotFoundError(f"No ablation reports found in {report_dir}")
+    knob_impacts: dict[str, list[float]] = {}
+    for report_path in report_files:
+        report = load_ablation_report(report_path)
+        importance = report["importance"]
+        if not isinstance(importance, dict):
+            continue  # pragma: no cover - guarded by load_ablation_report
+        for knob, deltas in importance.items():
+            impact = _total_impact(deltas)
+            knob_impacts.setdefault(knob, []).append(impact)
+    knobs: dict[str, Any] = {}
+    for knob, impacts in sorted(knob_impacts.items()):
+        knobs[knob] = {
+            "mean_impact": float(np.mean(impacts)),
+            "median_impact": float(np.median(impacts)),
+            "std_impact": float(np.std(impacts)) if len(impacts) > 1 else 0.0,
+            "count": len(impacts),
+            "impacts": [float(impact) for impact in impacts],
+        }
+    ranking = sorted(
+        ((knob, details["mean_impact"]) for knob, details in knobs.items()),
+        key=lambda pair: (-pair[1], pair[0]),
+    )
+    return {
+        "reports_loaded": len(report_files),
+        "knobs": knobs,
+        "ranking": [{"knob": knob, "mean_impact": impact} for knob, impact in ranking],
+    }
+
+
 def _evaluate_single_fold(
     df: pd.DataFrame,
     top_k: int,
