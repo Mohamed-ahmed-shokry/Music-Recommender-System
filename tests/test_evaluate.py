@@ -1003,3 +1003,29 @@ def test_aggregate_ablation_reports_combines_multiple_knobs_sorted_by_impact(
 def test_aggregate_ablation_reports_raises_when_no_reports(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="No ablation reports found"):
         aggregate_ablation_reports(tmp_path)
+
+
+def test_write_ablation_summary_report_persists_stable_json(tmp_path: Path) -> None:
+    summary = {
+        "reports_loaded": 2,
+        "knobs": {
+            "diversity": {
+                "mean_impact": 0.2,
+                "median_impact": 0.2,
+                "std_impact": 0.0,
+                "count": 2,
+                "impacts": [0.2, 0.2],
+            }
+        },
+        "ranking": [{"knob": "diversity", "mean_impact": 0.2}],
+    }
+    summary_path = tmp_path / "nested" / "summary.json"
+
+    written = evaluate_module.write_ablation_summary_report(summary, summary_path)
+
+    assert written == summary_path
+    persisted = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert persisted["reports_loaded"] == 2
+    assert persisted["knobs"]["diversity"]["mean_impact"] == pytest.approx(0.2)
+    assert persisted["ranking"] == [{"knob": "diversity", "mean_impact": 0.2}]
+    assert "generated_at" in persisted

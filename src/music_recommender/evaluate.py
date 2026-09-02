@@ -716,6 +716,26 @@ def aggregate_ablation_reports(
     }
 
 
+def write_ablation_summary_report(
+    summary: Mapping[str, Any],
+    summary_path: Path,
+) -> Path:
+    """Persist an aggregated ablation summary as a JSON file.
+
+    Wraps ``summary`` with a stable schema (including the generation timestamp)
+    so downstream dashboards and CI can consume the aggregated knob importance
+    deterministically. The parent directory is created if needed.
+    """
+    summary_dict = dict(summary)
+    summary_dict["generated_at"] = datetime.now(UTC).isoformat()
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps(summary_dict, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return summary_path
+
+
 def _evaluate_single_fold(
     df: pd.DataFrame,
     top_k: int,
