@@ -103,7 +103,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `ablation-summary`: aggregates every persisted ablation report in a directory
   and reports, per knob, the mean/median/std of the total impact across runs
   plus the run count, ranked by mean impact. This surfaces which knobs stay
-  important across datasets versus whose effect depends on the data.
+  important across datasets versus whose effect depends on the data. The
+  aggregated result is also persisted as a JSON report (default
+  `reports/ablation_summary.json`, overridden with `--summary-path`) for
+  downstream dashboards and CI.
 
 ### Fixed
 

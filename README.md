@@ -437,6 +437,15 @@ how many reports contributed, ranked by mean impact. A small standard deviation
 relative to the mean flags a stable knob, while a large one suggests the knob's
 effect depends on the dataset.
 
+The aggregated result is also written as a JSON report (default
+`reports/ablation_summary.json`, override with `--summary-path`) so dashboards
+and CI can consume the stable knob-importance summary deterministically:
+
+```bash
+uv run python -m music_recommender.cli ablation-summary \
+  --report-dir reports/ --summary-path reports/ablation_summary.json
+```
+
 ## API Reference
 
 Train before starting the API:
@@ -1020,8 +1029,7 @@ Current coverage focus:
 - Add audio-feature content similarity.
 - Expose the learning-to-rank re-ranked recommendations through the API and
   dashboard with a configurable toggle.
-- Write an aggregated ablation summary as a persistent JSON report, not just CLI
-  output, for downstream dashboards or CI.
+- Surface the aggregated ablation summary in the dashboard or an API endpoint.
 - Add a CI quality gate that auto-promotes the winning setting when the A/B run
   passes a minimum quality threshold.
 
