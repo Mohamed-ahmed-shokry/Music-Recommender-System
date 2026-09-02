@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -1380,4 +1381,46 @@ def test_demo_command_reports_service_error(monkeypatch) -> None:
 
     assert result.exit_code == 1
     assert "Error: artifact is invalid" in result.output
+    assert result.exception is not None
+
+
+def _write_report(path: Any, importance: dict[str, Any]) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-09-02T00:00:00+00:00",
+                "champion_label": "champion",
+                "arms": {},
+                "importance": importance,
+                "ranking": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_ablation_summary_prints_aggregated_knob_importance(tmp_path) -> None:
+    _write_report(
+        tmp_path / "run-a.json",
+        {"popularity_penalty": {"ndcg_at_k": 0.1}, "diversity": {"ndcg_at_k": 0.2}},
+    )
+    _write_report(
+        tmp_path / "run-b.json",
+        {"popularity_penalty": {"ndcg_at_k": 0.3}, "diversity": {"ndcg_at_k": 0.2}},
+    )
+
+    result = runner.invoke(cli.app, ["ablation-summary", "--report-dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "Aggregated 2 ablation report(s)" in result.output
+    assert "Knob importance by mean total impact:" in result.output
+    assert "diversity: mean=0.2000" in result.output
+    assert "popularity_penalty: mean=0.2000" in result.output
+
+
+def test_ablation_summary_reports_error_when_no_reports(tmp_path) -> None:
+    result = runner.invoke(cli.app, ["ablation-summary", "--report-dir", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert "No ablation reports found" in result.output
     assert result.exception is not None

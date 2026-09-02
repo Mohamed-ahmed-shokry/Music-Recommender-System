@@ -29,6 +29,7 @@ from music_recommender.config import (
 from music_recommender.data import load_and_validate_interactions
 from music_recommender.evaluate import (
     ablation_importances,
+    aggregate_ablation_reports,
     build_ablation_settings,
     compare_parameter_settings,
     evaluate_repeated_holdout,
@@ -877,6 +878,33 @@ def demo(use_gpu: bool = DEFAULT_USE_GPU) -> None:
     typer.echo("")
     typer.echo("Content-similar artists for artist_2:")
     typer.echo(format_recommendations(similar_response["similar_artists"]))
+
+
+@app.command()
+def ablation_summary(
+    report_dir: str = typer.Option(
+        str(REPORTS_DIR),
+        "--report-dir",
+        help="Directory of persisted ablation reports to aggregate.",
+    ),
+) -> None:
+    """Aggregate ablation-importance reports across runs or datasets."""
+    try:
+        summary = aggregate_ablation_reports(Path(report_dir))
+    except (FileNotFoundError, ValueError, OSError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(
+        f"Aggregated {summary['reports_loaded']} ablation report(s) from {report_dir}:"
+    )
+    typer.echo("Knob importance by mean total impact:")
+    for item in summary["ranking"]:
+        knob = summary["knobs"][item["knob"]]
+        typer.echo(
+            f"  {item['knob']}: mean={item['mean_impact']:.4f} "
+            f"std={knob['std_impact']:.4f} runs={knob['count']}"
+        )
 
 
 if __name__ == "__main__":
