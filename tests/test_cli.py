@@ -1409,13 +1409,28 @@ def test_ablation_summary_prints_aggregated_knob_importance(tmp_path) -> None:
         {"popularity_penalty": {"ndcg_at_k": 0.3}, "diversity": {"ndcg_at_k": 0.2}},
     )
 
-    result = runner.invoke(cli.app, ["ablation-summary", "--report-dir", str(tmp_path)])
+    result = runner.invoke(
+        cli.app,
+        [
+            "ablation-summary",
+            "--report-dir",
+            str(tmp_path),
+            "--summary-path",
+            str(tmp_path / "summary.json"),
+        ],
+    )
 
     assert result.exit_code == 0
     assert "Aggregated 2 ablation report(s)" in result.output
     assert "Knob importance by mean total impact:" in result.output
     assert "diversity: mean=0.2000" in result.output
     assert "popularity_penalty: mean=0.2000" in result.output
+    assert f"Aggregated summary written to: {tmp_path / 'summary.json'}" in (
+        result.output
+    )
+    summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    assert summary["reports_loaded"] == 2
+    assert summary["knobs"]["diversity"]["mean_impact"] == 0.2
 
 
 def test_ablation_summary_reports_error_when_no_reports(tmp_path) -> None:

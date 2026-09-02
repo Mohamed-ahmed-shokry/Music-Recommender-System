@@ -37,6 +37,7 @@ from music_recommender.evaluate import (
     select_winning_strategies,
     strategy_leaderboard,
     write_ablation_report,
+    write_ablation_summary_report,
 )
 from music_recommender.metadata import load_and_validate_artist_metadata
 from music_recommender.model import train_and_save_model
@@ -887,10 +888,16 @@ def ablation_summary(
         "--report-dir",
         help="Directory of persisted ablation reports to aggregate.",
     ),
+    summary_path: str = typer.Option(
+        str(REPORTS_DIR / "ablation_summary.json"),
+        "--summary-path",
+        help="Where to write the aggregated summary JSON report.",
+    ),
 ) -> None:
     """Aggregate ablation-importance reports across runs or datasets."""
     try:
         summary = aggregate_ablation_reports(Path(report_dir))
+        written = write_ablation_summary_report(summary, Path(summary_path))
     except (FileNotFoundError, ValueError, OSError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
@@ -905,6 +912,7 @@ def ablation_summary(
             f"  {item['knob']}: mean={item['mean_impact']:.4f} "
             f"std={knob['std_impact']:.4f} runs={knob['count']}"
         )
+    typer.echo(f"Aggregated summary written to: {written}")
 
 
 if __name__ == "__main__":
