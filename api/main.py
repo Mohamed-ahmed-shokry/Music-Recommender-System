@@ -11,7 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from api.middleware import RequestSafetyMiddleware
 from music_recommender import __version__
-from music_recommender.config import DEFAULT_CONTENT_WEIGHT
+from music_recommender.config import DEFAULT_CONTENT_WEIGHT, REPORTS_DIR
+from music_recommender.evaluate import load_ablation_summary_report
 from music_recommender.service import RecommenderService
 
 _CORS_ORIGINS_ENV = "CORS_ORIGINS"
@@ -19,6 +20,8 @@ _CORS_ORIGINS_RAW = os.getenv(_CORS_ORIGINS_ENV, "*")
 
 service: RecommenderService | None = None
 service_load_error: str | None = None
+
+ABLATION_SUMMARY_PATH = REPORTS_DIR / "ablation_summary.json"
 
 MAX_API_RESULTS = 100
 MAX_REQUEST_VALUES = 100
@@ -165,6 +168,21 @@ def health() -> dict[str, object]:
 def metadata() -> dict[str, object]:
     """Return loaded artifact metadata."""
     return get_service().metadata()
+
+
+@app.get("/evaluation/ablation-summary")
+def ablation_summary() -> dict[str, object]:
+    """Return the persisted aggregated ablation-importance summary."""
+    try:
+        return load_ablation_summary_report(ABLATION_SUMMARY_PATH)
+    except FileNotFoundError as error:
+        raise HTTPException(
+            status_code=404,
+            detail="No aggregated ablation summary found. Run "
+            "`music_recommender.cli ablation-summary` first.",
+        ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @app.get("/popular-artists")

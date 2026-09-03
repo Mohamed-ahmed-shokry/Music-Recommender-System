@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -764,3 +765,51 @@ def test_service_value_errors_become_http_422(
 
     assert response.status_code == 422
     assert response.json()["detail"] == "service operation failed"
+
+
+def test_ablation_summary_route_returns_persisted_summary(
+    tmp_path, monkeypatch
+) -> None:
+    summary_path = tmp_path / "summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "reports_loaded": 2,
+                "ranking": [{"knob": "diversity", "mean_impact": 0.2}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(api_main, "ABLATION_SUMMARY_PATH", summary_path)
+
+    with TestClient(api_main.app) as client:
+        response = client.get("/evaluation/ablation-summary")
+
+    assert response.status_code == 200
+    assert response.json()["reports_loaded"] == 2
+    assert response.json()["ranking"] == [{"knob": "diversity", "mean_impact": 0.2}]
+
+
+def test_ablation_summary_route_returns_404_when_missing(tmp_path, monkeypatch) -> None:
+    missing = tmp_path / "absent.json"
+    monkeypatch.setattr(api_main, "ABLATION_SUMMARY_PATH", missing)
+
+    with TestClient(api_main.app) as client:
+        response = client.get("/evaluation/ablation-summary")
+
+    assert response.status_code == 404
+    assert "No aggregated ablation summary found" in response.json()["detail"]
+
+
+def test_ablation_summary_route_returns_422_on_invalid_summary(
+    tmp_path, monkeypatch
+) -> None:
+    summary_path = tmp_path / "summary.json"
+    summary_path.write_text("not json", encoding="utf-8")
+    monkeypatch.setattr(api_main, "ABLATION_SUMMARY_PATH", summary_path)
+
+    with TestClient(api_main.app) as client:
+        response = client.get("/evaluation/ablation-summary")
+
+    assert response.status_code == 422
+    assert "Failed to parse ablation summary" in response.json()["detail"]
