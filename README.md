@@ -469,6 +469,7 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/catalog/artists?query=pop&limit=25` | Search and page through artists and metadata |
 | `GET` | `/popular-artists?top_k=10` | Popular artist recommendations |
 | `GET` | `/recommend/user/{user_id}?top_k=10&content_weight=0.25&explain=true` | Hybrid personalized or fallback recommendations |
+| `GET` | `/recommend/user/{user_id}/ltr?top_k=10&diversity=0.2&popularity_penalty=0.1` | LTR re-ranked personalized recommendations |
 | `POST` | `/recommend/profile` | Onboarding recommendations from artists, genres, and moods |
 | `POST` | `/recommend/session` | Short-term session recommendations from seeds, exclusions, and optional user taste |
 | `GET` | `/similar-artists/{artist_id}?method=hybrid&top_k=10` | ALS, content, or hybrid similar artists |
@@ -484,6 +485,7 @@ curl "http://127.0.0.1:8000/catalog/artists?genre=pop&country=Canada&limit=25"
 curl "http://127.0.0.1:8000/popular-artists?top_k=10"
 curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10&content_weight=0.25&explain=true"
 curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10&diversity=0.2&popularity_penalty=0.1"
+curl "http://127.0.0.1:8000/recommend/user/user_1/ltr?top_k=10&diversity=0.2&popularity_penalty=0.1"
 curl "http://127.0.0.1:8000/similar-artists/artist_2?method=hybrid&top_k=10&explain=true"
 curl "http://127.0.0.1:8000/content-similar-artists/artist_2?top_k=10&explain=true"
 curl -X POST http://127.0.0.1:8000/recommend/profile \
@@ -522,13 +524,14 @@ Open the dashboard at:
 http://127.0.0.1:8501
 ```
 
-The dashboard provides five workflows:
+The dashboard provides six workflows:
 
-- personalized hybrid recommendations for known listeners;
+- personalized hybrid recommendations for known listeners (with optional LTR re-ranking);
 - cold-start recommendations from favorite artists, genres, and moods;
 - session mixes that blend long-term taste with short-term intent;
 - ALS, metadata, and hybrid artist similarity;
-- responsive catalog search over artist metadata and popularity statistics.
+- responsive catalog search over artist metadata and popularity statistics;
+- aggregated ablation-importance summary for ranking knob analysis.
 
 The trained `RecommenderService` is cached as a shared Streamlit resource, so
 widget reruns do not reload the model artifact. Catalog search uses the same
@@ -610,6 +613,36 @@ Known-user response:
         "collaborative_score": 0.4287,
         "content_score": 0.1543,
         "hybrid_score": 0.3357
+      },
+      "matched_metadata": {
+        "genres": ["pop", "singer-songwriter"],
+        "mood_tags": ["bright", "romantic", "anthemic"]
+      },
+      "reasons": [
+        "Shares 2010s, pop with The Weeknd"
+      ]
+    }
+  ]
+}
+```
+
+LTR re-ranked response:
+
+```json
+{
+  "user_id": "user_1",
+  "strategy": "ltr_personalized",
+  "recommendations": [
+    {
+      "artist_id": "artist_7",
+      "artist_name": "Taylor Swift",
+      "score": 0.8921,
+      "popularity_rank": 5,
+      "score_components": {
+        "collaborative_score": 0.4287,
+        "content_score": 0.1543,
+        "hybrid_score": 0.3357,
+        "ltr_score": 0.8921
       },
       "matched_metadata": {
         "genres": ["pop", "singer-songwriter"],

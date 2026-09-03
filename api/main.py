@@ -316,3 +316,24 @@ def content_similar_artists(
         )
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.get("/recommend/user/{user_id}/ltr")
+def recommend_user_ltr(
+    user_id: RequestText,
+    top_k: PositiveTopK = 10,
+    include_listened: bool = False,
+    diversity: UnitInterval = 0.0,
+    popularity_penalty: UnitInterval = 0.0,
+) -> dict[str, object]:
+    """Return LTR re-ranked artist recommendations for a user."""
+    try:
+        return get_service().recommend_user_ltr(
+            user_id=user_id,
+            top_k=top_k,
+            include_listened=include_listened,
+            diversity=diversity,
+            popularity_penalty=popularity_penalty,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error

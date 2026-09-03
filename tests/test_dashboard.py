@@ -65,6 +65,7 @@ class FakeDashboardService:
             content_artifacts=SimpleNamespace(metadata=metadata),
             artist_stats=artist_stats,
             metadata={"training_device": "cpu"},
+            ltr_model=None,
         )
 
     def health(self) -> dict[str, object]:
@@ -230,6 +231,7 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Session Mix",
         "Similar Artists",
         "Catalog",
+        "Ablation Summary",
     ]
     assert [metric.label for metric in app.metric] == [
         "Listeners",
@@ -477,4 +479,5 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
         "Session Mix",
         "Similar Artists",
         "Catalog",
+        "Ablation Summary",
     ]

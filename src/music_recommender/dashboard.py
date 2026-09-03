@@ -146,6 +146,7 @@ def _render_personalized_tab(
     max_top_k: int,
 ) -> None:
     st.write("Blend collaborative listening history with artist metadata.")
+    ltr_available = service.artifact.ltr_model is not None
     with st.form("personalized_recommendations"):
         user_id = st.selectbox("Listener", user_ids)
         top_k = st.slider("Number of recommendations", 1, max_top_k, min(10, max_top_k))
@@ -160,6 +161,15 @@ def _render_personalized_tab(
         )
         include_listened = st.checkbox("Include previously listened artists")
         explain = st.checkbox("Show recommendation reasons", value=True)
+        use_ltr = st.checkbox(
+            "Use Learning-to-Rank re-ranking",
+            value=False,
+            disabled=not ltr_available,
+            help=(
+                "Re-rank ALS candidates with the bundled LTR model "
+                "(requires artifact trained with --learn-to-rank)."
+            ),
+        )
         submitted = st.form_submit_button(
             "Recommend for this listener",
             type="primary",
@@ -167,17 +177,28 @@ def _render_personalized_tab(
         )
 
     if submitted:
-        _run_recommendation(
-            lambda: service.recommend_user(
-                user_id=user_id,
-                top_k=top_k,
-                include_listened=include_listened,
-                diversity=diversity,
-                popularity_penalty=popularity_penalty,
-                content_weight=content_weight,
-                explain=explain,
+        if use_ltr and ltr_available:
+            _run_recommendation(
+                lambda: service.recommend_user_ltr(
+                    user_id=user_id,
+                    top_k=top_k,
+                    include_listened=include_listened,
+                    diversity=diversity,
+                    popularity_penalty=popularity_penalty,
+                )
             )
-        )
+        else:
+            _run_recommendation(
+                lambda: service.recommend_user(
+                    user_id=user_id,
+                    top_k=top_k,
+                    include_listened=include_listened,
+                    diversity=diversity,
+                    popularity_penalty=popularity_penalty,
+                    content_weight=content_weight,
+                    explain=explain,
+                )
+            )
 
 
 def _render_profile_tab(
@@ -398,6 +419,56 @@ def _render_catalog_tab(service: RecommenderService) -> None:
     )
 
 
+def _render_ablation_summary_tab(service: RecommenderService) -> None:
+    st.write("Aggregated knob-importance summary across ablation reports.")
+    st.caption(
+        "Run `music_recommender.cli ablation-summary` to generate the summary from "
+        "persisted ablation reports."
+    )
+    try:
+        from music_recommender.config import REPORTS_DIR
+        from music_recommender.evaluate import load_ablation_summary_report
+        summary = load_ablation_summary_report(REPORTS_DIR / "ablation_summary.json")
+    except (FileNotFoundError, ValueError) as error:
+        st.warning(f"No ablation summary available: {error}")
+        st.info("Run `uv run music-recommender ablation-summary` to generate one.")
+        return
+
+    st.subheader("Knob Importance by Mean Total Impact")
+    ranking_data = summary["ranking"]
+    knobs_data = summary["knobs"]
+
+    if ranking_data:
+        import pandas as pd
+        rows = []
+        for item in ranking_data:
+            knob = item["knob"]
+            knob_info = knobs_data.get(knob, {})
+            rows.append({
+                "Knob": knob,
+                "Mean Impact": round(item["mean_impact"], 4),
+                "Std Impact": round(knob_info.get("std_impact", 0.0), 4),
+                "Runs": knob_info.get("count", 0),
+            })
+        df = pd.DataFrame(rows)
+        st.dataframe(
+            df,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "Mean Impact": st.column_config.NumberColumn(format="%.4f"),
+                "Std Impact": st.column_config.NumberColumn(format="%.4f"),
+                "Runs": st.column_config.NumberColumn(format="%d"),
+            },
+        )
+        st.caption(
+            f"Aggregated from {summary['reports_loaded']} ablation report(s). "
+            "A small standard deviation relative to the mean indicates a stable knob."
+        )
+    else:
+        st.info("No knob importance data in the summary.")
+
+
 def render_dashboard(service: RecommenderService) -> None:
     """Render the dashboard using an already loaded recommender service."""
     health = service.health()
@@ -437,6 +508,7 @@ def render_dashboard(service: RecommenderService) -> None:
             "Session Mix",
             "Similar Artists",
             "Catalog",
+            "Ablation Summary",
         ]
     )
     with tabs[0]:
@@ -462,6 +534,8 @@ def render_dashboard(service: RecommenderService) -> None:
         _render_similarity_tab(service, artist_choices, max_top_k)
     with tabs[4]:
         _render_catalog_tab(service)
+    with tabs[5]:
+        _render_ablation_summary_tab(service)
 
 
 def main() -> None:
