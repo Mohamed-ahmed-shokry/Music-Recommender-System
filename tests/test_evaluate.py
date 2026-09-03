@@ -20,6 +20,7 @@ from music_recommender.evaluate import (
     explanation_coverage,
     intra_list_diversity,
     load_ablation_report,
+    load_ablation_summary_report,
     map_at_k,
     ndcg_at_k,
     novelty_at_k,
@@ -1029,3 +1030,38 @@ def test_write_ablation_summary_report_persists_stable_json(tmp_path: Path) -> N
     assert persisted["knobs"]["diversity"]["mean_impact"] == pytest.approx(0.2)
     assert persisted["ranking"] == [{"knob": "diversity", "mean_impact": 0.2}]
     assert "generated_at" in persisted
+
+
+def test_load_ablation_summary_report_returns_persisted_summary(tmp_path) -> None:
+    summary_path = tmp_path / "summary.json"
+    summary_path.write_text(
+        json.dumps({"reports_loaded": 2, "ranking": []}), encoding="utf-8"
+    )
+
+    loaded = load_ablation_summary_report(summary_path)
+
+    assert loaded["reports_loaded"] == 2
+    assert loaded["ranking"] == []
+
+
+def test_load_ablation_summary_report_raises_when_missing(tmp_path) -> None:
+    missing = tmp_path / "absent.json"
+
+    with pytest.raises(FileNotFoundError, match="Ablation summary not found"):
+        load_ablation_summary_report(missing)
+
+
+def test_load_ablation_summary_report_raises_on_invalid_json(tmp_path) -> None:
+    summary_path = tmp_path / "summary.json"
+    summary_path.write_text("not json", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Failed to parse ablation summary"):
+        load_ablation_summary_report(summary_path)
+
+
+def test_load_ablation_summary_report_raises_on_unrecognized_shape(tmp_path) -> None:
+    summary_path = tmp_path / "summary.json"
+    summary_path.write_text(json.dumps({"foo": 1}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="not a valid ablation summary"):
+        load_ablation_summary_report(summary_path)

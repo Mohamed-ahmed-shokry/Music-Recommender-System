@@ -736,6 +736,29 @@ def write_ablation_summary_report(
     return summary_path
 
 
+def load_ablation_summary_report(summary_path: Path) -> dict[str, Any]:
+    """Load and validate a persisted aggregated ablation summary.
+
+    Returns the parsed JSON, raising ``FileNotFoundError`` when the summary is
+    missing and ``ValueError`` when it is not valid JSON or does not look like
+    an aggregated summary (no ``reports_loaded`` key).
+    """
+    if not summary_path.exists():
+        raise FileNotFoundError(f"Ablation summary not found: {summary_path}")
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            f"Failed to parse ablation summary '{summary_path}': {error}"
+        ) from error
+    if not isinstance(summary, dict) or "reports_loaded" not in summary:
+        raise ValueError(
+            f"'{summary_path}' is not a valid ablation summary "
+            "(missing 'reports_loaded')."
+        )
+    return summary
+
+
 def _evaluate_single_fold(
     df: pd.DataFrame,
     top_k: int,
