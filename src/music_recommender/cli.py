@@ -51,6 +51,23 @@ from music_recommender.tracking import (
     tracking_run,
 )
 
+# Optional Spotify imports
+try:
+    from music_recommender.spotify import (
+        SpotifyConfig,
+        create_spotify_client,
+        fetch_artist,
+        fetch_artist_top_tracks,
+        fetch_artists,
+        fetch_audio_features,
+        get_artist_related_artists,
+        search_artists,
+        search_tracks,
+    )
+    SPOTIFY_AVAILABLE = True
+except ImportError:
+    SPOTIFY_AVAILABLE = False
+
 app = typer.Typer(help="Train and use an ALS music artist recommender.")
 
 
@@ -971,6 +988,187 @@ def ablation_summary(
             f"std={knob['std_impact']:.4f} runs={knob['count']}"
         )
     typer.echo(f"Aggregated summary written to: {written}")
+
+
+def _get_spotify_client() -> tuple[object, SpotifyConfig]:
+    """Get Spotify client and config, handling missing credentials gracefully."""
+    if not SPOTIFY_AVAILABLE:
+        typer.secho(
+            "Error: Spotify integration not installed. "
+            "Install with: uv sync --extra spotify",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    try:
+        config = SpotifyConfig.from_env()
+    except ValueError as error:
+        typer.secho(
+            f"Error: {error}. Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1) from error
+    return create_spotify_client(config), config
+
+
+@app.command()
+def spotify_artist(
+    artist_id: str = typer.Argument(..., help="Spotify artist ID."),
+) -> None:
+    """Fetch and display artist information from Spotify."""
+    try:
+        client, _ = _get_spotify_client()
+        artist = fetch_artist(client, artist_id)
+    except (ValueError, Exception) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"Artist: {artist.name}")
+    typer.echo(f"Spotify ID: {artist.id}")
+    typer.echo(f"Genres: {', '.join(artist.genres) if artist.genres else 'N/A'}")
+    typer.echo(f"Popularity: {artist.popularity}")
+    typer.echo(f"Followers: {artist.followers:,}")
+    if artist.external_urls:
+        typer.echo(f"Spotify URL: {artist.external_urls.get('spotify', 'N/A')}")
+
+
+@app.command()
+def spotify_artists(
+    artist_ids: str = typer.Option(
+        ..., "--ids", help="Comma-separated Spotify artist IDs."
+    ),
+) -> None:
+    """Fetch and display multiple artists from Spotify."""
+    ids = [aid.strip() for aid in artist_ids.split(",") if aid.strip()]
+    if not ids:
+        typer.secho("Error: No artist IDs provided.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        client, _ = _get_spotify_client()
+        artists = fetch_artists(client, ids)
+    except (ValueError, Exception) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    for artist in artists:
+        typer.echo(f"  {artist.name} ({artist.id}) - Popularity: {artist.popularity}")
+
+
+@app.command()
+def spotify_artist_top_tracks(
+    artist_id: str = typer.Argument(..., help="Spotify artist ID."),
+    country: str = typer.Option("US", help="Country code for top tracks."),
+) -> None:
+    """Fetch and display an artist's top tracks from Spotify."""
+    try:
+        client, _ = _get_spotify_client()
+        tracks = fetch_artist_top_tracks(client, artist_id, country=country)
+    except (ValueError, Exception) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"Top tracks for artist {artist_id} (country: {country}):")
+    for i, track in enumerate(tracks, 1):
+        artists_str = ", ".join(track.artist_names)
+        typer.echo(
+            f"  {i}. {track.name} by {artists_str} "
+            f"(popularity: {track.popularity})"
+        )
+
+
+@app.command()
+def spotify_related_artists(
+    artist_id: str = typer.Argument(..., help="Spotify artist ID."),
+) -> None:
+    """Fetch and display related artists for a given artist."""
+    try:
+        client, _ = _get_spotify_client()
+        artists = get_artist_related_artists(client, artist_id)
+    except (ValueError, Exception) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"Related artists for {artist_id}:")
+    for i, artist in enumerate(artists, 1):
+        typer.echo(
+            f"  {i}. {artist.name} ({artist.id}) "
+            f"- Popularity: {artist.popularity}"
+        )
+
+
+@app.command()
+def spotify_search_artists(
+    query: str = typer.Argument(..., help="Search query for artist name."),
+    limit: int = typer.Option(20, help="Maximum number of results."),
+) -> None:
+    """Search for artists by name on Spotify."""
+    try:
+        client, _ = _get_spotify_client()
+        artists = search_artists(client, query, limit=limit)
+    except (ValueError, Exception) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"Search results for '{query}':")
+    for i, artist in enumerate(artists, 1):
+        typer.echo(
+            f"  {i}. {artist.name} ({artist.id}) "
+            f"- Popularity: {artist.popularity}"
+        )
+
+
+@app.command()
+def spotify_search_tracks(
+    query: str = typer.Argument(..., help="Search query for track name."),
+    limit: int = typer.Option(20, help="Maximum number of results."),
+) -> None:
+    """Search for tracks by name on Spotify."""
+    try:
+        client, _ = _get_spotify_client()
+        tracks = search_tracks(client, query, limit=limit)
+    except (ValueError, Exception) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"Search results for '{query}':")
+    for i, track in enumerate(tracks, 1):
+        artists_str = ", ".join(track.artist_names)
+        typer.echo(
+            f"  {i}. {track.name} by {artists_str} "
+            f"(popularity: {track.popularity})"
+        )
+
+
+@app.command()
+def spotify_audio_features(
+    track_ids: str = typer.Option(
+        ..., "--ids", help="Comma-separated Spotify track IDs."
+    ),
+) -> None:
+    """Fetch and display audio features for tracks."""
+    ids = [tid.strip() for tid in track_ids.split(",") if tid.strip()]
+    if not ids:
+        typer.secho("Error: No track IDs provided.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        client, _ = _get_spotify_client()
+        features = fetch_audio_features(client, ids)
+    except (ValueError, Exception) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    for i, feature in enumerate(features):
+        if feature:
+            typer.echo(
+                f"  {ids[i]}: danceability={feature.danceability:.3f}, "
+                f"energy={feature.energy:.3f}, valence={feature.valence:.3f}, "
+                f"tempo={feature.tempo:.1f}, key={feature.key}, mode={feature.mode}"
+            )
+        else:
+            typer.echo(f"  {ids[i]}: No audio features available")
 
 
 if __name__ == "__main__":

@@ -54,6 +54,10 @@ dashboard = [
 tracking = [
     "mlflow-skinny>=3.14.0",
 ]
+spotify = [
+    "spotipy>=2.24.0",
+    "python-dotenv>=1.0.1",
+]
 
 [dependency-groups]
 dev = [
