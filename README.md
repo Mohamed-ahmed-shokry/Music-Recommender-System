@@ -850,6 +850,29 @@ uv run python -m music_recommender.cli train --no-use-gpu \
   --popularity-penalty 0.2 --diversity 0.5 --include-listened
 ```
 
+### CI quality gate for auto-promotion
+
+For continuous integration pipelines, you can add a quality gate that only promotes
+the winning setting if it meets minimum metric thresholds. This prevents promoting
+a setting that wins the A/B test but doesn't meet your quality bar:
+
+```bash
+uv run python -m music_recommender.cli evaluate --no-use-gpu \
+  --compare-settings "control:;diversity:popularity_penalty=0.2,diversity=0.5" \
+  --top-k 10 --promote-winner \
+  --min-quality-threshold "ndcg_at_k=0.4,precision_at_k=0.2"
+```
+
+The `--min-quality-threshold` option accepts comma-separated `metric=value` pairs.
+All specified thresholds must be met by the winning setting for promotion to proceed.
+If any threshold is not met, the promotion is skipped with a warning. Available
+metrics include `precision_at_k`, `recall_at_k`, `map_at_k`, `ndcg_at_k`,
+`catalog_coverage`, `average_popularity`, `novelty_at_k`, `unexpectedness_at_k`,
+`serendipity_at_k`, `explanation_coverage`, and `intra_list_diversity`.
+
+This is useful in CI/CD pipelines where you want to automatically promote winning
+configurations only when they meet your quality standards.
+
 ## Experiment Tracking
 
 The optional tracking integration uses `mlflow-skinny` in the project and a
@@ -1063,10 +1086,10 @@ Current coverage focus:
 - Add track-level recommendations.
 - Add audio-feature content similarity.
 - Expose the learning-to-rank re-ranked recommendations through the API and
-  dashboard with a configurable toggle.
+  dashboard with a configurable toggle. ✓
 - Add a CI quality gate that auto-promotes the winning setting when the A/B run
-  passes a minimum quality threshold.
-- Render the aggregated ablation summary in the Streamlit dashboard.
+  passes a minimum quality threshold. ✓
+- Render the aggregated ablation summary in the Streamlit dashboard. ✓
 
 ## License
 

@@ -558,6 +558,15 @@ def evaluate(
             "setting's ranking parameters and save the new artifact."
         ),
     ),
+    min_quality_threshold: str | None = typer.Option(
+        None,
+        "--min-quality-threshold",
+        help=(
+            "Minimum quality thresholds for auto-promotion as 'metric=value,...'. "
+            "Example: 'ndcg_at_k=0.3,precision_at_k=0.15'. "
+            "Only promotes winner if all thresholds are met."
+        ),
+    ),
     learn_to_rank: bool = typer.Option(
         False,
         "--learn-to-rank/--no-learn-to-rank",
@@ -584,6 +593,8 @@ def evaluate(
     """Evaluate recommendations with ranking metrics."""
     if promote_winner and compare_settings is None:
         raise typer.BadParameter("--promote-winner requires --compare-settings.")
+    if min_quality_threshold is not None and not promote_winner:
+        raise typer.BadParameter("--min-quality-threshold requires --promote-winner.")
     if compare_settings is not None and (compare_baseline or compare_all):
         raise typer.BadParameter(
             "--compare-settings cannot be combined with"
@@ -703,7 +714,19 @@ def evaluate(
         best_label, wins = strategy_leaderboard(comparison_metrics)[0]
         typer.echo(f"Overall: {best_label} won {wins} of {len(winners)} metrics.")
         if promote_winner:
-            _promote_ranking_settings(best_label, parameter_sets)
+            if min_quality_threshold:
+                if not _check_quality_threshold(
+                    comparison_metrics[best_label], min_quality_threshold
+                ):
+                    typer.secho(
+                        "Quality gate failed: winning setting does not meet "
+                        "minimum thresholds. Promotion skipped.",
+                        fg=typer.colors.YELLOW,
+                    )
+                else:
+                    _promote_ranking_settings(best_label, parameter_sets)
+            else:
+                _promote_ranking_settings(best_label, parameter_sets)
     elif compare_all:
         comparison_metrics = cast(dict[str, dict[str, float]], metrics)
         typer.echo(f"Evaluation over {folds} fold(s):")
@@ -845,6 +868,41 @@ def _parse_parameter_value_dict(text: str) -> dict[str, float | int | bool | str
             raise ValueError(f"Invalid pair '{pair}'. Expected 'key=value'.")
         settings[key] = _parse_parameter_value(raw_value)
     return settings
+
+
+def _check_quality_threshold(
+    metrics: dict[str, float], threshold_str: str
+) -> bool:
+    """Check if all metrics meet their minimum thresholds.
+
+    Args:
+        metrics: Dictionary of metric names to values.
+        threshold_str: Comma-separated 'metric=value' pairs, e.g.
+            'ndcg_at_k=0.3,precision_at_k=0.15'.
+
+    Returns:
+        True if all thresholds are met, False otherwise.
+    """
+    for pair in threshold_str.split(","):
+        key, equals, raw_value = pair.partition("=")
+        key = key.strip()
+        raw_value = raw_value.strip()
+        if not key or not equals:
+            raise ValueError(
+                f"Invalid threshold '{pair}'. Expected 'metric=value'."
+            )
+        try:
+            threshold = float(raw_value)
+        except ValueError as err:
+            raise ValueError(
+                f"Invalid threshold value '{raw_value}' for metric '{key}'. "
+                "Must be a number."
+            ) from err
+        if key not in metrics:
+            raise ValueError(f"Unknown metric '{key}' in threshold specification.")
+        if metrics[key] < threshold:
+            return False
+    return True
 
 
 @app.command()
