@@ -107,6 +107,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   aggregated result is also persisted as a JSON report (default
   `reports/ablation_summary.json`, overridden with `--summary-path`) for
   downstream dashboards and CI.
+- API endpoint `GET /evaluation/ablation-summary` serves the persisted
+  aggregated knob-importance summary (HTTP 404 when no summary has been
+  generated, HTTP 422 if the file is unparsable), so dashboards and CI can pull
+  the aggregated evaluation deterministically.
 
 ### Fixed
 

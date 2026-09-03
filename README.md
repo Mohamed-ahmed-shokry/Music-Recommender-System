@@ -465,6 +465,7 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/` | Basic API message |
 | `GET` | `/health` | Artifact and service health |
 | `GET` | `/metadata` | Training config, dataset fingerprint, artifact metadata |
+| `GET` | `/evaluation/ablation-summary` | Persisted aggregated knob-importance summary |
 | `GET` | `/catalog/artists?query=pop&limit=25` | Search and page through artists and metadata |
 | `GET` | `/popular-artists?top_k=10` | Popular artist recommendations |
 | `GET` | `/recommend/user/{user_id}?top_k=10&content_weight=0.25&explain=true` | Hybrid personalized or fallback recommendations |
@@ -478,6 +479,7 @@ Example requests:
 ```bash
 curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/metadata
+curl http://127.0.0.1:8000/evaluation/ablation-summary
 curl "http://127.0.0.1:8000/catalog/artists?genre=pop&country=Canada&limit=25"
 curl "http://127.0.0.1:8000/popular-artists?top_k=10"
 curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10&content_weight=0.25&explain=true"
@@ -1029,9 +1031,9 @@ Current coverage focus:
 - Add audio-feature content similarity.
 - Expose the learning-to-rank re-ranked recommendations through the API and
   dashboard with a configurable toggle.
-- Surface the aggregated ablation summary in the dashboard or an API endpoint.
 - Add a CI quality gate that auto-promotes the winning setting when the A/B run
   passes a minimum quality threshold.
+- Render the aggregated ablation summary in the Streamlit dashboard.
 
 ## License
 
