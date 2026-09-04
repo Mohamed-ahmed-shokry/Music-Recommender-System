@@ -24,14 +24,14 @@ It is updated incrementally as phases land.
 - Phase 10 — Docs refresh (README, CHANGELOG, data README, PLAN).
 - Phase 11 — Coverage for new modules (tracks, spotify) — done, keep ≥75%.
 - Phase 12 — Track recommendations via API + dashboard tab — done.
+- Phase 13 — Spotify import pipeline (`spotify-import-catalog`) — done.
 
 ## Next steps
 
 1. Persist track artifacts (mappings, similarity) in versioned bundle.
 2. Add `evaluate --compare-all-tracks` or track holdout metrics.
-3. Add Spotify import pipeline: fetch → `data/raw/sample_track_*` format.
-4. CI: quality-gate job example + ablation-summary artifact upload.
-5. Release 0.5.0 (track API + dashboard now served; bundle persistence left).
+3. CI: quality-gate job example + ablation-summary artifact upload.
+4. Release 0.5.0.
 
 ## Quality gates (every change)
 
