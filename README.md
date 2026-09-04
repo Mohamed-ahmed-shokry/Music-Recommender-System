@@ -471,6 +471,15 @@ uv run python -m music_recommender.cli spotify-related-artists <spotify_artist_i
 uv run python -m music_recommender.cli spotify-audio-features --ids <track_id_1>,<track_id_2>
 ```
 
+Import a real track catalog from Spotify top tracks plus audio features into
+the track metadata contract:
+
+```bash
+uv run python -m music_recommender.cli spotify-import-catalog \
+  --artist-ids <spotify_artist_id_1>,<spotify_artist_id_2> \
+  --output data/raw/spotify_track_metadata.csv
+```
+
 Track-level recommendations with audio-feature similarity:
 
 ```bash
