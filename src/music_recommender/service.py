@@ -9,7 +9,12 @@ import numpy as np
 
 from music_recommender.artifacts import RecommenderArtifact, load_artifact
 from music_recommender.baselines import popular_artists
-from music_recommender.config import ARTIFACT_BUNDLE_PATH, DEFAULT_CONTENT_WEIGHT
+from music_recommender.config import (
+    ARTIFACT_BUNDLE_PATH,
+    DEFAULT_CONTENT_WEIGHT,
+    RAW_TRACK_DATA_PATH,
+    RAW_TRACK_METADATA_PATH,
+)
 from music_recommender.content import (
     build_content_recommendation,
     content_similar_artists,
@@ -32,6 +37,12 @@ from music_recommender.ranking import (
 from music_recommender.recommend import (
     get_similar_artists,
     recommend_artists_for_user,
+)
+from music_recommender.tracks import (
+    TrackServingResources,
+    get_similar_tracks,
+    load_track_serving_resources,
+    recommend_tracks_for_user,
 )
 
 
@@ -487,6 +498,87 @@ class RecommenderService:
             "strategy": "content_similarity",
             "similar_artists": recommendations,
         }
+
+    def _track_resources(self) -> TrackServingResources:
+        """Lazily load and cache track serving resources."""
+        cached = self.__dict__.get("_track_resources_cache")
+        if cached is None:
+            try:
+                cached = load_track_serving_resources(
+                    RAW_TRACK_DATA_PATH, RAW_TRACK_METADATA_PATH
+                )
+            except FileNotFoundError as error:
+                raise ValueError(
+                    "Track data not found. Expected sample track CSVs under "
+                    "data/raw/ (sample_track_interactions.csv and "
+                    "sample_track_metadata.csv)."
+                ) from error
+            self.__dict__["_track_resources_cache"] = cached
+        return cached
+
+    def recommend_tracks(
+        self,
+        user_id: str,
+        top_k: int,
+        include_listened: bool = False,
+    ) -> dict[str, Any]:
+        """Recommend tracks for a user with audio-feature similarity."""
+        validate_ranking_parameters(top_k)
+        resources = self._track_resources()
+        if user_id not in resources.user_track_matrix.index:
+            raise ValueError(f"Unknown user_id: {user_id}")
+        recommendations = recommend_tracks_for_user(
+            user_id=user_id,
+            user_track_matrix=resources.user_track_matrix,
+            track_similarity_matrix=resources.similarity_matrix,
+            track_id_to_index=resources.track_id_to_index,
+            top_k=top_k,
+            include_listened=include_listened,
+        )
+        return {
+            "user_id": user_id,
+            "strategy": "track_similarity",
+            "recommendations": [
+                self._enrich_track_recommendation(resources, rec)
+                for rec in recommendations
+            ],
+        }
+
+    def similar_tracks(
+        self,
+        track_id: str,
+        top_k: int,
+    ) -> dict[str, Any]:
+        """Find tracks similar to a selected track by audio features."""
+        validate_ranking_parameters(top_k)
+        resources = self._track_resources()
+        if track_id not in resources.track_id_to_index:
+            raise ValueError(f"Unknown track_id: {track_id}")
+        recommendations = get_similar_tracks(
+            track_id=track_id,
+            track_similarity_matrix=resources.similarity_matrix,
+            track_id_to_index=resources.track_id_to_index,
+            top_k=top_k,
+        )
+        return {
+            "track_id": track_id,
+            "strategy": "track_similarity",
+            "similar_tracks": [
+                self._enrich_track_recommendation(resources, rec)
+                for rec in recommendations
+            ],
+        }
+
+    @staticmethod
+    def _enrich_track_recommendation(
+        resources: TrackServingResources,
+        recommendation: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Attach track metadata to a track recommendation."""
+        track_id = str(recommendation["track_id"])
+        enriched = dict(recommendation)
+        enriched.update(resources.track_lookup.get(track_id, {"track_id": track_id}))
+        return enriched
 
     def _content_weight(self, content_weight: float | None) -> float:
         if content_weight is None:

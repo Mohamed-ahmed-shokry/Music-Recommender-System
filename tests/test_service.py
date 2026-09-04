@@ -508,3 +508,47 @@ def test_artist_catalog_rejects_invalid_pagination(
 
     with pytest.raises(ValueError, match=message):
         service.browse_artists(offset=offset, limit=limit)
+
+
+def test_recommend_tracks_returns_enriched_recommendations(
+    tmp_path: Path,
+) -> None:
+    service = create_service(tmp_path)
+
+    result = service.recommend_tracks(user_id="user_1", top_k=3)
+
+    assert result["strategy"] == "track_similarity"
+    assert result["user_id"] == "user_1"
+    assert len(result["recommendations"]) == 3
+    first = result["recommendations"][0]
+    assert first["track_name"]
+    assert first["artist_name"]
+
+
+def test_recommend_tracks_rejects_unknown_user_and_top_k(
+    tmp_path: Path,
+) -> None:
+    service = create_service(tmp_path)
+
+    with pytest.raises(ValueError, match="Unknown user_id"):
+        service.recommend_tracks(user_id="ghost", top_k=5)
+    with pytest.raises(ValueError, match="top_k must be a positive integer"):
+        service.recommend_tracks(user_id="user_1", top_k=0)
+
+
+def test_similar_tracks_returns_enriched_similarity(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    result = service.similar_tracks(track_id="track_1", top_k=3)
+
+    assert result["strategy"] == "track_similarity"
+    assert result["track_id"] == "track_1"
+    assert len(result["similar_tracks"]) == 3
+    assert all(item["track_id"] != "track_1" for item in result["similar_tracks"])
+
+
+def test_similar_tracks_rejects_unknown_track(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    with pytest.raises(ValueError, match="Unknown track_id"):
+        service.similar_tracks(track_id="track_missing", top_k=5)
