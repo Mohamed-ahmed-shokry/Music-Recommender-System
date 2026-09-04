@@ -120,6 +120,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   plus `spotify-*` CLI commands.
 - `spotify-import-catalog`: imports Spotify top tracks plus audio features for
   a list of artists into a track-metadata CSV matching the track contract.
+- `evaluate --fail-on-quality-gate`: strict mode for `--min-quality-threshold`
+  that exits non-zero when the winning setting misses the bar, for CI gates.
+- Scheduled `quality-gate` workflow: weekly/on-demand gated A/B promotion plus
+  knob ablation, uploading the reports via a pinned `actions/upload-artifact`.
 - Track-level recommendations (`music_recommender.tracks`) with audio-feature
   content similarity, sample `sample_track_interactions.csv` /
   `sample_track_metadata.csv`, and `prepare-track-data`,
