@@ -1,0 +1,193 @@
+user_id,track_id,track_name,artist_id,artist_name,play_count
+user_1,track_1,The Weeknd Song 1,artist_1,The Weeknd,21
+user_1,track_2,The Weeknd Song 2,artist_1,The Weeknd,21
+user_1,track_3,Drake Song 1,artist_2,Drake,19
+user_1,track_4,Drake Song 2,artist_2,Drake,19
+user_1,track_5,Travis Scott Song 1,artist_3,Travis Scott,16
+user_1,track_6,Travis Scott Song 2,artist_3,Travis Scott,15
+user_1,track_7,Kendrick Lamar Song 1,artist_4,Kendrick Lamar,13
+user_1,track_8,Kendrick Lamar Song 2,artist_4,Kendrick Lamar,12
+user_1,track_9,J. Cole Song 1,artist_5,J. Cole,9
+user_1,track_10,J. Cole Song 2,artist_5,J. Cole,9
+user_1,track_33,SZA Song 1,artist_17,SZA,8
+user_1,track_34,SZA Song 2,artist_17,SZA,8
+user_1,track_11,Dua Lipa Song 1,artist_6,Dua Lipa,5
+user_1,track_12,Dua Lipa Song 2,artist_6,Dua Lipa,4
+user_1,track_27,Daft Punk Song 1,artist_14,Daft Punk,4
+user_1,track_28,Daft Punk Song 2,artist_14,Daft Punk,3
+user_2,track_3,Drake Song 1,artist_2,Drake,26
+user_2,track_4,Drake Song 2,artist_2,Drake,26
+user_2,track_7,Kendrick Lamar Song 1,artist_4,Kendrick Lamar,19
+user_2,track_8,Kendrick Lamar Song 2,artist_4,Kendrick Lamar,18
+user_2,track_9,J. Cole Song 1,artist_5,J. Cole,17
+user_2,track_10,J. Cole Song 2,artist_5,J. Cole,16
+user_2,track_5,Travis Scott Song 1,artist_3,Travis Scott,13
+user_2,track_6,Travis Scott Song 2,artist_3,Travis Scott,13
+user_2,track_1,The Weeknd Song 1,artist_1,The Weeknd,10
+user_2,track_2,The Weeknd Song 2,artist_1,The Weeknd,10
+user_2,track_33,SZA Song 1,artist_17,SZA,8
+user_2,track_34,SZA Song 2,artist_17,SZA,7
+user_2,track_17,Billie Eilish Song 1,artist_9,Billie Eilish,4
+user_2,track_18,Billie Eilish Song 2,artist_9,Billie Eilish,4
+user_2,track_13,Taylor Swift Song 1,artist_7,Taylor Swift,3
+user_2,track_14,Taylor Swift Song 2,artist_7,Taylor Swift,3
+user_3,track_7,Kendrick Lamar Song 1,artist_4,Kendrick Lamar,23
+user_3,track_8,Kendrick Lamar Song 2,artist_4,Kendrick Lamar,23
+user_3,track_9,J. Cole Song 1,artist_5,J. Cole,21
+user_3,track_10,J. Cole Song 2,artist_5,J. Cole,20
+user_3,track_3,Drake Song 1,artist_2,Drake,14
+user_3,track_4,Drake Song 2,artist_2,Drake,13
+user_3,track_5,Travis Scott Song 1,artist_3,Travis Scott,12
+user_3,track_6,Travis Scott Song 2,artist_3,Travis Scott,11
+user_3,track_33,SZA Song 1,artist_17,SZA,9
+user_3,track_34,SZA Song 2,artist_17,SZA,9
+user_3,track_1,The Weeknd Song 1,artist_1,The Weeknd,7
+user_3,track_2,The Weeknd Song 2,artist_1,The Weeknd,6
+user_3,track_19,Coldplay Song 1,artist_10,Coldplay,4
+user_3,track_20,Coldplay Song 2,artist_10,Coldplay,3
+user_3,track_35,Radiohead Song 1,artist_18,Radiohead,3
+user_3,track_36,Radiohead Song 2,artist_18,Radiohead,2
+user_4,track_13,Taylor Swift Song 1,artist_7,Taylor Swift,23
+user_4,track_14,Taylor Swift Song 2,artist_7,Taylor Swift,22
+user_4,track_11,Dua Lipa Song 1,artist_6,Dua Lipa,20
+user_4,track_12,Dua Lipa Song 2,artist_6,Dua Lipa,20
+user_4,track_15,Ariana Grande Song 1,artist_8,Ariana Grande,18
+user_4,track_16,Ariana Grande Song 2,artist_8,Ariana Grande,18
+user_4,track_17,Billie Eilish Song 1,artist_9,Billie Eilish,14
+user_4,track_18,Billie Eilish Song 2,artist_9,Billie Eilish,14
+user_4,track_33,SZA Song 1,artist_17,SZA,10
+user_4,track_34,SZA Song 2,artist_17,SZA,9
+user_4,track_1,The Weeknd Song 1,artist_1,The Weeknd,7
+user_4,track_2,The Weeknd Song 2,artist_1,The Weeknd,7
+user_4,track_29,Calvin Harris Song 1,artist_15,Calvin Harris,5
+user_4,track_30,Calvin Harris Song 2,artist_15,Calvin Harris,4
+user_4,track_3,Drake Song 1,artist_2,Drake,3
+user_4,track_4,Drake Song 2,artist_2,Drake,3
+user_5,track_11,Dua Lipa Song 1,artist_6,Dua Lipa,20
+user_5,track_12,Dua Lipa Song 2,artist_6,Dua Lipa,19
+user_5,track_15,Ariana Grande Song 1,artist_8,Ariana Grande,18
+user_5,track_16,Ariana Grande Song 2,artist_8,Ariana Grande,17
+user_5,track_13,Taylor Swift Song 1,artist_7,Taylor Swift,15
+user_5,track_14,Taylor Swift Song 2,artist_7,Taylor Swift,15
+user_5,track_17,Billie Eilish Song 1,artist_9,Billie Eilish,12
+user_5,track_18,Billie Eilish Song 2,artist_9,Billie Eilish,12
+user_5,track_29,Calvin Harris Song 1,artist_15,Calvin Harris,9
+user_5,track_30,Calvin Harris Song 2,artist_15,Calvin Harris,9
+user_5,track_27,Daft Punk Song 1,artist_14,Daft Punk,6
+user_5,track_28,Daft Punk Song 2,artist_14,Daft Punk,6
+user_5,track_33,SZA Song 1,artist_17,SZA,5
+user_5,track_34,SZA Song 2,artist_17,SZA,5
+user_5,track_1,The Weeknd Song 1,artist_1,The Weeknd,4
+user_5,track_2,The Weeknd Song 2,artist_1,The Weeknd,4
+user_6,track_19,Coldplay Song 1,artist_10,Coldplay,22
+user_6,track_20,Coldplay Song 2,artist_10,Coldplay,22
+user_6,track_21,Foo Fighters Song 1,artist_11,Foo Fighters,20
+user_6,track_22,Foo Fighters Song 2,artist_11,Foo Fighters,19
+user_6,track_23,Arctic Monkeys Song 1,artist_12,Arctic Monkeys,17
+user_6,track_24,Arctic Monkeys Song 2,artist_12,Arctic Monkeys,17
+user_6,track_25,The Strokes Song 1,artist_13,The Strokes,14
+user_6,track_26,The Strokes Song 2,artist_13,The Strokes,13
+user_6,track_35,Radiohead Song 1,artist_18,Radiohead,11
+user_6,track_36,Radiohead Song 2,artist_18,Radiohead,11
+user_6,track_17,Billie Eilish Song 1,artist_9,Billie Eilish,5
+user_6,track_18,Billie Eilish Song 2,artist_9,Billie Eilish,5
+user_6,track_27,Daft Punk Song 1,artist_14,Daft Punk,4
+user_6,track_28,Daft Punk Song 2,artist_14,Daft Punk,3
+user_6,track_7,Kendrick Lamar Song 1,artist_4,Kendrick Lamar,3
+user_6,track_8,Kendrick Lamar Song 2,artist_4,Kendrick Lamar,2
+user_7,track_23,Arctic Monkeys Song 1,artist_12,Arctic Monkeys,22
+user_7,track_24,Arctic Monkeys Song 2,artist_12,Arctic Monkeys,21
+user_7,track_25,The Strokes Song 1,artist_13,The Strokes,18
+user_7,track_26,The Strokes Song 2,artist_13,The Strokes,18
+user_7,track_35,Radiohead Song 1,artist_18,Radiohead,16
+user_7,track_36,Radiohead Song 2,artist_18,Radiohead,15
+user_7,track_19,Coldplay Song 1,artist_10,Coldplay,12
+user_7,track_20,Coldplay Song 2,artist_10,Coldplay,12
+user_7,track_21,Foo Fighters Song 1,artist_11,Foo Fighters,10
+user_7,track_22,Foo Fighters Song 2,artist_11,Foo Fighters,10
+user_7,track_17,Billie Eilish Song 1,artist_9,Billie Eilish,7
+user_7,track_18,Billie Eilish Song 2,artist_9,Billie Eilish,6
+user_7,track_31,ODESZA Song 1,artist_16,ODESZA,4
+user_7,track_32,ODESZA Song 2,artist_16,ODESZA,4
+user_7,track_11,Dua Lipa Song 1,artist_6,Dua Lipa,3
+user_7,track_12,Dua Lipa Song 2,artist_6,Dua Lipa,2
+user_8,track_27,Daft Punk Song 1,artist_14,Daft Punk,24
+user_8,track_28,Daft Punk Song 2,artist_14,Daft Punk,24
+user_8,track_29,Calvin Harris Song 1,artist_15,Calvin Harris,21
+user_8,track_30,Calvin Harris Song 2,artist_15,Calvin Harris,20
+user_8,track_31,ODESZA Song 1,artist_16,ODESZA,17
+user_8,track_32,ODESZA Song 2,artist_16,ODESZA,16
+user_8,track_11,Dua Lipa Song 1,artist_6,Dua Lipa,11
+user_8,track_12,Dua Lipa Song 2,artist_6,Dua Lipa,11
+user_8,track_15,Ariana Grande Song 1,artist_8,Ariana Grande,8
+user_8,track_16,Ariana Grande Song 2,artist_8,Ariana Grande,7
+user_8,track_1,The Weeknd Song 1,artist_1,The Weeknd,6
+user_8,track_2,The Weeknd Song 2,artist_1,The Weeknd,5
+user_8,track_19,Coldplay Song 1,artist_10,Coldplay,4
+user_8,track_20,Coldplay Song 2,artist_10,Coldplay,4
+user_8,track_25,The Strokes Song 1,artist_13,The Strokes,3
+user_8,track_26,The Strokes Song 2,artist_13,The Strokes,2
+user_9,track_29,Calvin Harris Song 1,artist_15,Calvin Harris,23
+user_9,track_30,Calvin Harris Song 2,artist_15,Calvin Harris,23
+user_9,track_31,ODESZA Song 1,artist_16,ODESZA,19
+user_9,track_32,ODESZA Song 2,artist_16,ODESZA,19
+user_9,track_27,Daft Punk Song 1,artist_14,Daft Punk,18
+user_9,track_28,Daft Punk Song 2,artist_14,Daft Punk,17
+user_9,track_11,Dua Lipa Song 1,artist_6,Dua Lipa,14
+user_9,track_12,Dua Lipa Song 2,artist_6,Dua Lipa,13
+user_9,track_13,Taylor Swift Song 1,artist_7,Taylor Swift,10
+user_9,track_14,Taylor Swift Song 2,artist_7,Taylor Swift,9
+user_9,track_15,Ariana Grande Song 1,artist_8,Ariana Grande,6
+user_9,track_16,Ariana Grande Song 2,artist_8,Ariana Grande,6
+user_9,track_1,The Weeknd Song 1,artist_1,The Weeknd,5
+user_9,track_2,The Weeknd Song 2,artist_1,The Weeknd,4
+user_9,track_17,Billie Eilish Song 1,artist_9,Billie Eilish,3
+user_9,track_18,Billie Eilish Song 2,artist_9,Billie Eilish,3
+user_10,track_1,The Weeknd Song 1,artist_1,The Weeknd,19
+user_10,track_2,The Weeknd Song 2,artist_1,The Weeknd,18
+user_10,track_33,SZA Song 1,artist_17,SZA,16
+user_10,track_34,SZA Song 2,artist_17,SZA,15
+user_10,track_13,Taylor Swift Song 1,artist_7,Taylor Swift,13
+user_10,track_14,Taylor Swift Song 2,artist_7,Taylor Swift,12
+user_10,track_3,Drake Song 1,artist_2,Drake,11
+user_10,track_4,Drake Song 2,artist_2,Drake,11
+user_10,track_11,Dua Lipa Song 1,artist_6,Dua Lipa,9
+user_10,track_12,Dua Lipa Song 2,artist_6,Dua Lipa,9
+user_10,track_7,Kendrick Lamar Song 1,artist_4,Kendrick Lamar,7
+user_10,track_8,Kendrick Lamar Song 2,artist_4,Kendrick Lamar,7
+user_10,track_17,Billie Eilish Song 1,artist_9,Billie Eilish,5
+user_10,track_18,Billie Eilish Song 2,artist_9,Billie Eilish,5
+user_10,track_29,Calvin Harris Song 1,artist_15,Calvin Harris,4
+user_10,track_30,Calvin Harris Song 2,artist_15,Calvin Harris,3
+user_11,track_35,Radiohead Song 1,artist_18,Radiohead,18
+user_11,track_36,Radiohead Song 2,artist_18,Radiohead,18
+user_11,track_27,Daft Punk Song 1,artist_14,Daft Punk,16
+user_11,track_28,Daft Punk Song 2,artist_14,Daft Punk,16
+user_11,track_31,ODESZA Song 1,artist_16,ODESZA,14
+user_11,track_32,ODESZA Song 2,artist_16,ODESZA,13
+user_11,track_19,Coldplay Song 1,artist_10,Coldplay,11
+user_11,track_20,Coldplay Song 2,artist_10,Coldplay,11
+user_11,track_25,The Strokes Song 1,artist_13,The Strokes,8
+user_11,track_26,The Strokes Song 2,artist_13,The Strokes,8
+user_11,track_21,Foo Fighters Song 1,artist_11,Foo Fighters,6
+user_11,track_22,Foo Fighters Song 2,artist_11,Foo Fighters,6
+user_11,track_11,Dua Lipa Song 1,artist_6,Dua Lipa,5
+user_11,track_12,Dua Lipa Song 2,artist_6,Dua Lipa,4
+user_11,track_5,Travis Scott Song 1,artist_3,Travis Scott,3
+user_11,track_6,Travis Scott Song 2,artist_3,Travis Scott,2
+user_12,track_3,Drake Song 1,artist_2,Drake,15
+user_12,track_4,Drake Song 2,artist_2,Drake,14
+user_12,track_13,Taylor Swift Song 1,artist_7,Taylor Swift,14
+user_12,track_14,Taylor Swift Song 2,artist_7,Taylor Swift,13
+user_12,track_19,Coldplay Song 1,artist_10,Coldplay,12
+user_12,track_20,Coldplay Song 2,artist_10,Coldplay,12
+user_12,track_27,Daft Punk Song 1,artist_14,Daft Punk,11
+user_12,track_28,Daft Punk Song 2,artist_14,Daft Punk,11
+user_12,track_33,SZA Song 1,artist_17,SZA,9
+user_12,track_34,SZA Song 2,artist_17,SZA,9
+user_12,track_23,Arctic Monkeys Song 1,artist_12,Arctic Monkeys,8
+user_12,track_24,Arctic Monkeys Song 2,artist_12,Arctic Monkeys,7
+user_12,track_15,Ariana Grande Song 1,artist_8,Ariana Grande,6
+user_12,track_16,Ariana Grande Song 2,artist_8,Ariana Grande,5
+user_12,track_9,J. Cole Song 1,artist_5,J. Cole,4
+user_12,track_10,J. Cole Song 2,artist_5,J. Cole,4

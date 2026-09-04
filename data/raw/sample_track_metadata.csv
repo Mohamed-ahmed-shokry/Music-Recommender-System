@@ -1,0 +1,37 @@
+track_id,track_name,artist_id,artist_name,album_id,album_name,duration_ms,popularity,explicit,danceability,energy,key,loudness,mode,speechiness,acousticness,instrumentalness,liveness,valence,tempo,time_signature
+track_1,The Weeknd Song 1,artist_1,The Weeknd,album_1,The Weeknd Album,207347,97,False,0.77,0.88,11,-15.3,1,0.044,0.27,0.17,0.22,0.47,144.7,4
+track_2,The Weeknd Song 2,artist_1,The Weeknd,album_1,The Weeknd Album,215052,52,False,0.42,0.31,0,-9.8,0,0.054,0.02,0.12,0.17,0.22,165.2,4
+track_3,Drake Song 1,artist_2,Drake,album_2,Drake Album,201633,83,False,0.63,0.34,9,-16.7,1,0.056,0.63,0.03,0.08,0.83,143.3,4
+track_4,Drake Song 2,artist_2,Drake,album_2,Drake Album,278067,67,False,0.57,0.48,3,-8.3,1,0.044,0.07,0.27,0.32,0.27,136.7,4
+track_5,Travis Scott Song 1,artist_3,Travis Scott,album_3,Travis Scott Album,293659,59,False,0.49,0.77,7,-9.1,1,0.068,0.59,0.19,0.24,0.79,165.9,3
+track_6,Travis Scott Song 2,artist_3,Travis Scott,album_3,Travis Scott Album,237312,62,False,0.42,0.54,0,-18.8,0,0.054,0.52,0.12,0.17,0.72,81.2,4
+track_7,Kendrick Lamar Song 1,artist_4,Kendrick Lamar,album_4,Kendrick Lamar Album,269852,52,True,0.62,0.41,8,-19.8,0,0.054,0.22,0.02,0.07,0.42,95.2,4
+track_8,Kendrick Lamar Song 2,artist_4,Kendrick Lamar,album_4,Kendrick Lamar Album,238884,84,False,0.54,0.7,0,-11.6,0,0.038,0.14,0.24,0.29,0.34,118.4,4
+track_9,J. Cole Song 1,artist_5,J. Cole,album_5,J. Cole Album,219967,67,False,0.37,0.45,7,-13.3,1,0.044,0.27,0.07,0.12,0.47,86.7,4
+track_10,J. Cole Song 2,artist_5,J. Cole,album_5,J. Cole Album,291017,67,False,0.47,0.47,5,-18.3,1,0.064,0.47,0.17,0.22,0.67,111.7,3
+track_11,Dua Lipa Song 1,artist_6,Dua Lipa,album_6,Dua Lipa Album,243930,80,False,0.6,0.41,6,-17.0,0,0.05,0.3,0.0,0.05,0.5,83.0,4
+track_12,Dua Lipa Song 2,artist_6,Dua Lipa,album_6,Dua Lipa Album,277638,88,False,0.48,0.54,6,-6.2,0,0.066,0.18,0.18,0.23,0.38,153.8,4
+track_13,Taylor Swift Song 1,artist_7,Taylor Swift,album_7,Taylor Swift Album,247892,92,False,0.62,0.56,8,-10.8,0,0.054,0.12,0.02,0.07,0.32,149.2,4
+track_14,Taylor Swift Song 2,artist_7,Taylor Swift,album_7,Taylor Swift Album,291355,55,True,0.85,0.89,7,-14.5,1,0.06,0.45,0.25,0.3,0.65,115.5,4
+track_15,Ariana Grande Song 1,artist_8,Ariana Grande,album_8,Ariana Grande Album,187435,85,False,0.85,0.59,7,-11.5,1,0.06,0.45,0.25,0.3,0.65,133.5,3
+track_16,Ariana Grande Song 2,artist_8,Ariana Grande,album_8,Ariana Grande Album,244525,75,False,0.55,0.55,1,-17.5,1,0.04,0.65,0.25,0.3,0.85,112.5,4
+track_17,Billie Eilish Song 1,artist_9,Billie Eilish,album_9,Billie Eilish Album,297134,84,False,0.44,0.31,2,-6.6,0,0.058,0.14,0.14,0.19,0.34,93.4,4
+track_18,Billie Eilish Song 2,artist_9,Billie Eilish,album_9,Billie Eilish Album,250674,74,False,0.84,0.44,6,-17.6,0,0.058,0.04,0.24,0.29,0.24,97.4,4
+track_19,Coldplay Song 1,artist_10,Coldplay,album_10,Coldplay Album,296296,96,False,0.46,0.47,4,-15.4,0,0.062,0.56,0.16,0.21,0.76,129.6,4
+track_20,Coldplay Song 2,artist_10,Coldplay,album_10,Coldplay Album,290399,99,False,0.89,0.89,11,-5.1,1,0.068,0.59,0.29,0.34,0.79,139.9,3
+track_21,Foo Fighters Song 1,artist_11,Foo Fighters,album_11,Foo Fighters Album,198679,79,True,0.49,0.84,7,-12.1,1,0.068,0.69,0.19,0.24,0.89,87.9,4
+track_22,Foo Fighters Song 2,artist_11,Foo Fighters,album_11,Foo Fighters Album,277637,87,False,0.47,0.54,5,-6.3,1,0.064,0.47,0.17,0.22,0.67,153.7,4
+track_23,Arctic Monkeys Song 1,artist_12,Arctic Monkeys,album_12,Arctic Monkeys Album,277784,84,False,0.74,0.73,8,-6.6,0,0.038,0.14,0.14,0.19,0.34,138.4,4
+track_24,Arctic Monkeys Song 2,artist_12,Arctic Monkeys,album_12,Arctic Monkeys Album,259303,53,False,0.73,0.42,7,-9.7,1,0.036,0.43,0.13,0.18,0.63,90.3,4
+track_25,The Strokes Song 1,artist_13,The Strokes,album_13,The Strokes Album,246282,82,False,0.72,0.35,6,-6.8,0,0.034,0.42,0.12,0.17,0.62,168.2,3
+track_26,The Strokes Song 2,artist_13,The Strokes,album_13,The Strokes Album,251021,71,False,0.71,0.87,5,-12.9,1,0.032,0.21,0.11,0.16,0.41,102.1,4
+track_27,Daft Punk Song 1,artist_14,Daft Punk,album_14,Daft Punk Album,256357,57,False,0.67,0.34,1,-19.3,1,0.064,0.57,0.07,0.12,0.77,95.7,4
+track_28,Daft Punk Song 2,artist_14,Daft Punk,album_14,Daft Punk Album,194181,81,True,0.51,0.62,9,-11.9,1,0.032,0.21,0.21,0.26,0.41,118.1,4
+track_29,Calvin Harris Song 1,artist_15,Calvin Harris,album_15,Calvin Harris Album,199750,50,False,0.4,0.38,10,-10.0,0,0.05,0.4,0.1,0.15,0.6,105.0,4
+track_30,Calvin Harris Song 2,artist_15,Calvin Harris,album_15,Calvin Harris Album,239499,99,False,0.69,0.87,3,-10.1,1,0.068,0.59,0.09,0.14,0.79,149.9,3
+track_31,ODESZA Song 1,artist_16,ODESZA,album_16,ODESZA Album,287783,83,False,0.53,0.62,11,-11.7,1,0.036,0.23,0.23,0.28,0.43,118.3,4
+track_32,ODESZA Song 2,artist_16,ODESZA,album_16,ODESZA Album,275793,93,False,0.63,0.64,9,-10.7,1,0.056,0.33,0.03,0.08,0.53,119.3,4
+track_33,SZA Song 1,artist_17,SZA,album_17,SZA Album,228647,97,False,0.77,0.5,11,-15.3,1,0.044,0.27,0.17,0.22,0.47,114.7,4
+track_34,SZA Song 2,artist_17,SZA,album_17,SZA Album,293909,59,False,0.59,0.48,5,-14.1,1,0.048,0.09,0.29,0.34,0.29,100.9,4
+track_35,Radiohead Song 1,artist_18,Radiohead,album_18,Radiohead Album,241391,91,True,0.41,0.83,11,-15.9,1,0.052,0.31,0.11,0.16,0.51,99.1,3
+track_36,Radiohead Song 2,artist_18,Radiohead,album_18,Radiohead Album,192615,65,False,0.45,0.46,3,-18.5,1,0.06,0.65,0.15,0.2,0.85,141.5,4

@@ -24,6 +24,8 @@ from music_recommender.config import (
     MODEL_PATH,
     RAW_DATA_PATH,
     RAW_METADATA_PATH,
+    RAW_TRACK_DATA_PATH,
+    RAW_TRACK_METADATA_PATH,
     REPORTS_DIR,
 )
 from music_recommender.data import load_and_validate_interactions
@@ -49,6 +51,13 @@ from music_recommender.tracking import (
     DEFAULT_TRAINING_EXPERIMENT,
     ExperimentTrackingError,
     tracking_run,
+)
+from music_recommender.tracks import (
+    build_track_content_matrix,
+    get_similar_tracks,
+    load_and_validate_track_interactions,
+    load_and_validate_track_metadata,
+    recommend_tracks_for_user,
 )
 
 # Optional Spotify imports
@@ -1169,6 +1178,133 @@ def spotify_audio_features(
             )
         else:
             typer.echo(f"  {ids[i]}: No audio features available")
+
+
+@app.command()
+def prepare_track_data(
+    min_user_interactions: int = DEFAULT_MIN_USER_INTERACTIONS,
+    min_track_interactions: int = DEFAULT_MIN_ARTIST_INTERACTIONS,
+) -> None:
+    """Validate track sample data, build interaction matrix, and save mappings."""
+    df = load_and_validate_track_interactions(RAW_TRACK_DATA_PATH)
+    metadata_df = load_and_validate_track_metadata(RAW_TRACK_METADATA_PATH, df)
+
+    typer.echo("Track data prepared successfully.")
+    typer.echo(f"Users: {df['user_id'].nunique()}")
+    typer.echo(f"Tracks: {df['track_id'].nunique()}")
+    typer.echo(f"Artists: {df['artist_id'].nunique()}")
+    typer.echo(f"Interactions: {len(df)}")
+    typer.echo(f"Track metadata rows: {len(metadata_df)}")
+
+
+@app.command()
+def track_recommendations(
+    user_id: str = typer.Option(..., help="User ID for recommendations."),
+    top_k: int = DEFAULT_TOP_K,
+    include_listened: bool = typer.Option(
+        False, "--include-listened/--exclude-listened"
+    ),
+) -> None:
+    """Recommend tracks for a user using track similarity."""
+    try:
+        df = load_and_validate_track_interactions(RAW_TRACK_DATA_PATH)
+        metadata_df = load_and_validate_track_metadata(RAW_TRACK_METADATA_PATH, df)
+
+        # Build user-track matrix
+        user_track_matrix = df.pivot_table(
+            index="user_id",
+            columns="track_id",
+            values="play_count",
+            fill_value=0,
+        )
+
+        # Build track similarity matrix from audio features
+        feature_df, feature_names = build_track_content_matrix(metadata_df)
+        track_ids = feature_df.index.tolist()
+        track_id_to_index = {tid: i for i, tid in enumerate(track_ids)}
+
+        # Compute cosine similarity
+        from sklearn.metrics.pairwise import cosine_similarity
+
+        track_similarity_matrix = cosine_similarity(feature_df.values)
+
+        # Get recommendations
+        recommendations = recommend_tracks_for_user(
+            user_id=user_id,
+            user_track_matrix=user_track_matrix,
+            track_similarity_matrix=track_similarity_matrix,
+            track_id_to_index=track_id_to_index,
+            top_k=top_k,
+            include_listened=include_listened,
+        )
+
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"Track recommendations for {user_id}:")
+    if not recommendations:
+        typer.echo("  No recommendations available.")
+    else:
+        for i, rec in enumerate(recommendations, 1):
+            track_id = rec["track_id"]
+            track_name = metadata_df.loc[
+                metadata_df["track_id"] == track_id, "track_name"
+            ].values[0]
+            artist_name = metadata_df.loc[
+                metadata_df["track_id"] == track_id, "artist_name"
+            ].values[0]
+            typer.echo(
+                f"  {i}. {track_name} by {artist_name} "
+                f"(score: {rec['score']:.4f})"
+            )
+
+
+@app.command()
+def similar_tracks(
+    track_id: str = typer.Option(..., help="Track ID to find similar tracks for."),
+    top_k: int = DEFAULT_TOP_K,
+) -> None:
+    """Find tracks similar to a given track using audio features."""
+    try:
+        df = load_and_validate_track_interactions(RAW_TRACK_DATA_PATH)
+        metadata_df = load_and_validate_track_metadata(RAW_TRACK_METADATA_PATH, df)
+
+        feature_df, feature_names = build_track_content_matrix(metadata_df)
+        track_ids = feature_df.index.tolist()
+        track_id_to_index = {tid: i for i, tid in enumerate(track_ids)}
+
+        from sklearn.metrics.pairwise import cosine_similarity
+
+        track_similarity_matrix = cosine_similarity(feature_df.values)
+
+        similar = get_similar_tracks(
+            track_id=track_id,
+            track_similarity_matrix=track_similarity_matrix,
+            track_id_to_index=track_id_to_index,
+            top_k=top_k,
+        )
+
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"Tracks similar to {track_id}:")
+    if not similar:
+        typer.echo("  No similar tracks found.")
+    else:
+        for i, rec in enumerate(similar, 1):
+            track_id = rec["track_id"]
+            track_name = metadata_df.loc[
+                metadata_df["track_id"] == track_id, "track_name"
+            ].values[0]
+            artist_name = metadata_df.loc[
+                metadata_df["track_id"] == track_id, "artist_name"
+            ].values[0]
+            typer.echo(
+                f"  {i}. {track_name} by {artist_name} "
+                f"(score: {rec['score']:.4f})"
+            )
 
 
 if __name__ == "__main__":

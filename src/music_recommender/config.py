@@ -21,6 +21,8 @@ PROJECT_ROOT = resolve_project_root()
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DATA_PATH = DATA_DIR / "raw" / "sample_interactions.csv"
 RAW_METADATA_PATH = DATA_DIR / "raw" / "sample_artist_metadata.csv"
+RAW_TRACK_DATA_PATH = DATA_DIR / "raw" / "sample_track_interactions.csv"
+RAW_TRACK_METADATA_PATH = DATA_DIR / "raw" / "sample_track_metadata.csv"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
