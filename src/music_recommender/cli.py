@@ -596,6 +596,14 @@ def evaluate(
             "Only promotes winner if all thresholds are met."
         ),
     ),
+    fail_on_quality_gate: bool = typer.Option(
+        False,
+        "--fail-on-quality-gate/--no-fail-on-quality-gate",
+        help=(
+            "Exit with a non-zero status when the winning setting does not "
+            "meet --min-quality-threshold, for CI quality gates."
+        ),
+    ),
     learn_to_rank: bool = typer.Option(
         False,
         "--learn-to-rank/--no-learn-to-rank",
@@ -624,6 +632,10 @@ def evaluate(
         raise typer.BadParameter("--promote-winner requires --compare-settings.")
     if min_quality_threshold is not None and not promote_winner:
         raise typer.BadParameter("--min-quality-threshold requires --promote-winner.")
+    if fail_on_quality_gate and min_quality_threshold is None:
+        raise typer.BadParameter(
+            "--fail-on-quality-gate requires --min-quality-threshold."
+        )
     if compare_settings is not None and (compare_baseline or compare_all):
         raise typer.BadParameter(
             "--compare-settings cannot be combined with"
@@ -743,17 +755,22 @@ def evaluate(
         best_label, wins = strategy_leaderboard(comparison_metrics)[0]
         typer.echo(f"Overall: {best_label} won {wins} of {len(winners)} metrics.")
         if promote_winner:
-            if min_quality_threshold:
-                if not _check_quality_threshold(
-                    comparison_metrics[best_label], min_quality_threshold
-                ):
+            if min_quality_threshold and not _check_quality_threshold(
+                comparison_metrics[best_label], min_quality_threshold
+            ):
+                if fail_on_quality_gate:
                     typer.secho(
-                        "Quality gate failed: winning setting does not meet "
-                        "minimum thresholds. Promotion skipped.",
-                        fg=typer.colors.YELLOW,
+                        "Error: quality gate failed: winning setting does not "
+                        "meet minimum thresholds.",
+                        fg=typer.colors.RED,
+                        err=True,
                     )
-                else:
-                    _promote_ranking_settings(best_label, parameter_sets)
+                    raise typer.Exit(code=1)
+                typer.secho(
+                    "Quality gate failed: winning setting does not meet "
+                    "minimum thresholds. Promotion skipped.",
+                    fg=typer.colors.YELLOW,
+                )
             else:
                 _promote_ranking_settings(best_label, parameter_sets)
     elif compare_all:

@@ -423,6 +423,135 @@ def test_evaluate_command_requires_compare_settings_for_promotion(
     assert "--promote-winner requires --compare-settings" in result.output
 
 
+def test_evaluate_command_rejects_threshold_without_promotion() -> None:
+    result = runner.invoke(
+        cli.app, ["evaluate", "--min-quality-threshold", "ndcg_at_k=0.4"]
+    )
+
+    assert result.exit_code == 2
+    assert "--min-quality-threshold requires --promote-winner" in result.output
+
+
+def test_evaluate_command_rejects_strict_gate_without_threshold() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate",
+            "--compare-settings",
+            "control:;",
+            "--promote-winner",
+            "--fail-on-quality-gate",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--fail-on-quality-gate requires --min-quality-threshold" in result.output
+
+
+def _mock_ab_comparison(monkeypatch, comparison: dict[str, dict[str, float]]) -> None:
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+    monkeypatch.setattr(
+        cli,
+        "compare_parameter_settings",
+        lambda *_args, **_kwargs: comparison,
+    )
+
+
+def test_evaluate_command_promotes_when_quality_gate_passes(monkeypatch) -> None:
+    trained: list[dict[str, Any]] = []
+    diverse_row = metric_row()
+    for key, value in diverse_row.items():
+        if isinstance(value, float):
+            diverse_row[key] = value + 0.1
+    _mock_ab_comparison(monkeypatch, {"control": metric_row(), "diverse": diverse_row})
+    monkeypatch.setattr(
+        cli,
+        "train_and_save_model",
+        lambda **kwargs: trained.append(kwargs),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate",
+            "--no-use-gpu",
+            "--compare-settings",
+            "control:;diverse:popularity_penalty=0.2",
+            "--promote-winner",
+            "--min-quality-threshold",
+            "ndcg_at_k=0.4",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Promoted 'diverse' ranking settings" in result.output
+    assert trained == [
+        {"popularity_penalty": 0.2, "diversity": 0.0, "include_listened": False}
+    ]
+
+
+def test_evaluate_command_skips_promotion_when_quality_gate_fails(
+    monkeypatch,
+) -> None:
+    trained: list[dict[str, Any]] = []
+    _mock_ab_comparison(monkeypatch, {"control": metric_row(), "diverse": metric_row()})
+    monkeypatch.setattr(
+        cli,
+        "train_and_save_model",
+        lambda **kwargs: trained.append(kwargs),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate",
+            "--no-use-gpu",
+            "--compare-settings",
+            "control:;diverse:popularity_penalty=0.2",
+            "--promote-winner",
+            "--min-quality-threshold",
+            "ndcg_at_k=0.99",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Quality gate failed" in result.output
+    assert "Promotion skipped" in result.output
+    assert trained == []
+
+
+def test_evaluate_command_fails_when_strict_quality_gate_fails(monkeypatch) -> None:
+    trained: list[dict[str, Any]] = []
+    _mock_ab_comparison(monkeypatch, {"control": metric_row(), "diverse": metric_row()})
+    monkeypatch.setattr(
+        cli,
+        "train_and_save_model",
+        lambda **kwargs: trained.append(kwargs),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate",
+            "--no-use-gpu",
+            "--compare-settings",
+            "control:;diverse:popularity_penalty=0.2",
+            "--promote-winner",
+            "--min-quality-threshold",
+            "ndcg_at_k=0.99",
+            "--fail-on-quality-gate",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "quality gate failed" in result.output
+    assert trained == []
+
+
 def test_evaluate_command_promotion_reports_retrain_failure(monkeypatch) -> None:
     monkeypatch.setattr(
         cli,
