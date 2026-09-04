@@ -920,6 +920,22 @@ metrics include `precision_at_k`, `recall_at_k`, `map_at_k`, `ndcg_at_k`,
 This is useful in CI/CD pipelines where you want to automatically promote winning
 configurations only when they meet your quality standards.
 
+For a hard gate that fails the pipeline when the winner misses the bar, add
+`--fail-on-quality-gate` (exits non-zero instead of skipping promotion with a
+warning):
+
+```bash
+uv run python -m music_recommender.cli evaluate --no-use-gpu \
+  --compare-settings "control:;diversity:popularity_penalty=0.2,diversity=0.5" \
+  --top-k 10 --promote-winner \
+  --min-quality-threshold "ndcg_at_k=0.4,precision_at_k=0.2" \
+  --fail-on-quality-gate
+```
+
+The scheduled `quality-gate` workflow (`.github/workflows/quality-gate.yml`)
+runs this gated A/B promotion plus a knob ablation every Monday and on demand,
+uploading the ablation reports as a workflow artifact for review.
+
 ## Experiment Tracking
 
 The optional tracking integration uses `mlflow-skinny` in the project and a
