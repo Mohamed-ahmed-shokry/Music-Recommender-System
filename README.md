@@ -61,7 +61,10 @@ The current system:
 - exposes searchable, filterable artist catalog discovery;
 - stores everything needed for serving in a versioned artifact bundle;
 - compares ALS, popularity, content-only, and hybrid strategies;
+- re-ranks candidates with an optional learning-to-rank model;
 - tracks reproducible training and evaluation runs in MLflow;
+- recommends tracks with audio-feature similarity from sample track data;
+- fetches live artist/track/audio-feature data via the optional Spotify extras;
 - exposes CLI, API, and interactive dashboard workflows.
 
 The included dataset is intentionally small so the whole project can run quickly
@@ -84,6 +87,10 @@ with the same columns.
 | Cold start | Unknown users receive popular fallback or profile/session-based recommendations |
 | Ranking controls | Optional listened-item inclusion, popularity penalty, diversity reranking |
 | Evaluation | ALS, popularity, content, and hybrid metrics with novelty and explanations |
+| Learning to rank | Ridge re-ranker over collaborative/popularity/user features, served via CLI, API, and dashboard |
+| Quality gates | A/B compare-settings with `--promote-winner` and `--min-quality-threshold` CI gate |
+| Track recommendations | Audio-feature similarity with sample track fixtures and CLI workflows |
+| External data | Optional Spotify integration (search, top tracks, related artists, audio features) |
 | Experiment tracking | Optional MLflow training parameters, evaluation metrics, tags, and artifacts |
 | Reproducibility | `uv`, `pyproject.toml`, `uv.lock`, deterministic sample data |
 | Portfolio polish | README, MIT license, clean commands, model card, roadmap |
@@ -153,7 +160,9 @@ music-recommender-system/
 |-- data/
 |   |-- raw/
 |   |   |-- sample_artist_metadata.csv
-|   |   `-- sample_interactions.csv
+|   |   |-- sample_interactions.csv
+|   |   |-- sample_track_interactions.csv
+|   |   `-- sample_track_metadata.csv
 |   |-- processed/
 |   `-- README.md
 |-- notebooks/
@@ -174,11 +183,14 @@ music-recommender-system/
 |       |-- ranking.py
 |       |-- recommend.py
 |       |-- service.py
+|       |-- spotify.py
 |       |-- tracking.py
+|       |-- tracks.py
 |       `-- utils.py
 |-- tests/
 |-- .dockerignore
 |-- CHANGELOG.md
+|-- PLAN.md
 |-- compose.yaml
 |-- Dockerfile
 |-- LICENSE
