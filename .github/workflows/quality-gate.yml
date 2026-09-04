@@ -1,0 +1,84 @@
+name: Quality gate
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ab-promotion-gate:
+    name: A/B promotion gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      - name: Install locked dependencies
+        run: uv sync --locked --dev
+
+      - name: Run gated A/B comparison with auto-promotion
+        run: |
+          uv run python -m music_recommender.cli evaluate \
+            --top-k 5 --folds 2 --no-use-gpu \
+            --compare-settings "control:;candidate:popularity_penalty=0.2,diversity=0.5" \
+            --promote-winner \
+            --min-quality-threshold "ndcg_at_k=0.3,precision_at_k=0.2" \
+            --fail-on-quality-gate
+
+  ablation-reports:
+    name: Ablation reports
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      - name: Install locked dependencies
+        run: uv sync --locked --dev
+
+      - name: Run knob ablation and aggregate the summary
+        run: |
+          uv run python -m music_recommender.cli evaluate \
+            --top-k 5 --folds 2 --no-use-gpu \
+            --ablations "popularity_penalty=0.2,diversity=0.5" \
+            --report-dir reports/ci
+          uv run python -m music_recommender.cli ablation-summary \
+            --report-dir reports/ci \
+            --summary-path reports/ci/ablation_summary.json
+
+      - name: Upload ablation reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: quality-gate-reports
+          path: reports/ci
+          retention-days: 30
