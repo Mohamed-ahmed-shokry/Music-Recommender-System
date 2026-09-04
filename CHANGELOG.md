@@ -122,6 +122,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   content similarity, sample `sample_track_interactions.csv` /
   `sample_track_metadata.csv`, and `prepare-track-data`,
   `track-recommendations`, `similar-tracks` CLI commands.
+- Track serving in `RecommenderService` (`recommend_tracks`, `similar_tracks`
+  with enriched track metadata), API endpoints `GET /tracks/recommend/{user_id}`
+  and `GET /tracks/similar/{track_id}`, and a dashboard Tracks tab with
+  track-aware result rendering.
 - `PLAN.md` with completed phases, in-progress work, and next steps.
 
 ### Fixed
