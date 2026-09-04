@@ -139,6 +139,7 @@ rebuilding matrices or reloading raw CSV data for every request.
 | `content_similarity` | Metadata artist similarity | Finds artists with similar genres, moods, country, and era |
 | `hybrid_similarity` | Hybrid artist similarity | Blends ALS factor similarity and content similarity |
 | `als_similarity` | ALS artist similarity | Uses cosine similarity between artist factor vectors |
+| `track_similarity` | Track recommendations and similarity | Ranks tracks by audio-feature cosine similarity |
 | `popular_fallback` | Unknown user ID | Returns globally popular artists from training data |
 | `popular_baseline` | Evaluation and CLI baseline | Ranks artists by total plays and listener count |
 
@@ -502,6 +503,8 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/popular-artists?top_k=10` | Popular artist recommendations |
 | `GET` | `/recommend/user/{user_id}?top_k=10&content_weight=0.25&explain=true` | Hybrid personalized or fallback recommendations |
 | `GET` | `/recommend/user/{user_id}/ltr?top_k=10&diversity=0.2&popularity_penalty=0.1` | LTR re-ranked personalized recommendations |
+| `GET` | `/tracks/recommend/{user_id}?top_k=10` | Track recommendations with audio-feature similarity |
+| `GET` | `/tracks/similar/{track_id}?top_k=10` | Tracks similar to a selected track by audio features |
 | `POST` | `/recommend/profile` | Onboarding recommendations from artists, genres, and moods |
 | `POST` | `/recommend/session` | Short-term session recommendations from seeds, exclusions, and optional user taste |
 | `GET` | `/similar-artists/{artist_id}?method=hybrid&top_k=10` | ALS, content, or hybrid similar artists |
@@ -518,6 +521,8 @@ curl "http://127.0.0.1:8000/popular-artists?top_k=10"
 curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10&content_weight=0.25&explain=true"
 curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10&diversity=0.2&popularity_penalty=0.1"
 curl "http://127.0.0.1:8000/recommend/user/user_1/ltr?top_k=10&diversity=0.2&popularity_penalty=0.1"
+curl "http://127.0.0.1:8000/tracks/recommend/user_1?top_k=10"
+curl "http://127.0.0.1:8000/tracks/similar/track_1?top_k=10"
 curl "http://127.0.0.1:8000/similar-artists/artist_2?method=hybrid&top_k=10&explain=true"
 curl "http://127.0.0.1:8000/content-similar-artists/artist_2?top_k=10&explain=true"
 curl -X POST http://127.0.0.1:8000/recommend/profile \
@@ -556,12 +561,13 @@ Open the dashboard at:
 http://127.0.0.1:8501
 ```
 
-The dashboard provides six workflows:
+The dashboard provides seven workflows:
 
 - personalized hybrid recommendations for known listeners (with optional LTR re-ranking);
 - cold-start recommendations from favorite artists, genres, and moods;
 - session mixes that blend long-term taste with short-term intent;
 - ALS, metadata, and hybrid artist similarity;
+- track recommendations and audio-feature track similarity;
 - responsive catalog search over artist metadata and popularity statistics;
 - aggregated ablation-importance summary for ranking knob analysis.
 
