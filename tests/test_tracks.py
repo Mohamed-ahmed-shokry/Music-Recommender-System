@@ -6,9 +6,11 @@ import pytest
 
 from music_recommender.tracks import (
     build_track_content_matrix,
+    build_track_serving_resources,
     get_similar_tracks,
     load_and_validate_track_interactions,
     load_and_validate_track_metadata,
+    load_track_serving_resources,
     normalize_track_interactions,
     recommend_tracks_for_user,
     validate_track_interactions,
@@ -164,3 +166,22 @@ def test_load_track_files_roundtrip(tmp_path: Path) -> None:
     assert len(df) == 3
     meta = load_and_validate_track_metadata(meta_path, df)
     assert len(meta) == 2
+
+
+def test_build_track_serving_resources() -> None:
+    resources = build_track_serving_resources(valid_track_df(), valid_metadata_df())
+    assert resources.track_ids == ["track_1", "track_2"]
+    assert resources.track_id_to_index == {"track_1": 0, "track_2": 1}
+    assert resources.similarity_matrix.shape == (2, 2)
+    assert resources.track_lookup["track_1"]["artist_name"] == "Artist A"
+    assert list(resources.user_track_matrix.index) == ["user_1", "user_2"]
+
+
+def test_load_track_serving_resources_roundtrip(tmp_path: Path) -> None:
+    inter_path = tmp_path / "inter.csv"
+    meta_path = tmp_path / "meta.csv"
+    valid_track_df().to_csv(inter_path, index=False)
+    valid_metadata_df().to_csv(meta_path, index=False)
+    resources = load_track_serving_resources(inter_path, meta_path)
+    assert resources.track_ids == ["track_1", "track_2"]
+    assert resources.feature_names[:2] == ["danceability", "energy"]

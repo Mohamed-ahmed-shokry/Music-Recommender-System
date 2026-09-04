@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics.pairwise import cosine_similarity
 
 TRACK_REQUIRED_COLUMNS = (
     "user_id",
@@ -328,3 +330,71 @@ def get_similar_tracks(
         )
 
     return recommendations
+
+
+@dataclass
+class TrackServingResources:
+    """Precomputed track data for serving recommendations."""
+
+    interactions: pd.DataFrame
+    metadata: pd.DataFrame
+    feature_names: list[str]
+    track_ids: list[str]
+    track_id_to_index: dict[str, int]
+    similarity_matrix: np.ndarray
+    user_track_matrix: pd.DataFrame
+    track_lookup: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+def build_track_serving_resources(
+    interactions_df: pd.DataFrame,
+    metadata_df: pd.DataFrame,
+) -> TrackServingResources:
+    """Build cached serving resources from validated track dataframes."""
+    validate_track_interactions(interactions_df)
+    validate_track_metadata(metadata_df, interactions_df)
+    feature_df, feature_names = build_track_content_matrix(metadata_df)
+    track_ids = [str(track_id) for track_id in feature_df.index.tolist()]
+    track_id_to_index = {track_id: i for i, track_id in enumerate(track_ids)}
+    similarity_matrix = cosine_similarity(feature_df.values)
+    user_track_matrix = interactions_df.pivot_table(
+        index="user_id",
+        columns="track_id",
+        values="play_count",
+        fill_value=0,
+    )
+    lookup: dict[str, dict[str, Any]] = {}
+    for row in metadata_df.itertuples(index=False):
+        lookup[str(row.track_id)] = {
+            "track_id": str(row.track_id),
+            "track_name": str(row.track_name),
+            "artist_id": str(row.artist_id),
+            "artist_name": str(row.artist_name),
+            "popularity": row.popularity,
+        }
+    return TrackServingResources(
+        interactions=interactions_df,
+        metadata=metadata_df,
+        feature_names=feature_names,
+        track_ids=track_ids,
+        track_id_to_index=track_id_to_index,
+        similarity_matrix=similarity_matrix,
+        user_track_matrix=user_track_matrix,
+        track_lookup=lookup,
+    )
+
+
+def load_track_serving_resources(
+    data_path: str | Path | None = None,
+    metadata_path: str | Path | None = None,
+) -> TrackServingResources:
+    """Load track CSVs and build serving resources."""
+    from music_recommender.config import RAW_TRACK_DATA_PATH, RAW_TRACK_METADATA_PATH
+
+    interactions = load_and_validate_track_interactions(
+        data_path or RAW_TRACK_DATA_PATH
+    )
+    metadata = load_and_validate_track_metadata(
+        metadata_path or RAW_TRACK_METADATA_PATH, interactions
+    )
+    return build_track_serving_resources(interactions, metadata)
