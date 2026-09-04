@@ -121,6 +121,32 @@ class FakeDashboardService:
         response["similar_artists"] = response.pop("recommendations")
         return response
 
+    def recommend_tracks(self, **_: Any) -> dict[str, object]:
+        return {
+            "strategy": "track_similarity",
+            "recommendations": [
+                {
+                    "track_id": "track_1",
+                    "track_name": "Hit",
+                    "artist_name": "Test Artist",
+                    "score": 0.95,
+                }
+            ],
+        }
+
+    def similar_tracks(self, **_: Any) -> dict[str, object]:
+        return {
+            "strategy": "track_similarity",
+            "similar_tracks": [
+                {
+                    "track_id": "track_2",
+                    "track_name": "Hit 2",
+                    "artist_name": "Test Artist",
+                    "score": 0.9,
+                }
+            ],
+        }
+
     @staticmethod
     def _recommendation_response(strategy: str) -> dict[str, object]:
         return {
@@ -230,6 +256,7 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Taste Profile",
         "Session Mix",
         "Similar Artists",
+        "Tracks",
         "Catalog",
         "Ablation Summary",
     ]
@@ -335,6 +362,50 @@ def test_dashboard_similarity_tab_submits() -> None:
     assert any(
         caption.value == "Strategy: Hybrid Similarity" for caption in app.caption
     )
+
+
+def test_dashboard_tracks_tab_recommends_tracks() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(FakeDashboardService(),),
+        default_timeout=10,
+    ).run()
+
+    app.button[4].click().run()
+
+    assert not app.exception
+    assert any(caption.value == "Strategy: Track Similarity" for caption in app.caption)
+
+
+def test_dashboard_tracks_tab_finds_similar_tracks() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(FakeDashboardService(),),
+        default_timeout=10,
+    ).run()
+
+    app.button[5].click().run()
+
+    assert not app.exception
+    assert any(caption.value == "Strategy: Track Similarity" for caption in app.caption)
+
+
+def test_recommendation_frame_supports_track_responses() -> None:
+    frame = recommendation_frame(
+        {
+            "similar_tracks": [
+                {
+                    "track_id": "track_2",
+                    "track_name": "Hit 2",
+                    "artist_name": "Test Artist",
+                    "score": 0.9,
+                }
+            ]
+        }
+    )
+
+    assert frame.loc[0, "Artist"] == "Hit 2 by Test Artist"
+    assert frame.loc[0, "Artist ID"] == "track_2"
 
 
 def test_dashboard_renders_fallback_message_in_results() -> None:
@@ -478,6 +549,7 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
         "Taste Profile",
         "Session Mix",
         "Similar Artists",
+        "Tracks",
         "Catalog",
         "Ablation Summary",
     ]

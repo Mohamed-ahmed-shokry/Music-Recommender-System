@@ -45,16 +45,26 @@ def recommendation_frame(payload: dict[str, Any]) -> pd.DataFrame:
     """Convert a service response into a dashboard-friendly table."""
     recommendations = payload.get("recommendations")
     if recommendations is None:
-        recommendations = payload.get("similar_artists", [])
+        recommendations = payload.get("similar_artists")
+    if recommendations is None:
+        recommendations = payload.get("similar_tracks", [])
 
     rows = []
     for rank, recommendation in enumerate(recommendations, start=1):
         reasons = recommendation.get("reasons") or []
+        if recommendation.get("track_name"):
+            name = str(recommendation["track_name"])
+            if recommendation.get("artist_name"):
+                name = f"{name} by {recommendation['artist_name']}"
+            rec_id = str(recommendation.get("track_id", ""))
+        else:
+            name = str(recommendation.get("artist_name", "Unknown artist"))
+            rec_id = str(recommendation.get("artist_id", ""))
         rows.append(
             {
                 "Rank": rank,
-                "Artist": recommendation.get("artist_name", "Unknown artist"),
-                "Artist ID": recommendation.get("artist_id", ""),
+                "Artist": name,
+                "Artist ID": rec_id,
                 "Score": round(float(recommendation.get("score", 0.0)), 4),
                 "Popularity rank": recommendation.get("popularity_rank"),
                 "Why": " · ".join(str(reason) for reason in reasons),
@@ -394,6 +404,79 @@ def _render_similarity_tab(
         )
 
 
+def _track_choices(service: RecommenderService) -> dict[str, str]:
+    """Return track select options, with a fallback when data is unavailable."""
+    try:
+        resources = service._track_resources()
+    except (AttributeError, ValueError):
+        return {"Track 1 · track_1": "track_1", "Track 2 · track_2": "track_2"}
+    choices = {}
+    for track_id in resources.track_ids:
+        meta = resources.track_lookup.get(track_id, {})
+        label = f"{meta.get('track_name', track_id)} · {track_id}"
+        choices[label] = track_id
+    return dict(sorted(choices.items(), key=lambda item: str(item[0]).casefold()))
+
+
+def _render_tracks_tab(
+    service: RecommenderService,
+    user_ids: list[str],
+    max_top_k: int,
+) -> None:
+    st.write("Recommend tracks with audio-feature similarity.")
+    track_choices = _track_choices(service)
+    with st.form("track_recommendations"):
+        user_id = st.selectbox("Listener", user_ids, key="tracks_listener")
+        top_k = st.slider(
+            "Number of recommendations",
+            1,
+            max_top_k,
+            min(10, max_top_k),
+            key="tracks_top_k",
+        )
+        include_listened = st.checkbox(
+            "Include previously listened tracks",
+            key="tracks_include_listened",
+        )
+        submitted = st.form_submit_button(
+            "Recommend tracks",
+            type="primary",
+            use_container_width=True,
+        )
+
+    if submitted:
+        _run_recommendation(
+            lambda: service.recommend_tracks(
+                user_id=user_id,
+                top_k=top_k,
+                include_listened=include_listened,
+            )
+        )
+
+    with st.form("similar_tracks"):
+        selected_track = st.selectbox("Starting track", list(track_choices))
+        similar_top_k = st.slider(
+            "Number of similar tracks",
+            1,
+            max_top_k,
+            min(10, max_top_k),
+            key="similar_tracks_top_k",
+        )
+        similar_submitted = st.form_submit_button(
+            "Find similar tracks",
+            type="primary",
+            use_container_width=True,
+        )
+
+    if similar_submitted:
+        _run_recommendation(
+            lambda: service.similar_tracks(
+                track_id=track_choices[selected_track],
+                top_k=similar_top_k,
+            )
+        )
+
+
 def _render_catalog_tab(service: RecommenderService) -> None:
     st.write("Inspect artist metadata and the popularity signals used by the model.")
     search = st.text_input(
@@ -511,6 +594,7 @@ def render_dashboard(service: RecommenderService) -> None:
             "Taste Profile",
             "Session Mix",
             "Similar Artists",
+            "Tracks",
             "Catalog",
             "Ablation Summary",
         ]
@@ -537,8 +621,10 @@ def render_dashboard(service: RecommenderService) -> None:
     with tabs[3]:
         _render_similarity_tab(service, artist_choices, max_top_k)
     with tabs[4]:
-        _render_catalog_tab(service)
+        _render_tracks_tab(service, user_ids, max_top_k)
     with tabs[5]:
+        _render_catalog_tab(service)
+    with tabs[6]:
         _render_ablation_summary_tab(service)
 
 
