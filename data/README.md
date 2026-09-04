@@ -29,3 +29,16 @@ file.
 
 The included `sample_interactions.csv` and `sample_artist_metadata.csv` are
 small deterministic fixtures intended for local demos and automated tests.
+
+## Track contract
+
+Track interaction files require `user_id`, `track_id`, `track_name`,
+`artist_id`, `artist_name`, and `play_count`, with the same text/aggregation
+rules as artist interactions. One `track_id` must map to a single `artist_id`.
+
+Track metadata requires `track_id`, `track_name`, `artist_id`, `artist_name`,
+`album_id`, `album_name`, `duration_ms`, `popularity`, `explicit`, plus audio
+features: `danceability`, `energy`, `key`, `loudness`, `mode`, `speechiness`,
+`acousticness`, `instrumentalness`, `liveness`, `valence`, `tempo`,
+`time_signature`. Sample fixtures: `sample_track_interactions.csv` and
+`sample_track_metadata.csv`.
