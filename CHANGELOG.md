@@ -111,6 +111,18 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   aggregated knob-importance summary (HTTP 404 when no summary has been
   generated, HTTP 422 if the file is unparsable), so dashboards and CI can pull
   the aggregated evaluation deterministically.
+- API endpoint `GET /recommend/user/{user_id}/ltr` serves LTR re-ranked
+  recommendations; dashboard adds an LTR toggle and an Ablation Summary tab.
+- `evaluate --min-quality-threshold`: CI quality gate for `--promote-winner`
+  that only promotes when all `metric=value` thresholds are met.
+- Spotify integration (`music_recommender.spotify`, optional `spotify` extra)
+  with artist/track search, top tracks, related artists, and audio features,
+  plus `spotify-*` CLI commands.
+- Track-level recommendations (`music_recommender.tracks`) with audio-feature
+  content similarity, sample `sample_track_interactions.csv` /
+  `sample_track_metadata.csv`, and `prepare-track-data`,
+  `track-recommendations`, `similar-tracks` CLI commands.
+- `PLAN.md` with completed phases, in-progress work, and next steps.
 
 ### Fixed
 
