@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 from dataclasses import dataclass
 from typing import Any
 
-import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials
+SPOTIPY_AVAILABLE = importlib.util.find_spec("spotipy") is not None
 
 
 @dataclass
@@ -30,8 +30,15 @@ class SpotifyConfig:
         return cls(client_id=client_id, client_secret=client_secret)
 
 
-def create_spotify_client(config: SpotifyConfig) -> spotipy.Spotify:
+def create_spotify_client(config: SpotifyConfig) -> Any:
     """Create an authenticated Spotify client using client credentials flow."""
+    if not SPOTIPY_AVAILABLE:
+        raise ImportError(
+            "spotipy is not installed. Install with: uv sync --extra spotify"
+        )
+    import spotipy
+    from spotipy.oauth2 import SpotifyClientCredentials
+
     auth_manager = SpotifyClientCredentials(
         client_id=config.client_id, client_secret=config.client_secret
     )
@@ -87,7 +94,7 @@ class SpotifyAudioFeatures:
     time_signature: int
 
 
-def fetch_artist(client: spotipy.Spotify, artist_id: str) -> SpotifyArtist:
+def fetch_artist(client: Any, artist_id: str) -> SpotifyArtist:
     """Fetch a single artist by Spotify ID."""
     data = client.artist(artist_id)
     return SpotifyArtist(
@@ -102,7 +109,7 @@ def fetch_artist(client: spotipy.Spotify, artist_id: str) -> SpotifyArtist:
 
 
 def fetch_artists(
-    client: spotipy.Spotify, artist_ids: list[str]
+    client: Any, artist_ids: list[str]
 ) -> list[SpotifyArtist]:
     """Fetch multiple artists by Spotify IDs (max 50 per request)."""
     artists = []
@@ -126,7 +133,7 @@ def fetch_artists(
 
 
 def fetch_artist_top_tracks(
-    client: spotipy.Spotify, artist_id: str, country: str = "US"
+    client: Any, artist_id: str, country: str = "US"
 ) -> list[SpotifyTrack]:
     """Fetch an artist's top tracks."""
     data = client.artist_top_tracks(artist_id, country=country)
@@ -150,7 +157,7 @@ def fetch_artist_top_tracks(
     return tracks
 
 
-def fetch_tracks(client: spotipy.Spotify, track_ids: list[str]) -> list[SpotifyTrack]:
+def fetch_tracks(client: Any, track_ids: list[str]) -> list[SpotifyTrack]:
     """Fetch multiple tracks by Spotify IDs (max 50 per request)."""
     tracks = []
     for i in range(0, len(track_ids), 50):
@@ -177,7 +184,7 @@ def fetch_tracks(client: spotipy.Spotify, track_ids: list[str]) -> list[SpotifyT
 
 
 def fetch_audio_features(
-    client: spotipy.Spotify, track_ids: list[str]
+    client: Any, track_ids: list[str]
 ) -> list[SpotifyAudioFeatures | None]:
     """Fetch audio features for multiple tracks (max 100 per request)."""
     features: list[SpotifyAudioFeatures | None] = []
@@ -211,7 +218,7 @@ def fetch_audio_features(
 
 
 def search_artists(
-    client: spotipy.Spotify, query: str, limit: int = 20
+    client: Any, query: str, limit: int = 20
 ) -> list[SpotifyArtist]:
     """Search for artists by name."""
     data = client.search(q=query, type="artist", limit=limit)
@@ -232,7 +239,7 @@ def search_artists(
 
 
 def search_tracks(
-    client: spotipy.Spotify, query: str, limit: int = 20
+    client: Any, query: str, limit: int = 20
 ) -> list[SpotifyTrack]:
     """Search for tracks by name."""
     data = client.search(q=query, type="track", limit=limit)
@@ -257,7 +264,7 @@ def search_tracks(
 
 
 def get_artist_related_artists(
-    client: spotipy.Spotify, artist_id: str
+    client: Any, artist_id: str
 ) -> list[SpotifyArtist]:
     """Get related artists for a given artist."""
     data = client.artist_related_artists(artist_id)
