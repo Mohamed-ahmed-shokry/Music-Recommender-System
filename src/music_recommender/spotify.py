@@ -7,6 +7,8 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+import pandas as pd
+
 SPOTIPY_AVAILABLE = importlib.util.find_spec("spotipy") is not None
 
 
@@ -274,3 +276,61 @@ def get_artist_related_artists(client: Any, artist_id: str) -> list[SpotifyArtis
             )
         )
     return artists
+
+
+def build_track_metadata_frame(
+    tracks: list[SpotifyTrack],
+    audio_features: list[SpotifyAudioFeatures | None],
+) -> pd.DataFrame:
+    """Convert Spotify tracks + audio features to a track-metadata dataframe.
+
+    The returned frame matches the track metadata contract in
+    `music_recommender.tracks` (same column order), so it can be written to
+    disk and validated with `validate_track_metadata`. Tracks without audio
+    features are skipped, and duplicate track IDs keep their first occurrence.
+    """
+    from music_recommender.tracks import (
+        TRACK_METADATA_REQUIRED_COLUMNS,
+        validate_track_metadata,
+    )
+
+    features_by_id = {
+        feature.id: feature for feature in audio_features if feature is not None
+    }
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for track in tracks:
+        if track.id in seen:
+            continue
+        seen.add(track.id)
+        feature = features_by_id.get(track.id)
+        if feature is None:
+            continue
+        rows.append(
+            {
+                "track_id": track.id,
+                "track_name": track.name,
+                "artist_id": track.artist_ids[0] if track.artist_ids else "",
+                "artist_name": ", ".join(track.artist_names),
+                "album_id": track.album_id,
+                "album_name": track.album_name,
+                "duration_ms": track.duration_ms,
+                "popularity": track.popularity,
+                "explicit": track.explicit,
+                "danceability": feature.danceability,
+                "energy": feature.energy,
+                "key": feature.key,
+                "loudness": feature.loudness,
+                "mode": feature.mode,
+                "speechiness": feature.speechiness,
+                "acousticness": feature.acousticness,
+                "instrumentalness": feature.instrumentalness,
+                "liveness": feature.liveness,
+                "valence": feature.valence,
+                "tempo": feature.tempo,
+                "time_signature": feature.time_signature,
+            }
+        )
+    frame = pd.DataFrame(rows, columns=list(TRACK_METADATA_REQUIRED_COLUMNS))
+    validate_track_metadata(frame)
+    return frame

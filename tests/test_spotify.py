@@ -6,7 +6,10 @@ import pytest
 
 from music_recommender import spotify as spotify_module
 from music_recommender.spotify import (
+    SpotifyAudioFeatures,
     SpotifyConfig,
+    SpotifyTrack,
+    build_track_metadata_frame,
     create_spotify_client,
     fetch_artist,
     fetch_artist_top_tracks,
@@ -164,3 +167,61 @@ def test_fetch_helpers_with_fake_client() -> None:
     assert len(search_artists(client, "test")) == 1
     assert len(search_tracks(client, "test")) == 1
     assert len(get_artist_related_artists(client, "artist_1")) == 1
+
+
+def make_spotify_track(track_id: str = "track_1") -> SpotifyTrack:
+    return SpotifyTrack(
+        id=track_id,
+        name="Hit",
+        artist_ids=["artist_1"],
+        artist_names=["Test Artist"],
+        album_id="album_1",
+        album_name="Album",
+        duration_ms=200000,
+        popularity=90,
+        explicit=False,
+        external_urls={},
+        preview_url=None,
+    )
+
+
+def make_spotify_features(track_id: str = "track_1") -> SpotifyAudioFeatures:
+    return SpotifyAudioFeatures(
+        id=track_id,
+        danceability=0.7,
+        energy=0.8,
+        key=5,
+        loudness=-5.0,
+        mode=1,
+        speechiness=0.05,
+        acousticness=0.1,
+        instrumentalness=0.0,
+        liveness=0.1,
+        valence=0.9,
+        tempo=120.0,
+        time_signature=4,
+    )
+
+
+def test_build_track_metadata_frame_matches_contract() -> None:
+    frame = build_track_metadata_frame(
+        [make_spotify_track("track_1"), make_spotify_track("track_2")],
+        [make_spotify_features("track_1"), make_spotify_features("track_2")],
+    )
+
+    assert list(frame["track_id"]) == ["track_1", "track_2"]
+    assert frame.loc[0, "artist_name"] == "Test Artist"
+    assert frame.loc[0, "tempo"] == 120.0
+
+
+def test_build_track_metadata_frame_skips_missing_and_duplicates() -> None:
+    frame = build_track_metadata_frame(
+        [
+            make_spotify_track("track_1"),
+            make_spotify_track("track_1"),
+            make_spotify_track("track_missing"),
+        ],
+        [make_spotify_features("track_1"), None],
+    )
+
+    assert list(frame["track_id"]) == ["track_1"]
