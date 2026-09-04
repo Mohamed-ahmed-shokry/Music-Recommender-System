@@ -1439,3 +1439,79 @@ def test_ablation_summary_reports_error_when_no_reports(tmp_path) -> None:
     assert result.exit_code == 1
     assert "No ablation reports found" in result.output
     assert result.exception is not None
+
+
+def _stub_spotify_client() -> SimpleNamespace:
+    def artist_top_tracks(artist_id: str, country: str = "US") -> dict[str, Any]:
+        assert country
+        return {
+            "tracks": [
+                {
+                    "id": f"{artist_id}_track",
+                    "name": "Hit",
+                    "artists": [{"id": artist_id, "name": "Test Artist"}],
+                    "album": {"id": "album_1", "name": "Album"},
+                    "duration_ms": 200000,
+                    "popularity": 90,
+                    "explicit": False,
+                    "external_urls": {},
+                    "preview_url": None,
+                }
+            ]
+        }
+
+    def audio_features(ids: list[str]) -> list[dict[str, Any] | None]:
+        return [
+            {
+                "id": track_id,
+                "danceability": 0.7,
+                "energy": 0.8,
+                "key": 5,
+                "loudness": -5.0,
+                "mode": 1,
+                "speechiness": 0.05,
+                "acousticness": 0.1,
+                "instrumentalness": 0.0,
+                "liveness": 0.1,
+                "valence": 0.9,
+                "tempo": 120.0,
+                "time_signature": 4,
+            }
+            for track_id in ids
+        ]
+
+    return SimpleNamespace(
+        artist_top_tracks=artist_top_tracks, audio_features=audio_features
+    )
+
+
+def test_spotify_import_catalog_writes_metadata_csv(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        cli, "_get_spotify_client", lambda: (_stub_spotify_client(), None)
+    )
+    output = tmp_path / "catalog.csv"
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "spotify-import-catalog",
+            "--artist-ids",
+            "artist_1,artist_2",
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Imported 2 tracks from 2 artist(s)" in result.output
+    catalog = pd.read_csv(output, dtype=str)
+    assert list(catalog["track_id"]) == ["artist_1_track", "artist_2_track"]
+
+
+def test_spotify_import_catalog_rejects_empty_ids() -> None:
+    result = runner.invoke(cli.app, ["spotify-import-catalog", "--artist-ids", " , "])
+
+    assert result.exit_code == 1
+    assert "No artist IDs provided" in result.output

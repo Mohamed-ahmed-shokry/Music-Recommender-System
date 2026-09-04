@@ -11,6 +11,7 @@ import typer
 from music_recommender import __version__
 from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
+    DATA_DIR,
     DEFAULT_ALS_ALPHA,
     DEFAULT_ALS_FACTORS,
     DEFAULT_ALS_ITERATIONS,
@@ -64,6 +65,7 @@ from music_recommender.tracks import (
 try:
     from music_recommender.spotify import (
         SpotifyConfig,
+        build_track_metadata_frame,
         create_spotify_client,
         fetch_artist,
         fetch_artist_top_tracks,
@@ -1171,6 +1173,57 @@ def spotify_audio_features(
             )
         else:
             typer.echo(f"  {ids[i]}: No audio features available")
+
+
+@app.command()
+def spotify_import_catalog(
+    artist_ids: str = typer.Option(
+        ..., "--artist-ids", help="Comma-separated Spotify artist IDs."
+    ),
+    country: str = typer.Option("US", help="Country code for top tracks."),
+    output: str = typer.Option(
+        str(DATA_DIR / "raw" / "spotify_track_metadata.csv"),
+        "--output",
+        help="Where to write the track metadata CSV.",
+    ),
+) -> None:
+    """Import a track metadata catalog from Spotify top tracks.
+
+    Fetches each artist's top tracks plus audio features and writes a CSV
+    matching the track metadata contract, ready for track recommendations.
+    """
+    ids = [aid.strip() for aid in artist_ids.split(",") if aid.strip()]
+    if not ids:
+        typer.secho("Error: No artist IDs provided.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        client, _ = _get_spotify_client()
+        all_tracks = []
+        for artist_id in ids:
+            all_tracks.extend(
+                fetch_artist_top_tracks(client, artist_id, country=country)
+            )
+        seen: set[str] = set()
+        unique_tracks = []
+        for track in all_tracks:
+            if track.id not in seen:
+                seen.add(track.id)
+                unique_tracks.append(track)
+        features = fetch_audio_features(client, [track.id for track in unique_tracks])
+        frame = build_track_metadata_frame(unique_tracks, features)
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(output_path, index=False)
+    except (ValueError, Exception) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    skipped = len(unique_tracks) - len(frame)
+    typer.echo(f"Imported {len(frame)} tracks from {len(ids)} artist(s).")
+    if skipped:
+        typer.echo(f"Skipped {skipped} track(s) without audio features.")
+    typer.echo(f"Wrote track metadata to: {output_path}")
 
 
 @app.command()
