@@ -160,9 +160,7 @@ def validate_track_metadata(
         raise ValueError("Track metadata dataframe is empty.")
 
     missing_columns = [
-        column
-        for column in TRACK_METADATA_REQUIRED_COLUMNS
-        if column not in df.columns
+        column for column in TRACK_METADATA_REQUIRED_COLUMNS if column not in df.columns
     ]
     if missing_columns:
         raise ValueError(f"Missing required columns: {missing_columns}")

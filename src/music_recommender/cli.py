@@ -73,6 +73,7 @@ try:
         search_artists,
         search_tracks,
     )
+
     SPOTIFY_AVAILABLE = True
 except ImportError:
     SPOTIFY_AVAILABLE = False
@@ -896,9 +897,7 @@ def _parse_parameter_value_dict(text: str) -> dict[str, float | int | bool | str
     return settings
 
 
-def _check_quality_threshold(
-    metrics: dict[str, float], threshold_str: str
-) -> bool:
+def _check_quality_threshold(metrics: dict[str, float], threshold_str: str) -> bool:
     """Check if all metrics meet their minimum thresholds.
 
     Args:
@@ -914,9 +913,7 @@ def _check_quality_threshold(
         key = key.strip()
         raw_value = raw_value.strip()
         if not key or not equals:
-            raise ValueError(
-                f"Invalid threshold '{pair}'. Expected 'metric=value'."
-            )
+            raise ValueError(f"Invalid threshold '{pair}'. Expected 'metric=value'.")
         try:
             threshold = float(raw_value)
         except ValueError as err:
@@ -1082,8 +1079,7 @@ def spotify_artist_top_tracks(
     for i, track in enumerate(tracks, 1):
         artists_str = ", ".join(track.artist_names)
         typer.echo(
-            f"  {i}. {track.name} by {artists_str} "
-            f"(popularity: {track.popularity})"
+            f"  {i}. {track.name} by {artists_str} (popularity: {track.popularity})"
         )
 
 
@@ -1102,8 +1098,7 @@ def spotify_related_artists(
     typer.echo(f"Related artists for {artist_id}:")
     for i, artist in enumerate(artists, 1):
         typer.echo(
-            f"  {i}. {artist.name} ({artist.id}) "
-            f"- Popularity: {artist.popularity}"
+            f"  {i}. {artist.name} ({artist.id}) - Popularity: {artist.popularity}"
         )
 
 
@@ -1123,8 +1118,7 @@ def spotify_search_artists(
     typer.echo(f"Search results for '{query}':")
     for i, artist in enumerate(artists, 1):
         typer.echo(
-            f"  {i}. {artist.name} ({artist.id}) "
-            f"- Popularity: {artist.popularity}"
+            f"  {i}. {artist.name} ({artist.id}) - Popularity: {artist.popularity}"
         )
 
 
@@ -1145,8 +1139,7 @@ def spotify_search_tracks(
     for i, track in enumerate(tracks, 1):
         artists_str = ", ".join(track.artist_names)
         typer.echo(
-            f"  {i}. {track.name} by {artists_str} "
-            f"(popularity: {track.popularity})"
+            f"  {i}. {track.name} by {artists_str} (popularity: {track.popularity})"
         )
 
 
@@ -1255,8 +1248,7 @@ def track_recommendations(
                 metadata_df["track_id"] == track_id, "artist_name"
             ].values[0]
             typer.echo(
-                f"  {i}. {track_name} by {artist_name} "
-                f"(score: {rec['score']:.4f})"
+                f"  {i}. {track_name} by {artist_name} (score: {rec['score']:.4f})"
             )
 
 
@@ -1302,8 +1294,7 @@ def similar_tracks(
                 metadata_df["track_id"] == track_id, "artist_name"
             ].values[0]
             typer.echo(
-                f"  {i}. {track_name} by {artist_name} "
-                f"(score: {rec['score']:.4f})"
+                f"  {i}. {track_name} by {artist_name} (score: {rec['score']:.4f})"
             )
 
 

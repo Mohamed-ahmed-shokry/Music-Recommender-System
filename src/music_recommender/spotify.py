@@ -108,9 +108,7 @@ def fetch_artist(client: Any, artist_id: str) -> SpotifyArtist:
     )
 
 
-def fetch_artists(
-    client: Any, artist_ids: list[str]
-) -> list[SpotifyArtist]:
+def fetch_artists(client: Any, artist_ids: list[str]) -> list[SpotifyArtist]:
     """Fetch multiple artists by Spotify IDs (max 50 per request)."""
     artists = []
     for i in range(0, len(artist_ids), 50):
@@ -217,9 +215,7 @@ def fetch_audio_features(
     return features
 
 
-def search_artists(
-    client: Any, query: str, limit: int = 20
-) -> list[SpotifyArtist]:
+def search_artists(client: Any, query: str, limit: int = 20) -> list[SpotifyArtist]:
     """Search for artists by name."""
     data = client.search(q=query, type="artist", limit=limit)
     artists = []
@@ -238,9 +234,7 @@ def search_artists(
     return artists
 
 
-def search_tracks(
-    client: Any, query: str, limit: int = 20
-) -> list[SpotifyTrack]:
+def search_tracks(client: Any, query: str, limit: int = 20) -> list[SpotifyTrack]:
     """Search for tracks by name."""
     data = client.search(q=query, type="track", limit=limit)
     tracks = []
@@ -263,9 +257,7 @@ def search_tracks(
     return tracks
 
 
-def get_artist_related_artists(
-    client: Any, artist_id: str
-) -> list[SpotifyArtist]:
+def get_artist_related_artists(client: Any, artist_id: str) -> list[SpotifyArtist]:
     """Get related artists for a given artist."""
     data = client.artist_related_artists(artist_id)
     artists = []

@@ -428,6 +428,7 @@ def _render_ablation_summary_tab(service: RecommenderService) -> None:
     try:
         from music_recommender.config import REPORTS_DIR
         from music_recommender.evaluate import load_ablation_summary_report
+
         summary = load_ablation_summary_report(REPORTS_DIR / "ablation_summary.json")
     except (FileNotFoundError, ValueError) as error:
         st.warning(f"No ablation summary available: {error}")
@@ -440,16 +441,19 @@ def _render_ablation_summary_tab(service: RecommenderService) -> None:
 
     if ranking_data:
         import pandas as pd
+
         rows = []
         for item in ranking_data:
             knob = item["knob"]
             knob_info = knobs_data.get(knob, {})
-            rows.append({
-                "Knob": knob,
-                "Mean Impact": round(item["mean_impact"], 4),
-                "Std Impact": round(knob_info.get("std_impact", 0.0), 4),
-                "Runs": knob_info.get("count", 0),
-            })
+            rows.append(
+                {
+                    "Knob": knob,
+                    "Mean Impact": round(item["mean_impact"], 4),
+                    "Std Impact": round(knob_info.get("std_impact", 0.0), 4),
+                    "Runs": knob_info.get("count", 0),
+                }
+            )
         df = pd.DataFrame(rows)
         st.dataframe(
             df,
