@@ -446,6 +446,26 @@ uv run python -m music_recommender.cli ablation-summary \
   --report-dir reports/ --summary-path reports/ablation_summary.json
 ```
 
+Spotify integration (optional):
+
+```bash
+uv sync --extra spotify
+export SPOTIFY_CLIENT_ID=... SPOTIFY_CLIENT_SECRET=...
+uv run python -m music_recommender.cli spotify-search-artists "Daft Punk"
+uv run python -m music_recommender.cli spotify-artist <spotify_artist_id>
+uv run python -m music_recommender.cli spotify-artist-top-tracks <spotify_artist_id>
+uv run python -m music_recommender.cli spotify-related-artists <spotify_artist_id>
+uv run python -m music_recommender.cli spotify-audio-features --ids <track_id_1>,<track_id_2>
+```
+
+Track-level recommendations with audio-feature similarity:
+
+```bash
+uv run python -m music_recommender.cli prepare-track-data
+uv run python -m music_recommender.cli track-recommendations --user-id user_1 --top-k 10
+uv run python -m music_recommender.cli similar-tracks --track-id track_1 --top-k 10
+```
+
 ## API Reference
 
 Train before starting the API:
@@ -1082,14 +1102,19 @@ Current coverage focus:
 
 ## Roadmap
 
-- Add Spotify API integration.
-- Add track-level recommendations.
-- Add audio-feature content similarity.
+See [PLAN.md](PLAN.md) for the full phased plan.
+
+- Add Spotify API integration. ✓ (module + CLI, optional `spotify` extra)
+- Add track-level recommendations. ✓ (CLI + sample data; API serving next)
+- Add audio-feature content similarity. ✓ (track content matrix; artist
+  audio-feature blending next)
 - Expose the learning-to-rank re-ranked recommendations through the API and
   dashboard with a configurable toggle. ✓
 - Add a CI quality gate that auto-promotes the winning setting when the A/B run
   passes a minimum quality threshold. ✓
 - Render the aggregated ablation summary in the Streamlit dashboard. ✓
+- Next: track API endpoints, persisted track artifacts, Spotify import
+  pipeline, 0.5.0 release.
 
 ## License
 
