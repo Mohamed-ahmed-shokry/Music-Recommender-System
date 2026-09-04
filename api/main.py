@@ -337,3 +337,35 @@ def recommend_user_ltr(
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/tracks/recommend/{user_id}")
+def recommend_tracks(
+    user_id: RequestText,
+    top_k: PositiveTopK = 10,
+    include_listened: bool = False,
+) -> dict[str, object]:
+    """Return track recommendations for a user with audio-feature similarity."""
+    try:
+        return get_service().recommend_tracks(
+            user_id=user_id,
+            top_k=top_k,
+            include_listened=include_listened,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/tracks/similar/{track_id}")
+def similar_tracks(
+    track_id: RequestText,
+    top_k: PositiveTopK = 10,
+) -> dict[str, object]:
+    """Return tracks similar to a selected track by audio features."""
+    try:
+        return get_service().similar_tracks(
+            track_id=track_id,
+            top_k=top_k,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error

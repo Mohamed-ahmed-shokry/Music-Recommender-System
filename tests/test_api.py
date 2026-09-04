@@ -190,6 +190,48 @@ class FakeService:
             ][:top_k],
         }
 
+    def recommend_tracks(
+        self,
+        user_id: str,
+        top_k: int,
+        include_listened: bool,
+    ) -> dict[str, object]:
+        if user_id == "ghost":
+            raise ValueError(f"Unknown user_id: {user_id}")
+        return {
+            "user_id": user_id,
+            "strategy": "track_similarity",
+            "recommendations": [
+                {
+                    "track_id": "track_1",
+                    "track_name": "Hit",
+                    "artist_name": "Test Artist",
+                    "score": 0.95,
+                }
+            ][:top_k],
+            "include_listened": include_listened,
+        }
+
+    def similar_tracks(
+        self,
+        track_id: str,
+        top_k: int,
+    ) -> dict[str, object]:
+        if track_id == "track_missing":
+            raise ValueError(f"Unknown track_id: {track_id}")
+        return {
+            "track_id": track_id,
+            "strategy": "track_similarity",
+            "similar_tracks": [
+                {
+                    "track_id": "track_2",
+                    "track_name": "Hit 2",
+                    "artist_name": "Test Artist",
+                    "score": 0.9,
+                }
+            ][:top_k],
+        }
+
 
 def test_health_route_uses_loaded_service() -> None:
     with TestClient(api_main.app) as client:
@@ -740,6 +782,54 @@ def test_content_similar_route_returns_404_for_unknown_artist() -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == "service operation failed"
+
+
+def test_track_recommend_route_returns_track_recommendations() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/tracks/recommend/user_1", params={"top_k": 1})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["strategy"] == "track_similarity"
+    assert body["recommendations"][0]["track_id"] == "track_1"
+
+
+def test_track_recommend_route_returns_422_for_unknown_user() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/tracks/recommend/ghost")
+
+    assert response.status_code == 422
+    assert "Unknown user_id" in response.json()["detail"]
+
+
+def test_similar_tracks_route_returns_similar_tracks() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/tracks/similar/track_1", params={"top_k": 1})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["strategy"] == "track_similarity"
+    assert body["similar_tracks"][0]["track_id"] == "track_2"
+
+
+def test_similar_tracks_route_returns_404_for_unknown_track() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/tracks/similar/track_missing")
+
+    assert response.status_code == 404
+    assert "Unknown track_id" in response.json()["detail"]
 
 
 @pytest.mark.parametrize(
