@@ -47,6 +47,7 @@ from music_recommender.model import train_and_save_model
 from music_recommender.preprocessing import prepare_training_data
 from music_recommender.recommend import format_recommendations
 from music_recommender.service import RecommenderService
+from music_recommender.track_evaluate import evaluate_track_holdout
 from music_recommender.tracking import (
     DEFAULT_EVALUATION_EXPERIMENT,
     DEFAULT_TRAINING_EXPERIMENT,
@@ -1372,6 +1373,39 @@ def similar_tracks(
             typer.echo(
                 f"  {i}. {track_name} by {artist_name} (score: {rec['score']:.4f})"
             )
+
+
+@app.command()
+def evaluate_tracks(
+    top_k: int = DEFAULT_TOP_K,
+    folds: int = 1,
+    include_listened: bool = typer.Option(
+        False,
+        "--include-listened/--exclude-listened",
+        help="Include or exclude listened tracks when evaluating.",
+    ),
+) -> None:
+    """Evaluate track similarity with repeated per-user holdout splits."""
+    try:
+        df = load_and_validate_track_interactions(RAW_TRACK_DATA_PATH)
+        metadata_df = load_and_validate_track_metadata(RAW_TRACK_METADATA_PATH, df)
+        metrics = evaluate_track_holdout(
+            df,
+            metadata_df,
+            top_k=top_k,
+            folds=folds,
+            include_listened=include_listened,
+        )
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"Track evaluation over {folds} fold(s):")
+    typer.echo(f"  Precision@{top_k}: {metrics['precision_at_k']:.4f}")
+    typer.echo(f"  Recall@{top_k}: {metrics['recall_at_k']:.4f}")
+    typer.echo(f"  MAP@{top_k}: {metrics['map_at_k']:.4f}")
+    typer.echo(f"  NDCG@{top_k}: {metrics['ndcg_at_k']:.4f}")
+    typer.echo(f"  Catalog coverage: {metrics['catalog_coverage']:.4f}")
 
 
 if __name__ == "__main__":

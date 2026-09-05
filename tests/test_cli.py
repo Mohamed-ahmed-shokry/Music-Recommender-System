@@ -1644,3 +1644,13 @@ def test_spotify_import_catalog_rejects_empty_ids() -> None:
 
     assert result.exit_code == 1
     assert "No artist IDs provided" in result.output
+
+
+def test_evaluate_tracks_prints_holdout_metrics() -> None:
+    result = runner.invoke(cli.app, ["evaluate-tracks", "--top-k", "5", "--folds", "1"])
+
+    assert result.exit_code == 0
+    assert "Track evaluation over 1 fold(s):" in result.output
+    assert "Precision@5:" in result.output
+    assert "NDCG@5:" in result.output
+    assert "Catalog coverage:" in result.output
