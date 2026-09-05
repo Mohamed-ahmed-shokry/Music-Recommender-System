@@ -632,12 +632,12 @@ docker build --target dashboard-runtime --tag music-recommender-dashboard .
 docker run --rm --publish 8501:8501 music-recommender-dashboard
 ```
 
-Version tags that match `pyproject.toml`, for example `v0.4.0`, run the complete
+Version tags that match `pyproject.toml`, for example `v0.5.0`, run the complete
 quality gate and publish both images to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-api:0.4.0
-docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-dashboard:0.4.0
+docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-api:0.5.0
+docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-dashboard:0.5.0
 ```
 
 Published images receive full, major/minor, major, and stable `latest` tags.
