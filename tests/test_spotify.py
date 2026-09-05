@@ -144,6 +144,17 @@ def test_create_client_raises_without_dependency(
         create_spotify_client(SpotifyConfig("id", "secret"))
 
 
+@pytest.mark.skipif(
+    not spotify_module.SPOTIPY_AVAILABLE, reason="spotipy extra not installed"
+)
+def test_create_client_returns_spotify_client() -> None:
+    import spotipy
+
+    client = create_spotify_client(SpotifyConfig("id", "secret"))
+
+    assert isinstance(client, spotipy.Spotify)
+
+
 def test_fetch_helpers_with_fake_client() -> None:
     client: Any = FakeSpotifyClient()
     artist = fetch_artist(client, "artist_1")

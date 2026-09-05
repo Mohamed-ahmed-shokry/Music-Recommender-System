@@ -256,6 +256,44 @@ def test_artifact_rejects_invalid_track_bundle_type(tmp_path: Path) -> None:
         load_artifact(artifact_path)
 
 
+def _track_bundle_artifact(tmp_path: Path):
+    from music_recommender.tracks import build_track_serving_resources
+
+    artifact = create_test_artifact(tmp_path)
+    artifact.track_bundle = build_track_serving_resources(
+        track_interactions_df(), track_metadata_df()
+    )
+    return artifact
+
+
+@pytest.mark.parametrize(
+    ("attribute", "value", "message"),
+    [
+        ("track_ids", [], "invalid track identifiers"),
+        ("track_ids", ["track_1", "track_1"], "invalid track identifiers"),
+        ("track_id_to_index", {}, "mappings are inconsistent"),
+        ("feature_names", ["danceability", "danceability"], "invalid feature names"),
+        (
+            "user_track_matrix",
+            pd.DataFrame(columns=["unknown_track"]),
+            "interaction matrix is inconsistent",
+        ),
+        ("track_lookup", {}, "metadata lookup is inconsistent"),
+    ],
+)
+def test_artifact_rejects_inconsistent_track_bundle_fields(
+    tmp_path: Path, attribute: str, value: object, message: str
+) -> None:
+    artifact = _track_bundle_artifact(tmp_path)
+    setattr(artifact.track_bundle, attribute, value)
+    artifact_path = tmp_path / "bad-track-field.joblib"
+
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match=message):
+        load_artifact(artifact_path)
+
+
 def test_corrupt_artifact_has_actionable_load_error(tmp_path: Path) -> None:
     artifact_path = tmp_path / "corrupt.joblib"
     artifact_path.write_bytes(b"not a joblib artifact")

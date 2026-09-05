@@ -554,6 +554,37 @@ def test_similar_tracks_rejects_unknown_track(tmp_path: Path) -> None:
         service.similar_tracks(track_id="track_missing", top_k=5)
 
 
+def test_track_resources_falls_back_to_csv_when_unbundled(
+    tmp_path: Path,
+) -> None:
+    service = create_service(tmp_path)
+    service.artifact.track_bundle = None
+
+    resources = service._track_resources()
+
+    assert resources.track_ids
+    assert "track_1" in resources.track_id_to_index
+
+
+def test_track_resources_reports_missing_csv_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import music_recommender.service as service_module
+
+    service = create_service(tmp_path)
+    service.artifact.track_bundle = None
+    monkeypatch.setattr(
+        service_module,
+        "load_track_serving_resources",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            FileNotFoundError("no such file")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Track data not found"):
+        service._track_resources()
+
+
 def test_recommend_tracks_prefers_bundled_resources(tmp_path: Path) -> None:
     from music_recommender.tracks import build_track_serving_resources
 

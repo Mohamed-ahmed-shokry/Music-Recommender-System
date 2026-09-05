@@ -1654,3 +1654,42 @@ def test_evaluate_tracks_prints_holdout_metrics() -> None:
     assert "Precision@5:" in result.output
     assert "NDCG@5:" in result.output
     assert "Catalog coverage:" in result.output
+
+
+def test_prepare_track_data_reports_counts() -> None:
+    result = runner.invoke(cli.app, ["prepare-track-data"])
+
+    assert result.exit_code == 0
+    assert "Track data prepared successfully." in result.output
+    assert "Track metadata rows:" in result.output
+
+
+def test_track_recommendations_command_prints_tracks() -> None:
+    result = runner.invoke(
+        cli.app, ["track-recommendations", "--user-id", "user_1", "--top-k", "3"]
+    )
+
+    assert result.exit_code == 0
+    assert "Track recommendations for user_1:" in result.output
+
+
+def test_similar_tracks_command_prints_tracks() -> None:
+    result = runner.invoke(
+        cli.app, ["similar-tracks", "--track-id", "track_1", "--top-k", "3"]
+    )
+
+    assert result.exit_code == 0
+    assert "Tracks similar to track_1:" in result.output
+
+
+@pytest.mark.skipif(not cli.SPOTIFY_AVAILABLE, reason="spotipy extra not installed")
+def test_spotify_commands_require_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SPOTIFY_CLIENT_ID", raising=False)
+    monkeypatch.delenv("SPOTIFY_CLIENT_SECRET", raising=False)
+
+    result = runner.invoke(cli.app, ["spotify-artist", "artist_1"])
+
+    assert result.exit_code == 1
+    assert "SPOTIFY_CLIENT_ID" in result.output
