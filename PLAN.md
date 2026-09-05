@@ -31,10 +31,17 @@ It is updated incrementally as phases land.
   field, legacy fallback, train + serve wiring) — done.
 - Phase 16 — Track holdout evaluation (`track_evaluate`, `evaluate-tracks`)
   reusing the shared ranking metrics — done.
+- Phase 17 — Coverage sweep to 96% (track validators, CSV fallback, track
+  CLI paths, Spotify client) — done.
+- Release 0.5.0 — shipped (tag `v0.5.0`, containers publishing via release
+  workflow).
 
 ## Next steps
 
-1. Release 0.5.0.
+1. Monitor the `v0.5.0` release workflow and GHCR publication.
+2. Backfill track popularity/novelty metrics in `evaluate-tracks`.
+3. Dashboard track catalog search.
+4. Plan 0.6.0 scope.
 
 ## Quality gates (every change)
 
