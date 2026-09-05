@@ -552,3 +552,50 @@ def test_similar_tracks_rejects_unknown_track(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Unknown track_id"):
         service.similar_tracks(track_id="track_missing", top_k=5)
+
+
+def test_recommend_tracks_prefers_bundled_resources(tmp_path: Path) -> None:
+    from music_recommender.tracks import build_track_serving_resources
+
+    service = create_service(tmp_path)
+    track_df = pd.DataFrame(
+        {
+            "user_id": ["user_9"],
+            "track_id": ["track_9"],
+            "track_name": ["Rare Song"],
+            "artist_id": ["artist_9"],
+            "artist_name": ["Rare Artist"],
+            "play_count": [12],
+        }
+    )
+    meta_df = pd.DataFrame(
+        {
+            "track_id": ["track_9"],
+            "track_name": ["Rare Song"],
+            "artist_id": ["artist_9"],
+            "artist_name": ["Rare Artist"],
+            "album_id": ["album_9"],
+            "album_name": ["Rare Album"],
+            "duration_ms": [200000],
+            "popularity": [10],
+            "explicit": [False],
+            "danceability": [0.5],
+            "energy": [0.5],
+            "key": [0],
+            "loudness": [-6.0],
+            "mode": [1],
+            "speechiness": [0.05],
+            "acousticness": [0.1],
+            "instrumentalness": [0.0],
+            "liveness": [0.1],
+            "valence": [0.5],
+            "tempo": [110.0],
+            "time_signature": [4],
+        }
+    )
+    service.artifact.track_bundle = build_track_serving_resources(track_df, meta_df)
+
+    result = service.recommend_tracks(user_id="user_9", top_k=5)
+
+    assert result["strategy"] == "track_similarity"
+    assert result["recommendations"] == []

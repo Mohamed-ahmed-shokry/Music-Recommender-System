@@ -500,7 +500,9 @@ class RecommenderService:
         }
 
     def _track_resources(self) -> TrackServingResources:
-        """Lazily load and cache track serving resources."""
+        """Return bundled track resources, falling back to CSV loading."""
+        if self.artifact.track_bundle is not None:
+            return self.artifact.track_bundle
         cached = self.__dict__.get("_track_resources_cache")
         if cached is None:
             try:

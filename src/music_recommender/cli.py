@@ -161,6 +161,8 @@ def prepare_metadata(
 def train(
     data_path: Path = RAW_DATA_PATH,
     metadata_path: Path = RAW_METADATA_PATH,
+    track_data_path: Path = RAW_TRACK_DATA_PATH,
+    track_metadata_path: Path = RAW_TRACK_METADATA_PATH,
     factors: int = DEFAULT_ALS_FACTORS,
     regularization: float = DEFAULT_ALS_REGULARIZATION,
     iterations: int = DEFAULT_ALS_ITERATIONS,
@@ -207,6 +209,8 @@ def train(
                 {
                     "data_path": str(data_path),
                     "metadata_path": str(metadata_path),
+                    "track_data_path": str(track_data_path),
+                    "track_metadata_path": str(track_metadata_path),
                     "factors": factors,
                     "regularization": regularization,
                     "iterations": iterations,
@@ -221,6 +225,8 @@ def train(
             model, user_item_matrix, mappings = train_and_save_model(
                 raw_data_path=data_path,
                 metadata_path=metadata_path,
+                track_data_path=track_data_path,
+                track_metadata_path=track_metadata_path,
                 factors=factors,
                 regularization=regularization,
                 iterations=iterations,

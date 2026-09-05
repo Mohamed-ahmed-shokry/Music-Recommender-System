@@ -29,12 +29,15 @@ from music_recommender.config import (
     MODEL_PATH,
     RAW_DATA_PATH,
     RAW_METADATA_PATH,
+    RAW_TRACK_DATA_PATH,
+    RAW_TRACK_METADATA_PATH,
 )
 from music_recommender.content import build_content_artifacts, validate_content_weight
 from music_recommender.ltr import train_ltr_ranker
 from music_recommender.metadata import load_and_validate_artist_metadata
 from music_recommender.preprocessing import Mappings, prepare_training_data
 from music_recommender.ranking import validate_ranking_parameters
+from music_recommender.tracks import load_track_serving_resources
 from music_recommender.utils import atomic_joblib_dump, is_finite_number
 
 if TYPE_CHECKING:
@@ -209,6 +212,8 @@ def train_and_save_model(
     model_path: str | Path = MODEL_PATH,
     mappings_path: str | Path = MAPPINGS_PATH,
     artifact_path: str | Path = ARTIFACT_BUNDLE_PATH,
+    track_data_path: str | Path = RAW_TRACK_DATA_PATH,
+    track_metadata_path: str | Path = RAW_TRACK_METADATA_PATH,
     min_user_interactions: int = DEFAULT_MIN_USER_INTERACTIONS,
     min_artist_interactions: int = DEFAULT_MIN_ARTIST_INTERACTIONS,
     factors: int = DEFAULT_ALS_FACTORS,
@@ -282,6 +287,7 @@ def train_and_save_model(
         "popularity_penalty": popularity_penalty,
         "diversity": diversity,
     }
+    track_bundle = load_track_serving_resources(track_data_path, track_metadata_path)
     artifact = build_recommender_artifact(
         model=model,
         mappings=mappings,
@@ -293,6 +299,7 @@ def train_and_save_model(
         training_config=training_config,
         hybrid_config=hybrid_config,
         ranking_config=ranking_config,
+        track_bundle=track_bundle,
         ltr_model=train_ltr_ranker(
             train_df=filtered_df,
             mappings=mappings,
