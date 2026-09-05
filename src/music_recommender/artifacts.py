@@ -17,6 +17,7 @@ from scipy.sparse import csr_matrix
 from music_recommender.config import ARTIFACT_BUNDLE_PATH
 from music_recommender.content import ContentArtifacts
 from music_recommender.preprocessing import Mappings
+from music_recommender.tracks import TrackServingResources
 from music_recommender.utils import atomic_joblib_dump, is_finite_number
 
 ARTIFACT_VERSION = "4.0"
@@ -45,6 +46,7 @@ class RecommenderArtifact:
     hybrid_config: dict[str, Any]
     ranking_config: dict[str, Any]
     ltr_model: Any = None
+    track_bundle: TrackServingResources | None = None
 
     def __repr__(self) -> str:
         return (
@@ -123,6 +125,7 @@ def build_recommender_artifact(
     hybrid_config: dict[str, Any],
     ranking_config: dict[str, Any],
     ltr_model: Any = None,
+    track_bundle: TrackServingResources | None = None,
 ) -> RecommenderArtifact:
     """Build a versioned artifact from trained model state."""
     metadata = {
@@ -151,6 +154,7 @@ def build_recommender_artifact(
         hybrid_config=hybrid_config,
         ranking_config=ranking_config,
         ltr_model=ltr_model,
+        track_bundle=track_bundle,
     )
 
 
@@ -207,6 +211,10 @@ def _validate_loaded_artifact(artifact: Any) -> RecommenderArtifact:
     artifact.ranking_config = _validate_or_default_ranking_config(
         getattr(artifact, "ranking_config", None)
     )
+
+    artifact.track_bundle = getattr(artifact, "track_bundle", None)
+    if artifact.track_bundle is not None:
+        _validate_track_bundle(artifact.track_bundle)
 
     if not isinstance(artifact.mappings, dict):
         raise ValueError("Artifact mappings are not a dictionary. Retrain the model.")
@@ -644,6 +652,75 @@ def _validate_or_default_ranking_config(ranking_config: Any) -> dict[str, Any]:
             "Artifact ranking configuration is invalid. Retrain the model."
         )
     return ranking_config
+
+
+def _validate_track_bundle(bundle: Any) -> None:
+    """Validate an optional bundled track serving resource."""
+    if not isinstance(bundle, TrackServingResources):
+        raise ValueError(
+            "Artifact track bundle has an invalid structure. Retrain the model."
+        )
+    track_ids = bundle.track_ids
+    if (
+        not isinstance(track_ids, list)
+        or not track_ids
+        or any(
+            not isinstance(track_id, str) or not track_id.strip()
+            for track_id in track_ids
+        )
+        or len(set(track_ids)) != len(track_ids)
+    ):
+        raise ValueError(
+            "Artifact track bundle has invalid track identifiers. Retrain the model."
+        )
+    track_index = bundle.track_id_to_index
+    if (
+        not isinstance(track_index, dict)
+        or set(track_index) != set(track_ids)
+        or any(type(index) is not int for index in track_index.values())
+        or sorted(track_index.values()) != list(range(len(track_ids)))
+    ):
+        raise ValueError(
+            "Artifact track bundle mappings are inconsistent. Retrain the model."
+        )
+    similarity = bundle.similarity_matrix
+    if (
+        not isinstance(similarity, np.ndarray)
+        or similarity.shape != (len(track_ids), len(track_ids))
+        or not np.all(np.isfinite(similarity))
+    ):
+        raise ValueError(
+            "Artifact track similarity matrix is inconsistent. Retrain the model."
+        )
+    feature_names = bundle.feature_names
+    if (
+        not isinstance(feature_names, list)
+        or not feature_names
+        or any(not isinstance(name, str) or not name for name in feature_names)
+        or len(set(feature_names)) != len(feature_names)
+    ):
+        raise ValueError(
+            "Artifact track bundle has invalid feature names. Retrain the model."
+        )
+    user_track_matrix = bundle.user_track_matrix
+    if not isinstance(user_track_matrix, pd.DataFrame) or not {
+        str(column) for column in user_track_matrix.columns
+    } <= set(track_ids):
+        raise ValueError(
+            "Artifact track interaction matrix is inconsistent. Retrain the model."
+        )
+    track_lookup = bundle.track_lookup
+    if (
+        not isinstance(track_lookup, dict)
+        or set(track_lookup) != set(track_ids)
+        or any(
+            not isinstance(entry, dict) or entry.get("track_id") != track_id
+            for track_id, entry in track_lookup.items()
+        )
+    ):
+        raise ValueError(
+            "Artifact track bundle metadata lookup is inconsistent. Retrain the model."
+        )
 
 
 def _validate_artifact_configuration(

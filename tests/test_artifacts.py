@@ -160,6 +160,102 @@ def test_artifact_bundle_round_trips_ltr_model(tmp_path: Path) -> None:
     assert loaded_artifact.ltr_model == {"kind": "ridge"}
 
 
+def track_interactions_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "user_id": ["user_1", "user_1", "user_2"],
+            "track_id": ["track_1", "track_2", "track_1"],
+            "track_name": ["Song A1", "Song A2", "Song A1"],
+            "artist_id": ["artist_1", "artist_1", "artist_1"],
+            "artist_name": ["Artist A", "Artist A", "Artist A"],
+            "play_count": [5, 3, 7],
+        }
+    )
+
+
+def track_metadata_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "track_id": ["track_1", "track_2"],
+            "track_name": ["Song A1", "Song A2"],
+            "artist_id": ["artist_1", "artist_1"],
+            "artist_name": ["Artist A", "Artist A"],
+            "album_id": ["album_1", "album_1"],
+            "album_name": ["Album A", "Album A"],
+            "duration_ms": [200000, 210000],
+            "popularity": [80, 70],
+            "explicit": [False, False],
+            "danceability": [0.7, 0.6],
+            "energy": [0.8, 0.5],
+            "key": [5, 2],
+            "loudness": [-5.0, -8.0],
+            "mode": [1, 0],
+            "speechiness": [0.05, 0.04],
+            "acousticness": [0.1, 0.3],
+            "instrumentalness": [0.0, 0.1],
+            "liveness": [0.1, 0.2],
+            "valence": [0.9, 0.4],
+            "tempo": [120.0, 100.0],
+            "time_signature": [4, 3],
+        }
+    )
+
+
+def test_artifact_bundle_round_trips_track_bundle(tmp_path: Path) -> None:
+    from music_recommender.tracks import build_track_serving_resources
+
+    artifact = create_test_artifact(tmp_path)
+    artifact.track_bundle = build_track_serving_resources(
+        track_interactions_df(), track_metadata_df()
+    )
+    artifact_path = tmp_path / "tracks.joblib"
+
+    save_artifact(artifact, artifact_path)
+    loaded_artifact = load_artifact(artifact_path)
+
+    assert loaded_artifact.track_bundle is not None
+    assert loaded_artifact.track_bundle.track_ids == ["track_1", "track_2"]
+    assert loaded_artifact.track_bundle.similarity_matrix.shape == (2, 2)
+
+
+def test_artifact_without_track_bundle_defaults_to_none(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    del artifact.track_bundle
+    artifact_path = tmp_path / "legacy-tracks.joblib"
+
+    save_artifact(artifact, artifact_path)
+    loaded_artifact = load_artifact(artifact_path)
+
+    assert loaded_artifact.track_bundle is None
+
+
+def test_artifact_rejects_inconsistent_track_bundle(tmp_path: Path) -> None:
+    from music_recommender.tracks import build_track_serving_resources
+
+    artifact = create_test_artifact(tmp_path)
+    artifact.track_bundle = build_track_serving_resources(
+        track_interactions_df(), track_metadata_df()
+    )
+    artifact.track_bundle.similarity_matrix = np.zeros((3, 3))
+    artifact_path = tmp_path / "bad-tracks.joblib"
+
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="track similarity matrix"):
+        load_artifact(artifact_path)
+
+
+def test_artifact_rejects_invalid_track_bundle_type(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.track_bundle = {"track_ids": ["track_1"]}
+    artifact_path = tmp_path / "bad-track-type.joblib"
+
+    save_artifact(artifact, artifact_path)
+
+    with pytest.raises(ValueError, match="track bundle has an invalid structure"):
+        load_artifact(artifact_path)
+
+
 def test_corrupt_artifact_has_actionable_load_error(tmp_path: Path) -> None:
     artifact_path = tmp_path / "corrupt.joblib"
     artifact_path.write_bytes(b"not a joblib artifact")
