@@ -27,12 +27,14 @@ It is updated incrementally as phases land.
 - Phase 13 — Spotify import pipeline (`spotify-import-catalog`) — done.
 - Phase 14 — Strict quality gate (`--fail-on-quality-gate`) + scheduled
   `quality-gate` workflow with ablation report upload — done.
+- Phase 15 — Track bundle persistence in the versioned artifact (optional
+  field, legacy fallback, train + serve wiring) — done.
+- Phase 16 — Track holdout evaluation (`track_evaluate`, `evaluate-tracks`)
+  reusing the shared ranking metrics — done.
 
 ## Next steps
 
-1. Persist track artifacts (mappings, similarity) in versioned bundle.
-2. Add `evaluate --compare-all-tracks` or track holdout metrics.
-3. Release 0.5.0.
+1. Release 0.5.0.
 
 ## Quality gates (every change)
 
