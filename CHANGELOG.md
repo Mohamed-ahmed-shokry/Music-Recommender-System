@@ -124,6 +124,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that exits non-zero when the winning setting misses the bar, for CI gates.
 - Scheduled `quality-gate` workflow: weekly/on-demand gated A/B promotion plus
   knob ablation, uploading the reports via a pinned `actions/upload-artifact`.
+- Optional `track_bundle` on the versioned artifact: `train` persists track
+  interactions, the audio-feature matrix, similarity, and lookup; serving
+  prefers the bundle and falls back to CSVs for legacy bundles.
+- Track holdout evaluation (`music_recommender.track_evaluate`,
+  `evaluate-tracks` CLI) reporting precision, recall, MAP, NDCG, and catalog
+  coverage over repeated per-user splits.
 - Track-level recommendations (`music_recommender.tracks`) with audio-feature
   content similarity, sample `sample_track_interactions.csv` /
   `sample_track_metadata.csv`, and `prepare-track-data`,
