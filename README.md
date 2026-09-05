@@ -488,6 +488,12 @@ uv run python -m music_recommender.cli track-recommendations --user-id user_1 --
 uv run python -m music_recommender.cli similar-tracks --track-id track_1 --top-k 10
 ```
 
+Evaluate track similarity with repeated per-user holdouts:
+
+```bash
+uv run python -m music_recommender.cli evaluate-tracks --top-k 10 --folds 2
+```
+
 ## API Reference
 
 Train before starting the API:
@@ -997,6 +1003,7 @@ The bundle contains:
 | metadata | Created time, training device, dataset fingerprints, dimensions |
 | training config | ALS factors, regularization, iterations, alpha, GPU flag |
 | hybrid config | Default content weight and serving-time hybrid settings |
+| track bundle | Track interactions, audio-feature matrix, similarity, and lookup (optional; legacy bundles load without it and fall back to CSVs) |
 
 Inspect it with:
 
@@ -1061,7 +1068,7 @@ Or run the underlying commands directly:
 Run tests:
 
 ```bash
-uv run --extra dashboard --extra tracking pytest --cov
+uv run --extra dashboard --extra tracking --extra spotify pytest --cov
 ```
 
 Run linting:
@@ -1098,9 +1105,11 @@ uv run pre-commit run --all-files
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) for workflow and disclosure details.
 
 Every push to `main` and every pull request runs the same locked dashboard,
-tracking, and development install, formatting, lint, test, and package-build
-checks in GitHub Actions. CI also builds both Docker targets, starts each
-container, and verifies the API and Streamlit health endpoints.
+tracking, Spotify, and development install, formatting, lint, test, and
+package-build checks in GitHub Actions. CI also builds both Docker targets,
+starts each container, and verifies the API and Streamlit health endpoints. A
+weekly `quality-gate` workflow re-runs the gated A/B promotion and knob
+ablation, uploading the reports as workflow artifacts.
 
 Release tags repeat the quality gate without reusable dependency caches before
 publishing the API and dashboard images, then attach registry provenance.
@@ -1126,7 +1135,9 @@ Current coverage focus:
 - Streamlit dashboard rendering and interaction;
 - MLflow tracking lifecycle and CLI integration;
 - ranking controls;
-- evaluation metrics.
+- evaluation metrics;
+- track validation, audio-feature similarity, and holdout evaluation;
+- Spotify integration and catalog import.
 
 ## Model Card
 
@@ -1135,13 +1146,13 @@ Current coverage focus:
 | Intended use | Learning, portfolio demonstration, small-scale artist recommendation experiments |
 | Model type | Hybrid implicit-feedback ALS plus content-based metadata similarity |
 | Training signal | Positive play counts and artist metadata |
-| Prediction target | Artist-level recommendations |
+| Prediction target | Artist- and track-level recommendations |
 | Cold start | Unknown users receive popular artists or profile/session-based recommendations |
 | Serving | Local artifact bundle loaded by the CLI, API, or Streamlit dashboard |
 | Bias controls | Popularity baseline, popularity penalty, catalog coverage, diversity and novelty metrics |
 | Explainability | Score components, matched metadata, and human-readable reasons |
 | Reproducibility | Versioned artifacts, locked dependencies, deterministic splits, and optional MLflow run tracking |
-| Main limitation | Small synthetic sample dataset; no real streaming events or external catalog integration yet |
+| Main limitation | Small synthetic sample dataset; no real streaming events yet (Spotify catalog import available) |
 
 ## Roadmap
 
@@ -1156,8 +1167,8 @@ See [PLAN.md](PLAN.md) for the full phased plan.
 - Add a CI quality gate that auto-promotes the winning setting when the A/B run
   passes a minimum quality threshold. ✓
 - Render the aggregated ablation summary in the Streamlit dashboard. ✓
-- Next: track API endpoints, persisted track artifacts, Spotify import
-  pipeline, 0.5.0 release.
+- Next: 0.5.0 release (track API, bundled track artifacts, Spotify import
+  pipeline, and track evaluation are all served).
 
 ## License
 
