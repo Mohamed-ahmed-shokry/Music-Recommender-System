@@ -494,6 +494,9 @@ Evaluate track similarity with repeated per-user holdouts:
 uv run python -m music_recommender.cli evaluate-tracks --top-k 10 --folds 2
 ```
 
+Track evaluation reports precision, recall, MAP, NDCG, catalog coverage,
+average popularity, and novelty over the held-out tracks.
+
 ## API Reference
 
 Train before starting the API:
@@ -582,7 +585,7 @@ The dashboard provides seven workflows:
 - cold-start recommendations from favorite artists, genres, and moods;
 - session mixes that blend long-term taste with short-term intent;
 - ALS, metadata, and hybrid artist similarity;
-- track recommendations and audio-feature track similarity;
+- track recommendations, audio-feature track similarity, and track catalog search;
 - responsive catalog search over artist metadata and popularity statistics;
 - aggregated ablation-importance summary for ranking knob analysis.
 
@@ -632,12 +635,12 @@ docker build --target dashboard-runtime --tag music-recommender-dashboard .
 docker run --rm --publish 8501:8501 music-recommender-dashboard
 ```
 
-Version tags that match `pyproject.toml`, for example `v0.5.0`, run the complete
+Version tags that match `pyproject.toml`, for example `v0.6.0`, run the complete
 quality gate and publish both images to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-api:0.5.0
-docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-dashboard:0.5.0
+docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-api:0.6.0
+docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-dashboard:0.6.0
 ```
 
 Published images receive full, major/minor, major, and stable `latest` tags.
