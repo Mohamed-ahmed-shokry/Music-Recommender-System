@@ -555,11 +555,11 @@ def build_ablation_settings(
                 + ", ".join(sorted(_RANKING_PARAM_KEYS))
                 + "."
             )
-    active_knobs = [
+    active_knobs = sorted(
         key
         for key in _RANKING_PARAM_KEYS
         if key in champion and champion[key] != _RANKING_NEUTRAL_VALUES[key]
-    ]
+    )
     if not active_knobs:
         raise ValueError(
             "Champion ranking settings are already neutral; nothing to ablate."
