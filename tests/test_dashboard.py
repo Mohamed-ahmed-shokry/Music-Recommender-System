@@ -390,6 +390,37 @@ def test_dashboard_tracks_tab_finds_similar_tracks() -> None:
     assert any(caption.value == "Strategy: Track Similarity" for caption in app.caption)
 
 
+def test_dashboard_tracks_tab_search_filters_tracks() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(FakeDashboardService(),),
+        default_timeout=10,
+    ).run()
+
+    app.text_input[0].set_value("track_1").run()
+
+    assert not app.exception
+    assert any(
+        caption.value == "Showing 1 matching track(s)." for caption in app.caption
+    )
+
+
+def test_dashboard_tracks_tab_search_warns_without_matches() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(FakeDashboardService(),),
+        default_timeout=10,
+    ).run()
+
+    app.text_input[0].set_value("zzz-no-such-track").run()
+
+    assert not app.exception
+    assert any(
+        warning.value == "No tracks match the current search."
+        for warning in app.warning
+    )
+
+
 def test_recommendation_frame_supports_track_responses() -> None:
     frame = recommendation_frame(
         {

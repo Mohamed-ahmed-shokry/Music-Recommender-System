@@ -425,6 +425,19 @@ def _render_tracks_tab(
 ) -> None:
     st.write("Recommend tracks with audio-feature similarity.")
     track_choices = _track_choices(service)
+    search = st.text_input(
+        "Search tracks",
+        placeholder="Try a track, artist, or album name",
+        key="tracks_search",
+    )
+    if search and search.strip():
+        query = search.strip().casefold()
+        track_choices = {
+            label: track_id
+            for label, track_id in track_choices.items()
+            if query in label.casefold()
+        }
+    st.caption(f"Showing {len(track_choices)} matching track(s).")
     with st.form("track_recommendations"):
         user_id = st.selectbox("Listener", user_ids, key="tracks_listener")
         top_k = st.slider(
@@ -452,6 +465,10 @@ def _render_tracks_tab(
                 include_listened=include_listened,
             )
         )
+
+    if not track_choices:
+        st.warning("No tracks match the current search.")
+        return
 
     with st.form("similar_tracks"):
         selected_track = st.selectbox("Starting track", list(track_choices))
