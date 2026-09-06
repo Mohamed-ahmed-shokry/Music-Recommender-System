@@ -33,15 +33,23 @@ It is updated incrementally as phases land.
   reusing the shared ranking metrics — done.
 - Phase 17 — Coverage sweep to 96% (track validators, CSV fallback, track
   CLI paths, Spotify client) — done.
-- Release 0.5.0 — shipped (tag `v0.5.0`, containers publishing via release
-  workflow).
+- Release 0.5.0 — shipped code-wise (tag `v0.5.0`); the release workflow's
+  verify job is red for a pre-existing reason (see Phase 18), so GHCR
+  publication did NOT happen.
+- Phase 18 — CI triage: bisected the Linux red to pre-existing
+  `FORCE_COLOR`-sensitive CLI output assertions (red since Aug 31, before
+  this work); fixed via hermetic `_TYPER_FORCE_DISABLE_TERMINAL` test env,
+  fixed nondeterministic ablation arm order, and added pinned JUnit failure
+  annotations for future diagnosis.
+- Phase 19 — Track popularity statistics + novelty/average-popularity in
+  `evaluate-tracks` — done.
+- Phase 20 — Dashboard track catalog search — done.
 
 ## Next steps
 
-1. Monitor the `v0.5.0` release workflow and GHCR publication.
-2. Backfill track popularity/novelty metrics in `evaluate-tracks`.
-3. Dashboard track catalog search.
-4. Plan 0.6.0 scope.
+1. Confirm CI green on main, then re-release as 0.6.0 (0.5.0 tag stays
+  unpublished since its release run never passed verify).
+2. Plan 0.6.0 scope: track work above + CI hardening.
 
 ## Quality gates (every change)
 

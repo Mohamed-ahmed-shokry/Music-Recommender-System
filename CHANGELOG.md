@@ -7,6 +7,21 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Average popularity and novelty in track holdout evaluation, backed by
+  bundled track popularity statistics (`build_track_stats`).
+- Track catalog search in the dashboard Tracks tab.
+- JUnit failure annotations in CI (`mikepenz/action-junit-report`, pinned) so
+  failing tests are visible per-test without log access.
+
+### Fixed
+
+- Pinned plain CLI rendering in tests (`_TYPER_FORCE_DISABLE_TERMINAL`), fixing
+  Linux CI failures where Typer's forced terminal output dropped usage-error
+  messages under `FORCE_COLOR`/`GITHUB_ACTIONS`.
+- Sorted ablation arms for deterministic knob ordering across runs.
+
 ## [0.5.0] - 2026-09-05
 
 ### Added
