@@ -26,6 +26,8 @@ TRACK_TEXT_COLUMNS = (
     "artist_name",
 )
 
+TrackStats = dict[str, str | int | float]
+
 
 def load_track_interactions(path: str | Path) -> pd.DataFrame:
     """Load track-level interaction data from a CSV file."""
@@ -200,6 +202,43 @@ def load_and_validate_track_metadata(
     return df
 
 
+def build_track_stats(df: pd.DataFrame) -> dict[str, TrackStats]:
+    """Compute popularity stats for each track, mirroring artist stats."""
+    names = (
+        df[["track_id", "track_name", "artist_id", "artist_name"]]
+        .drop_duplicates(subset="track_id")
+        .set_index("track_id")
+    )
+    stats_df = (
+        df.groupby("track_id")
+        .agg(
+            total_plays=("play_count", "sum"),
+            listener_count=("user_id", "nunique"),
+            interaction_count=("user_id", "count"),
+        )
+        .reset_index()
+    )
+    stats_df = stats_df.sort_values(
+        by=["total_plays", "listener_count", "interaction_count", "track_id"],
+        ascending=[False, False, False, True],
+    ).reset_index(drop=True)
+    stats_df["popularity_rank"] = stats_df.index + 1
+
+    return {
+        str(row.track_id): {
+            "track_id": str(row.track_id),
+            "track_name": str(names.loc[row.track_id, "track_name"]),
+            "artist_id": str(names.loc[row.track_id, "artist_id"]),
+            "artist_name": str(names.loc[row.track_id, "artist_name"]),
+            "total_plays": int(row.total_plays),
+            "listener_count": int(row.listener_count),
+            "interaction_count": int(row.interaction_count),
+            "popularity_rank": int(row.popularity_rank),
+        }
+        for row in stats_df.itertuples(index=False)
+    }
+
+
 def build_track_content_matrix(
     metadata_df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, list[str]]:
@@ -343,6 +382,7 @@ class TrackServingResources:
     track_id_to_index: dict[str, int]
     similarity_matrix: np.ndarray
     user_track_matrix: pd.DataFrame
+    track_stats: dict[str, TrackStats]
     track_lookup: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
@@ -380,6 +420,7 @@ def build_track_serving_resources(
         track_id_to_index=track_id_to_index,
         similarity_matrix=similarity_matrix,
         user_track_matrix=user_track_matrix,
+        track_stats=build_track_stats(interactions_df),
         track_lookup=lookup,
     )
 

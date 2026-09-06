@@ -6,9 +6,11 @@ import numpy as np
 import pandas as pd
 
 from music_recommender.evaluate import (
+    average_popularity,
     catalog_coverage,
     map_at_k,
     ndcg_at_k,
+    novelty_at_k,
     precision_at_k,
     recall_at_k,
 )
@@ -110,6 +112,10 @@ def evaluate_track_holdout(
                 "map_at_k": map_at_k(recommended_lists, relevant_lists, top_k),
                 "ndcg_at_k": float(np.mean(ndcgs)),
                 "catalog_coverage": catalog_coverage(recommended_lists, catalog),
+                "average_popularity": average_popularity(
+                    recommended_lists, resources.track_stats
+                ),
+                "novelty_at_k": novelty_at_k(recommended_lists, resources.track_stats),
             }
         )
     return {

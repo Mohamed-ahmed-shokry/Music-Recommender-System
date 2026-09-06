@@ -1654,6 +1654,8 @@ def test_evaluate_tracks_prints_holdout_metrics() -> None:
     assert "Precision@5:" in result.output
     assert "NDCG@5:" in result.output
     assert "Catalog coverage:" in result.output
+    assert "Average popularity:" in result.output
+    assert "Novelty@5:" in result.output
 
 
 def test_prepare_track_data_reports_counts() -> None:

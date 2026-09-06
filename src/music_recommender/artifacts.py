@@ -721,6 +721,25 @@ def _validate_track_bundle(bundle: Any) -> None:
         raise ValueError(
             "Artifact track bundle metadata lookup is inconsistent. Retrain the model."
         )
+    track_stats = getattr(bundle, "track_stats", None)
+    if track_stats is None:
+        raise ValueError(
+            "Artifact track bundle is missing popularity statistics. Retrain the model."
+        )
+    if (
+        not isinstance(track_stats, dict)
+        or not track_stats
+        or not set(track_stats) <= set(track_ids)
+        or any(
+            not isinstance(entry, dict)
+            or type(entry.get("popularity_rank")) is not int
+            or not isinstance(entry.get("total_plays"), (int, float))
+            for entry in track_stats.values()
+        )
+    ):
+        raise ValueError(
+            "Artifact track bundle statistics are inconsistent. Retrain the model."
+        )
 
 
 def _validate_artifact_configuration(

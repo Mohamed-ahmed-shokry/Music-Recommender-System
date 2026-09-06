@@ -7,6 +7,7 @@ import pytest
 from music_recommender.tracks import (
     build_track_content_matrix,
     build_track_serving_resources,
+    build_track_stats,
     get_similar_tracks,
     load_and_validate_track_interactions,
     load_and_validate_track_metadata,
@@ -175,6 +176,16 @@ def test_build_track_serving_resources() -> None:
     assert resources.similarity_matrix.shape == (2, 2)
     assert resources.track_lookup["track_1"]["artist_name"] == "Artist A"
     assert list(resources.user_track_matrix.index) == ["user_1", "user_2"]
+    assert set(resources.track_stats) <= {"track_1", "track_2"}
+
+
+def test_build_track_stats_ranks_by_plays() -> None:
+    stats = build_track_stats(valid_track_df())
+
+    assert stats["track_1"]["popularity_rank"] == 1
+    assert stats["track_1"]["total_plays"] == 12
+    assert stats["track_2"]["popularity_rank"] == 2
+    assert stats["track_2"]["artist_name"] == "Artist A"
 
 
 def test_load_track_serving_resources_roundtrip(tmp_path: Path) -> None:

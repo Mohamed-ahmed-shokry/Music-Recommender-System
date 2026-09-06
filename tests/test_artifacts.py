@@ -279,6 +279,12 @@ def _track_bundle_artifact(tmp_path: Path):
             "interaction matrix is inconsistent",
         ),
         ("track_lookup", {}, "metadata lookup is inconsistent"),
+        ("track_stats", {}, "statistics are inconsistent"),
+        (
+            "track_stats",
+            {"track_1": {"track_id": "track_1"}},
+            "statistics are inconsistent",
+        ),
     ],
 )
 def test_artifact_rejects_inconsistent_track_bundle_fields(

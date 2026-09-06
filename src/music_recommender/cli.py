@@ -1406,6 +1406,8 @@ def evaluate_tracks(
     typer.echo(f"  MAP@{top_k}: {metrics['map_at_k']:.4f}")
     typer.echo(f"  NDCG@{top_k}: {metrics['ndcg_at_k']:.4f}")
     typer.echo(f"  Catalog coverage: {metrics['catalog_coverage']:.4f}")
+    typer.echo(f"  Average popularity: {metrics['average_popularity']:.4f}")
+    typer.echo(f"  Novelty@{top_k}: {metrics['novelty_at_k']:.4f}")
 
 
 if __name__ == "__main__":
