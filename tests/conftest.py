@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+import os
+
+# Typer forces Rich terminal rendering when GITHUB_ACTIONS, FORCE_COLOR, or
+# PY_COLORS is set (as on CI runners), which changes CLI error output and
+# breaks output assertions. Disable it before any app module is imported so
+# CLI snapshots render identically on every platform.
+os.environ["_TYPER_FORCE_DISABLE_TERMINAL"] = "1"
+
 import pandas as pd
 import pytest
 
