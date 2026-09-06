@@ -18,6 +18,9 @@ jobs:
     name: Test, lint, and build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      checks: write
 
     steps:
       - name: Check out repository
@@ -44,7 +47,14 @@ jobs:
         run: uv run mypy
 
       - name: Test
-        run: uv run --extra dashboard --extra tracking --extra spotify pytest --cov
+        run: uv run --extra dashboard --extra tracking --extra spotify pytest --cov --junitxml=test-results/junit.xml
+
+      - name: Report test results
+        if: failure()
+        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
+        with:
+          report_paths: test-results/junit.xml
+          check_name: Test results
 
       - name: Build distributions
         run: uv build
