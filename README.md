@@ -523,6 +523,7 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/recommend/user/{user_id}/ltr?top_k=10&diversity=0.2&popularity_penalty=0.1` | LTR re-ranked personalized recommendations |
 | `GET` | `/tracks/recommend/{user_id}?top_k=10` | Track recommendations with audio-feature similarity |
 | `GET` | `/tracks/similar/{track_id}?top_k=10` | Tracks similar to a selected track by audio features |
+| `GET` | `/tracks/catalog?query=hit&artist=Drake&limit=25` | Search and page through the track catalog |
 | `POST` | `/recommend/profile` | Onboarding recommendations from artists, genres, and moods |
 | `POST` | `/recommend/session` | Short-term session recommendations from seeds, exclusions, and optional user taste |
 | `GET` | `/similar-artists/{artist_id}?method=hybrid&top_k=10` | ALS, content, or hybrid similar artists |
@@ -541,6 +542,7 @@ curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10&diversity=0.2&popular
 curl "http://127.0.0.1:8000/recommend/user/user_1/ltr?top_k=10&diversity=0.2&popularity_penalty=0.1"
 curl "http://127.0.0.1:8000/tracks/recommend/user_1?top_k=10"
 curl "http://127.0.0.1:8000/tracks/similar/track_1?top_k=10"
+curl "http://127.0.0.1:8000/tracks/catalog?query=hit&artist=Drake&limit=25"
 curl "http://127.0.0.1:8000/similar-artists/artist_2?method=hybrid&top_k=10&explain=true"
 curl "http://127.0.0.1:8000/content-similar-artists/artist_2?top_k=10&explain=true"
 curl -X POST http://127.0.0.1:8000/recommend/profile \
