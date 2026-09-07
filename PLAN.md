@@ -44,17 +44,20 @@ It is updated incrementally as phases land.
 - Phase 19 — Track popularity statistics + novelty/average-popularity in
   `evaluate-tracks` — done.
 - Phase 20 — Dashboard track catalog search — done.
-- Release 0.6.0 — shipped (tag `v0.6.0`; CI green on main for the first
-  time since Aug 30, release workflow running).
+- Release 0.6.0 — shipped and published (tag `v0.6.0`; release run #2
+  succeeded, both GHCR images live). CI green on main for the first time
+  since Aug 30.
 
 Note: the `v0.5.0` tag never published images (its release run failed
 verify on the pre-existing CI red). Treat 0.6.0 as the published release.
 
+- Phase 21 — Dependabot #5 triaged by bumping the upload-artifact pin to
+  verified v7.0.1 in-repo (supersedes the PR).
+- Phase 22 — Track catalog parity (`browse_tracks` + `GET /tracks/catalog`).
+
 ## Next steps
 
-1. Confirm the `v0.6.0` release workflow publishes both GHCR images.
-2. Triage dependabot PR #5 (upload-artifact 4.6.2 → 7.0.1) once CI is green.
-3. Plan 0.7.0 scope.
+1. Release 0.7.0.
 
 ## Quality gates (every change)
 
