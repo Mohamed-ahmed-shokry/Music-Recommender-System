@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-07
+
 ### Added
 
 - Track catalog browsing: `RecommenderService.browse_tracks` with free-text
@@ -255,7 +257,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Pinned release actions to immutable commits and disabled reusable caches and
   persisted checkout credentials in artifact-publishing jobs.
 
-[Unreleased]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.7.0
 [0.6.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.6.0
 [0.5.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.4.0
