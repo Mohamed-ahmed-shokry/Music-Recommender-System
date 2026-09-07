@@ -7,6 +7,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Track catalog browsing: `RecommenderService.browse_tracks` with free-text
+  search, artist filter, and pagination, served via `GET /tracks/catalog`.
+- Bumped the `actions/upload-artifact` pin to v7.0.1 (verified SHA),
+  superseding dependabot PR #5.
+
 ## [0.6.0] - 2026-09-06
 
 ### Added
