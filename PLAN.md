@@ -55,9 +55,12 @@ verify on the pre-existing CI red). Treat 0.6.0 as the published release.
   verified v7.0.1 in-repo (supersedes the PR).
 - Phase 22 — Track catalog parity (`browse_tracks` + `GET /tracks/catalog`).
 
+- Release 0.7.0 — shipped (tag `v0.7.0`, release workflow running).
+
 ## Next steps
 
-1. Release 0.7.0.
+1. Confirm the `v0.7.0` release workflow publishes both GHCR images.
+2. Plan 0.8.0 scope.
 
 ## Quality gates (every change)
 
