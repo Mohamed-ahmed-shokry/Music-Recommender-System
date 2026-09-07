@@ -566,6 +566,34 @@ def test_track_resources_falls_back_to_csv_when_unbundled(
     assert "track_1" in resources.track_id_to_index
 
 
+def test_browse_tracks_searches_filters_and_paginates(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    result = service.browse_tracks(query="song", limit=2)
+
+    assert result["total"] > 2
+    assert len(result["tracks"]) == 2
+    assert result["has_more"] is True
+    assert result["tracks"][0]["popularity_rank"] == 1
+
+    filtered = service.browse_tracks(artist="Drake")
+    assert filtered["total"] >= 1
+    assert all(track["artist_name"] == "Drake" for track in filtered["tracks"])
+
+    page = service.browse_tracks(offset=1000, limit=10)
+    assert page["tracks"] == []
+    assert page["has_more"] is False
+
+
+def test_browse_tracks_rejects_invalid_pagination(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    with pytest.raises(ValueError, match="offset must be a non-negative integer"):
+        service.browse_tracks(offset=-1)
+    with pytest.raises(ValueError, match="limit must be a positive integer"):
+        service.browse_tracks(limit=0)
+
+
 def test_track_resources_reports_missing_csv_data(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -369,3 +369,22 @@ def similar_tracks(
         )
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.get("/tracks/catalog")
+def browse_tracks(
+    query: OptionalCatalogText = None,
+    artist: OptionalCatalogText = None,
+    offset: CatalogOffset = 0,
+    limit: CatalogLimit = 25,
+) -> dict[str, object]:
+    """Search and page through tracks available to the recommender."""
+    try:
+        return get_service().browse_tracks(
+            query=query,
+            artist=artist,
+            offset=offset,
+            limit=limit,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error

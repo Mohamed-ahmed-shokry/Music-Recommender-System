@@ -232,6 +232,56 @@ class FakeService:
             ][:top_k],
         }
 
+    def browse_tracks(
+        self,
+        *,
+        query: str | None,
+        artist: str | None,
+        offset: int,
+        limit: int,
+    ) -> dict[str, object]:
+        if offset < 0:
+            raise ValueError("offset must be a non-negative integer.")
+        if limit < 1:
+            raise ValueError("limit must be a positive integer.")
+        tracks = [
+            {
+                "track_id": "track_1",
+                "track_name": "Hit",
+                "artist_id": "artist_1",
+                "artist_name": "Test Artist",
+                "popularity_rank": 1,
+            },
+            {
+                "track_id": "track_2",
+                "track_name": "Hit 2",
+                "artist_id": "artist_1",
+                "artist_name": "Test Artist",
+                "popularity_rank": 2,
+            },
+        ]
+        if query:
+            tracks = [
+                track
+                for track in tracks
+                if query.casefold() in track["track_name"].casefold()
+            ]
+        if artist:
+            tracks = [
+                t
+                for t in tracks
+                if artist.casefold()
+                in {t["artist_id"].casefold(), t["artist_name"].casefold()}
+            ]
+        page = tracks[offset : offset + limit]
+        return {
+            "total": len(tracks),
+            "offset": offset,
+            "limit": limit,
+            "has_more": offset + len(page) < len(tracks),
+            "tracks": page,
+        }
+
 
 def test_health_route_uses_loaded_service() -> None:
     with TestClient(api_main.app) as client:
@@ -613,6 +663,8 @@ def test_invalid_artifact_keeps_api_alive_but_not_ready(
         ("get", "/popular-artists?top_k=101", {}),
         ("get", "/catalog/artists?offset=-1", {}),
         ("get", "/catalog/artists?limit=101", {}),
+        ("get", "/tracks/catalog?offset=-1", {}),
+        ("get", "/tracks/catalog?limit=101", {}),
         ("get", "/recommend/user/user_1?diversity=1.1", {}),
         ("get", "/similar-artists/artist_1?method=unknown", {}),
         (
@@ -832,12 +884,41 @@ def test_similar_tracks_route_returns_404_for_unknown_track() -> None:
     assert "Unknown track_id" in response.json()["detail"]
 
 
+def test_track_catalog_route_accepts_search_filters_and_pagination() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get(
+            "/tracks/catalog",
+            params={"query": "hit 2", "artist": "Test Artist", "limit": 10},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["tracks"][0]["track_id"] == "track_2"
+    assert body["has_more"] is False
+
+
+def test_track_catalog_route_rejects_invalid_pagination() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/tracks/catalog", params={"offset": -1})
+
+    assert response.status_code == 422
+
+
 @pytest.mark.parametrize(
     ("method", "path", "request_kwargs"),
     [
         ("get", "/popular-artists", {}),
         ("get", "/catalog/artists", {}),
         ("get", "/recommend/user/user_1", {}),
+        ("get", "/tracks/recommend/user_1", {}),
+        ("get", "/tracks/catalog", {}),
         ("post", "/recommend/profile", {"json": {}}),
         ("post", "/recommend/session", {"json": {}}),
     ],

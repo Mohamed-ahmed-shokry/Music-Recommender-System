@@ -582,6 +582,58 @@ class RecommenderService:
         enriched.update(resources.track_lookup.get(track_id, {"track_id": track_id}))
         return enriched
 
+    def browse_tracks(
+        self,
+        *,
+        query: str | None = None,
+        artist: str | None = None,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        """Search and page through the track catalog."""
+        if isinstance(offset, bool) or offset < 0:
+            raise ValueError("offset must be a non-negative integer.")
+        if isinstance(limit, bool) or limit < 1:
+            raise ValueError("limit must be a positive integer.")
+
+        resources = self._track_resources()
+        normalized_query = _normalize_catalog_filter(query)
+        normalized_artist = _normalize_catalog_filter(artist)
+        tracks: list[dict[str, Any]] = []
+        for track_id in resources.track_ids:
+            entry = {
+                **resources.track_stats.get(track_id, {}),
+                **resources.track_lookup.get(track_id, {"track_id": track_id}),
+            }
+            if normalized_artist and normalized_artist not in {
+                str(entry.get("artist_id", "")).casefold(),
+                str(entry.get("artist_name", "")).casefold(),
+            }:
+                continue
+            if normalized_query and not any(
+                normalized_query in str(entry.get(field, "")).casefold()
+                for field in ("track_id", "track_name", "artist_id", "artist_name")
+            ):
+                continue
+            tracks.append(entry)
+
+        tracks.sort(
+            key=lambda track: (
+                int(track.get("popularity_rank", len(tracks) + 1)),
+                str(track.get("track_name", "")).casefold(),
+                str(track["track_id"]),
+            )
+        )
+        total = len(tracks)
+        page = tracks[offset : offset + limit]
+        return {
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "has_more": offset + len(page) < total,
+            "tracks": page,
+        }
+
     def _content_weight(self, content_weight: float | None) -> float:
         if content_weight is None:
             content_weight = float(
