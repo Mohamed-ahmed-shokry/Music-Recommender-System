@@ -102,6 +102,28 @@ def test_evaluate_track_holdout_rejects_invalid_parameters() -> None:
         evaluate_track_holdout(track_df(), track_meta_df(), folds=0)
     with pytest.raises(ValueError, match="include_listened must be a boolean"):
         evaluate_track_holdout(track_df(), track_meta_df(), include_listened="yes")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="compare_baseline must be a boolean"):
+        evaluate_track_holdout(track_df(), track_meta_df(), compare_baseline="yes")  # type: ignore[arg-type]
+
+
+def test_evaluate_track_holdout_compares_baseline() -> None:
+    metrics = evaluate_track_holdout(
+        track_df(), track_meta_df(), top_k=2, folds=1, compare_baseline=True
+    )
+
+    assert isinstance(metrics, dict)
+    assert set(metrics) == {"similarity", "popularity"}
+    for arm in metrics.values():
+        assert isinstance(arm, dict)
+        assert set(arm) == {
+            "precision_at_k",
+            "recall_at_k",
+            "map_at_k",
+            "ndcg_at_k",
+            "catalog_coverage",
+            "average_popularity",
+            "novelty_at_k",
+        }
 
 
 def test_evaluate_track_holdout_requires_held_out_tracks() -> None:

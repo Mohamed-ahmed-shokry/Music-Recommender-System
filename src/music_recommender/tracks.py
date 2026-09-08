@@ -339,6 +339,42 @@ def recommend_tracks_for_user(
     return recommendations
 
 
+def recommend_popular_tracks(
+    user_id: str,
+    user_track_matrix: pd.DataFrame,
+    track_stats: dict[str, TrackStats],
+    top_k: int = 10,
+    include_listened: bool = False,
+) -> list[dict[str, Any]]:
+    """Recommend globally popular tracks, optionally excluding listened ones."""
+    if user_id not in user_track_matrix.index:
+        return []
+
+    listened_tracks = set(
+        user_track_matrix.columns[user_track_matrix.loc[user_id] > 0].tolist()
+    )
+    ranked = sorted(
+        track_stats,
+        key=lambda track_id: (
+            -float(track_stats[track_id].get("total_plays", 0)),
+            track_id,
+        ),
+    )
+    recommendations = []
+    for track_id in ranked:
+        if not include_listened and track_id in listened_tracks:
+            continue
+        if len(recommendations) >= top_k:
+            break
+        recommendations.append(
+            {
+                "track_id": track_id,
+                "score": float(track_stats[track_id].get("total_plays", 0)),
+            }
+        )
+    return recommendations
+
+
 def get_similar_tracks(
     track_id: str,
     track_similarity_matrix: np.ndarray,

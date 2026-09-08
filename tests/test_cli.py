@@ -1658,6 +1658,17 @@ def test_evaluate_tracks_prints_holdout_metrics() -> None:
     assert "Novelty@5:" in result.output
 
 
+def test_evaluate_tracks_compare_baseline_prints_both_arms() -> None:
+    result = runner.invoke(
+        cli.app,
+        ["evaluate-tracks", "--top-k", "5", "--folds", "1", "--compare-baseline"],
+    )
+
+    assert result.exit_code == 0
+    assert "Similarity:" in result.output
+    assert "Popularity:" in result.output
+
+
 def test_prepare_track_data_reports_counts() -> None:
     result = runner.invoke(cli.app, ["prepare-track-data"])
 

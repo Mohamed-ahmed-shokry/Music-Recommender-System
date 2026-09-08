@@ -1384,6 +1384,11 @@ def evaluate_tracks(
         "--include-listened/--exclude-listened",
         help="Include or exclude listened tracks when evaluating.",
     ),
+    compare_baseline: bool = typer.Option(
+        False,
+        "--compare-baseline/--no-compare-baseline",
+        help="Compare track similarity against a global-popularity baseline.",
+    ),
 ) -> None:
     """Evaluate track similarity with repeated per-user holdout splits."""
     try:
@@ -1395,12 +1400,29 @@ def evaluate_tracks(
             top_k=top_k,
             folds=folds,
             include_listened=include_listened,
+            compare_baseline=compare_baseline,
         )
     except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
     typer.echo(f"Track evaluation over {folds} fold(s):")
+    if compare_baseline:
+        metrics = cast(dict[str, dict[str, float]], metrics)
+        _print_track_metric_row("Similarity", metrics["similarity"], top_k)
+        _print_track_metric_row("Popularity", metrics["popularity"], top_k)
+    else:
+        _print_track_metric_row(
+            "Similarity", cast(dict[str, float], metrics), top_k, header=False
+        )
+
+
+def _print_track_metric_row(
+    name: str, metrics: dict[str, float], top_k: int, header: bool = True
+) -> None:
+    """Print one labeled row of track evaluation metrics."""
+    if header:
+        typer.echo(f"{name}:")
     typer.echo(f"  Precision@{top_k}: {metrics['precision_at_k']:.4f}")
     typer.echo(f"  Recall@{top_k}: {metrics['recall_at_k']:.4f}")
     typer.echo(f"  MAP@{top_k}: {metrics['map_at_k']:.4f}")

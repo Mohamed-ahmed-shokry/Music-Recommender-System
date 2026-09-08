@@ -13,6 +13,7 @@ from music_recommender.tracks import (
     load_and_validate_track_metadata,
     load_track_serving_resources,
     normalize_track_interactions,
+    recommend_popular_tracks,
     recommend_tracks_for_user,
     validate_track_interactions,
     validate_track_metadata,
@@ -186,6 +187,57 @@ def test_build_track_stats_ranks_by_plays() -> None:
     assert stats["track_1"]["total_plays"] == 12
     assert stats["track_2"]["popularity_rank"] == 2
     assert stats["track_2"]["artist_name"] == "Artist A"
+
+
+def test_recommend_popular_tracks_ranks_by_plays() -> None:
+    resources = build_track_serving_resources(valid_track_df(), valid_metadata_df())
+
+    recs = recommend_popular_tracks(
+        user_id="user_2",
+        user_track_matrix=resources.user_track_matrix,
+        track_stats=resources.track_stats,
+        top_k=2,
+    )
+
+    assert [rec["track_id"] for rec in recs] == ["track_2"]
+    included = recommend_popular_tracks(
+        user_id="user_2",
+        user_track_matrix=resources.user_track_matrix,
+        track_stats=resources.track_stats,
+        top_k=2,
+        include_listened=True,
+    )
+    assert [rec["track_id"] for rec in included] == ["track_1", "track_2"]
+    assert included[0]["score"] == 12.0
+
+
+def test_recommend_popular_tracks_excludes_listened() -> None:
+    resources = build_track_serving_resources(valid_track_df(), valid_metadata_df())
+
+    recs = recommend_popular_tracks(
+        user_id="user_1",
+        user_track_matrix=resources.user_track_matrix,
+        track_stats=resources.track_stats,
+        top_k=5,
+    )
+
+    assert recs == []
+    included = recommend_popular_tracks(
+        user_id="user_1",
+        user_track_matrix=resources.user_track_matrix,
+        track_stats=resources.track_stats,
+        top_k=5,
+        include_listened=True,
+    )
+    assert [rec["track_id"] for rec in included] == ["track_1", "track_2"]
+    assert (
+        recommend_popular_tracks(
+            user_id="ghost",
+            user_track_matrix=resources.user_track_matrix,
+            track_stats=resources.track_stats,
+        )
+        == []
+    )
 
 
 def test_load_track_serving_resources_roundtrip(tmp_path: Path) -> None:

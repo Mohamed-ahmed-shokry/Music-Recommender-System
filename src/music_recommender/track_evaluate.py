@@ -16,8 +16,10 @@ from music_recommender.evaluate import (
 )
 from music_recommender.ranking import validate_ranking_parameters
 from music_recommender.tracks import (
+    TrackServingResources,
     build_track_serving_resources,
     normalize_track_interactions,
+    recommend_popular_tracks,
     recommend_tracks_for_user,
 )
 
@@ -60,21 +62,62 @@ def train_test_split_tracks_by_user(
     return train_df, test_df
 
 
+def _summarize_track_lists(
+    recommended_lists: list[list[str]],
+    relevant_lists: list[list[str]],
+    top_k: int,
+    catalog: set[str],
+    resources: TrackServingResources,
+) -> dict[str, float]:
+    """Average ranking metrics over per-user recommendation lists."""
+    precisions = [
+        precision_at_k(recommended, relevant, top_k)
+        for recommended, relevant in zip(recommended_lists, relevant_lists, strict=True)
+    ]
+    recalls = [
+        recall_at_k(recommended, relevant, top_k)
+        for recommended, relevant in zip(recommended_lists, relevant_lists, strict=True)
+    ]
+    ndcgs = [
+        ndcg_at_k(recommended, relevant, top_k)
+        for recommended, relevant in zip(recommended_lists, relevant_lists, strict=True)
+    ]
+    return {
+        "precision_at_k": float(np.mean(precisions)),
+        "recall_at_k": float(np.mean(recalls)),
+        "map_at_k": map_at_k(recommended_lists, relevant_lists, top_k),
+        "ndcg_at_k": float(np.mean(ndcgs)),
+        "catalog_coverage": catalog_coverage(recommended_lists, catalog),
+        "average_popularity": average_popularity(
+            recommended_lists, resources.track_stats
+        ),
+        "novelty_at_k": novelty_at_k(recommended_lists, resources.track_stats),
+    }
+
+
 def evaluate_track_holdout(
     df: pd.DataFrame,
     metadata_df: pd.DataFrame,
     top_k: int = 10,
     folds: int = 1,
     include_listened: bool = False,
-) -> dict[str, float]:
-    """Evaluate track similarity with repeated per-user holdout splits."""
+    compare_baseline: bool = False,
+) -> dict[str, float] | dict[str, dict[str, float]]:
+    """Evaluate track similarity with repeated per-user holdout splits.
+
+    When ``compare_baseline`` is set, a global-popularity arm is evaluated on
+    the same holdouts, making the popularity-bias tradeoff explicit.
+    """
     validate_ranking_parameters(top_k)
     if type(folds) is not int or folds < 1:
         raise ValueError("folds must be a positive integer.")
     if type(include_listened) is not bool:
         raise ValueError("include_listened must be a boolean.")
+    if type(compare_baseline) is not bool:
+        raise ValueError("compare_baseline must be a boolean.")
 
-    fold_metrics: list[dict[str, float]] = []
+    similarity_folds: list[dict[str, float]] = []
+    popularity_folds: list[dict[str, float]] = []
     for fold in range(folds):
         train_df, test_df = train_test_split_tracks_by_user(df, random_state=42 + fold)
         if test_df.empty:
@@ -84,41 +127,59 @@ def evaluate_track_holdout(
             )
         resources = build_track_serving_resources(train_df, metadata_df)
         catalog = set(resources.track_ids)
-        recommended_lists: list[list[str]] = []
+        similarity_lists: list[list[str]] = []
+        popularity_lists: list[list[str]] = []
         relevant_lists: list[list[str]] = []
-        precisions: list[float] = []
-        recalls: list[float] = []
-        ndcgs: list[float] = []
         for user_id, user_test in test_df.groupby("user_id"):
             relevant = sorted({str(track_id) for track_id in user_test["track_id"]})
-            recommendations = recommend_tracks_for_user(
-                user_id=str(user_id),
-                user_track_matrix=resources.user_track_matrix,
-                track_similarity_matrix=resources.similarity_matrix,
-                track_id_to_index=resources.track_id_to_index,
-                top_k=top_k,
-                include_listened=include_listened,
+            similarity_lists.append(
+                [
+                    rec["track_id"]
+                    for rec in recommend_tracks_for_user(
+                        user_id=str(user_id),
+                        user_track_matrix=resources.user_track_matrix,
+                        track_similarity_matrix=resources.similarity_matrix,
+                        track_id_to_index=resources.track_id_to_index,
+                        top_k=top_k,
+                        include_listened=include_listened,
+                    )
+                ]
             )
-            recommended = [rec["track_id"] for rec in recommendations]
-            recommended_lists.append(recommended)
             relevant_lists.append(relevant)
-            precisions.append(precision_at_k(recommended, relevant, top_k))
-            recalls.append(recall_at_k(recommended, relevant, top_k))
-            ndcgs.append(ndcg_at_k(recommended, relevant, top_k))
-        fold_metrics.append(
-            {
-                "precision_at_k": float(np.mean(precisions)),
-                "recall_at_k": float(np.mean(recalls)),
-                "map_at_k": map_at_k(recommended_lists, relevant_lists, top_k),
-                "ndcg_at_k": float(np.mean(ndcgs)),
-                "catalog_coverage": catalog_coverage(recommended_lists, catalog),
-                "average_popularity": average_popularity(
-                    recommended_lists, resources.track_stats
-                ),
-                "novelty_at_k": novelty_at_k(recommended_lists, resources.track_stats),
-            }
+            if compare_baseline:
+                popularity_lists.append(
+                    [
+                        rec["track_id"]
+                        for rec in recommend_popular_tracks(
+                            user_id=str(user_id),
+                            user_track_matrix=resources.user_track_matrix,
+                            track_stats=resources.track_stats,
+                            top_k=top_k,
+                            include_listened=include_listened,
+                        )
+                    ]
+                )
+        similarity_folds.append(
+            _summarize_track_lists(
+                similarity_lists, relevant_lists, top_k, catalog, resources
+            )
         )
+        if compare_baseline:
+            popularity_folds.append(
+                _summarize_track_lists(
+                    popularity_lists, relevant_lists, top_k, catalog, resources
+                )
+            )
+    similarity_metrics = {
+        metric: float(np.mean([fold[metric] for fold in similarity_folds]))
+        for metric in similarity_folds[0]
+    }
+    if not compare_baseline:
+        return similarity_metrics
     return {
-        metric: float(np.mean([fold[metric] for fold in fold_metrics]))
-        for metric in fold_metrics[0]
+        "similarity": similarity_metrics,
+        "popularity": {
+            metric: float(np.mean([fold[metric] for fold in popularity_folds]))
+            for metric in popularity_folds[0]
+        },
     }
