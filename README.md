@@ -587,7 +587,7 @@ The dashboard provides seven workflows:
 - cold-start recommendations from favorite artists, genres, and moods;
 - session mixes that blend long-term taste with short-term intent;
 - ALS, metadata, and hybrid artist similarity;
-- track recommendations, audio-feature track similarity, and track catalog search;
+- track recommendations, audio-feature track similarity, and searchable track catalog table;
 - responsive catalog search over artist metadata and popularity statistics;
 - aggregated ablation-importance summary for ranking knob analysis.
 
