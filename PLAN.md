@@ -55,12 +55,15 @@ verify on the pre-existing CI red). Treat 0.6.0 as the published release.
   verified v7.0.1 in-repo (supersedes the PR).
 - Phase 22 — Track catalog parity (`browse_tracks` + `GET /tracks/catalog`).
 
-- Release 0.7.0 — shipped (tag `v0.7.0`, release workflow running).
+- Release 0.7.0 — shipped (tag `v0.7.0`).
+- Phase 23 — Dependabot triage by bumping remaining action pins
+  (`setup-uv` v10.0.1, `login-action` v4.6.0, `attest` v4.2.2; verified
+  SHAs), closing PRs #1, #3, and #4 (PR #5 already superseded).
+- Phase 24 — Dashboard track catalog table on the shared service contract.
 
 ## Next steps
 
-1. Confirm the `v0.7.0` release workflow publishes both GHCR images.
-2. Plan 0.8.0 scope.
+1. Release 0.8.0.
 
 ## Quality gates (every change)
 
