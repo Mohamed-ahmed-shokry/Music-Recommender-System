@@ -60,10 +60,12 @@ verify on the pre-existing CI red). Treat 0.6.0 as the published release.
   (`setup-uv` v10.0.1, `login-action` v4.6.0, `attest` v4.2.2; verified
   SHAs), closing PRs #1, #3, and #4 (PR #5 already superseded).
 - Phase 24 — Dashboard track catalog table on the shared service contract.
+- Release 0.8.0 — shipped (tag `v0.8.0`, release workflow running).
 
 ## Next steps
 
-1. Release 0.8.0.
+1. Confirm the `v0.8.0` release workflow publishes both GHCR images.
+2. Plan 0.9.0 scope.
 
 ## Quality gates (every change)
 
