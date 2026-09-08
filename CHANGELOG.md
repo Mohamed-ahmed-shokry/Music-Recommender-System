@@ -7,6 +7,14 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Browsable track catalog table in the dashboard Tracks tab, backed by the
+  shared `browse_tracks` service contract.
+- Bumped pinned GitHub Actions (`setup-uv` v10.0.1, `docker/login-action`
+  v4.6.0, `actions/attest` v4.2.2; verified SHAs), closing dependabot PRs
+  #1, #3, and #4.
+
 ## [0.7.0] - 2026-09-07
 
 ### Added
