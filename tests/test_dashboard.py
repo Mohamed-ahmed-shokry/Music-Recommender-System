@@ -12,6 +12,7 @@ from music_recommender.dashboard import (
     recommendation_frame,
     resolve_dashboard_artifact_path,
     split_metadata_terms,
+    track_catalog_frame,
 )
 
 
@@ -145,6 +146,44 @@ class FakeDashboardService:
                     "score": 0.9,
                 }
             ],
+        }
+
+    def browse_tracks(
+        self,
+        *,
+        query: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, object]:
+        tracks = [
+            {
+                "track_id": "track_1",
+                "track_name": "Hit",
+                "artist_id": "artist_1",
+                "artist_name": "Test Artist",
+                "total_plays": 30,
+                "popularity_rank": 1,
+            },
+            {
+                "track_id": "track_2",
+                "track_name": "Hit 2",
+                "artist_id": "artist_1",
+                "artist_name": "Test Artist",
+                "total_plays": 20,
+                "popularity_rank": 2,
+            },
+        ]
+        if query:
+            tracks = [
+                track
+                for track in tracks
+                if query.casefold()
+                in " ".join(str(value) for value in track.values()).casefold()
+            ]
+        page = tracks[:limit]
+        return {
+            "total": len(tracks),
+            "has_more": len(page) < len(tracks),
+            "tracks": page,
         }
 
     @staticmethod
@@ -419,6 +458,27 @@ def test_dashboard_tracks_tab_search_warns_without_matches() -> None:
         warning.value == "No tracks match the current search."
         for warning in app.warning
     )
+
+
+def test_track_catalog_frame_uses_service_search() -> None:
+    frame = track_catalog_frame(FakeDashboardService())
+    filtered_frame = track_catalog_frame(FakeDashboardService(), query="hit 2")
+
+    assert frame["track_id"].tolist() == ["track_1", "track_2"]
+    assert frame["total_plays"].tolist() == [30, 20]
+    assert filtered_frame["track_id"].tolist() == ["track_2"]
+    assert filtered_frame.attrs["total"] == 1
+
+
+def test_dashboard_tracks_tab_renders_catalog_caption() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(FakeDashboardService(),),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(caption.value == "Showing 2 matching tracks." for caption in app.caption)
 
 
 def test_recommendation_frame_supports_track_responses() -> None:

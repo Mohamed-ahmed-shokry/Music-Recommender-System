@@ -104,6 +104,21 @@ def catalog_frame(
     return catalog
 
 
+def track_catalog_frame(
+    service: RecommenderService,
+    query: str | None = None,
+    limit: int = 100,
+) -> pd.DataFrame:
+    """Build a dashboard table from the shared track catalog service."""
+    payload = service.browse_tracks(query=query, limit=limit)
+    catalog = pd.DataFrame(payload["tracks"])
+    catalog.attrs.update(
+        total=payload["total"],
+        has_more=payload["has_more"],
+    )
+    return catalog
+
+
 def _artist_choices(service: RecommenderService) -> dict[str, str]:
     names = service.artifact.mappings["artist_id_to_name"]
     return {
@@ -468,30 +483,49 @@ def _render_tracks_tab(
 
     if not track_choices:
         st.warning("No tracks match the current search.")
-        return
-
-    with st.form("similar_tracks"):
-        selected_track = st.selectbox("Starting track", list(track_choices))
-        similar_top_k = st.slider(
-            "Number of similar tracks",
-            1,
-            max_top_k,
-            min(10, max_top_k),
-            key="similar_tracks_top_k",
-        )
-        similar_submitted = st.form_submit_button(
-            "Find similar tracks",
-            type="primary",
-            use_container_width=True,
-        )
-
-    if similar_submitted:
-        _run_recommendation(
-            lambda: service.similar_tracks(
-                track_id=track_choices[selected_track],
-                top_k=similar_top_k,
+    else:
+        with st.form("similar_tracks"):
+            selected_track = st.selectbox("Starting track", list(track_choices))
+            similar_top_k = st.slider(
+                "Number of similar tracks",
+                1,
+                max_top_k,
+                min(10, max_top_k),
+                key="similar_tracks_top_k",
             )
-        )
+            similar_submitted = st.form_submit_button(
+                "Find similar tracks",
+                type="primary",
+                use_container_width=True,
+            )
+
+        if similar_submitted:
+            _run_recommendation(
+                lambda: service.similar_tracks(
+                    track_id=track_choices[selected_track],
+                    top_k=similar_top_k,
+                )
+            )
+
+    st.write("Browse the track catalog.")
+    catalog = track_catalog_frame(service, query=search or None)
+    total = int(catalog.attrs["total"])
+    if catalog.attrs["has_more"]:
+        st.caption(f"Showing the first {len(catalog)} of {total} matching tracks.")
+    else:
+        st.caption(f"Showing {total} matching track{'s' if total != 1 else ''}.")
+
+    st.dataframe(
+        catalog,
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "total_plays": st.column_config.NumberColumn(format="%d"),
+            "listener_count": st.column_config.NumberColumn(format="%d"),
+            "popularity_rank": st.column_config.NumberColumn(format="%d"),
+            "popularity": st.column_config.NumberColumn(format="%d"),
+        },
+    )
 
 
 def _render_catalog_tab(service: RecommenderService) -> None:
