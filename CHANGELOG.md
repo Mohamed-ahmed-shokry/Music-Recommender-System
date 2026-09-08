@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Popularity-baseline comparison for track evaluation
+  (`evaluate-tracks --compare-baseline`), reporting similarity and popularity
+  arms side by side on identical holdouts.
+
 ## [0.8.0] - 2026-09-08
 
 ### Added
