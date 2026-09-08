@@ -64,10 +64,12 @@ verify on the pre-existing CI red). Treat 0.6.0 as the published release.
   succeeded, both GHCR images live).
 - Phase 25 — Track popularity baseline (`recommend_popular_tracks`) with
   `evaluate-tracks --compare-baseline` reporting both arms.
+- Release 0.9.0 — shipped (tag `v0.9.0`, release workflow running).
 
 ## Next steps
 
-1. Release 0.9.0.
+1. Confirm the `v0.9.0` release workflow publishes both GHCR images.
+2. Plan 0.10.0 scope.
 
 ## Quality gates (every change)
 
