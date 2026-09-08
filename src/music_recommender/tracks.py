@@ -360,7 +360,7 @@ def recommend_popular_tracks(
             track_id,
         ),
     )
-    recommendations = []
+    recommendations: list[dict[str, Any]] = []
     for track_id in ranked:
         if not include_listened and track_id in listened_tracks:
             continue
