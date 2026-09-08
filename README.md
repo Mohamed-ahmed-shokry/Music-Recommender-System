@@ -495,7 +495,12 @@ uv run python -m music_recommender.cli evaluate-tracks --top-k 10 --folds 2
 ```
 
 Track evaluation reports precision, recall, MAP, NDCG, catalog coverage,
-average popularity, and novelty over the held-out tracks.
+average popularity, and novelty over the held-out tracks. Compare similarity
+against a global-popularity baseline on the same holdouts:
+
+```bash
+uv run python -m music_recommender.cli evaluate-tracks --top-k 10 --folds 2 --compare-baseline
+```
 
 ## API Reference
 
