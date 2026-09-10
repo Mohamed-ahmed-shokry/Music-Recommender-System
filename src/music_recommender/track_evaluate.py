@@ -102,13 +102,15 @@ def evaluate_track_holdout(
     folds: int = 1,
     include_listened: bool = False,
     compare_baseline: bool = False,
+    popularity_penalty: float = 0.0,
+    diversity: float = 0.0,
 ) -> dict[str, float] | dict[str, dict[str, float]]:
     """Evaluate track similarity with repeated per-user holdout splits.
 
     When ``compare_baseline`` is set, a global-popularity arm is evaluated on
     the same holdouts, making the popularity-bias tradeoff explicit.
     """
-    validate_ranking_parameters(top_k)
+    validate_ranking_parameters(top_k, diversity, popularity_penalty)
     if type(folds) is not int or folds < 1:
         raise ValueError("folds must be a positive integer.")
     if type(include_listened) is not bool:
@@ -142,6 +144,10 @@ def evaluate_track_holdout(
                         track_id_to_index=resources.track_id_to_index,
                         top_k=top_k,
                         include_listened=include_listened,
+                        track_stats=resources.track_stats,
+                        feature_matrix=resources.feature_matrix,
+                        popularity_penalty=popularity_penalty,
+                        diversity=diversity,
                     )
                 ]
             )

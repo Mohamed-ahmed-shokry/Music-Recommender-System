@@ -1413,6 +1413,20 @@ def evaluate_tracks(
         "--compare-baseline/--no-compare-baseline",
         help="Compare track similarity against a global-popularity baseline.",
     ),
+    popularity_penalty: float = typer.Option(
+        0.0,
+        "--popularity-penalty",
+        min=0.0,
+        max=1.0,
+        help="Penalize globally popular tracks during evaluation (0.0 to 1.0).",
+    ),
+    diversity: float = typer.Option(
+        0.0,
+        "--diversity",
+        min=0.0,
+        max=1.0,
+        help="Diversify recommendations by audio features (0.0 to 1.0).",
+    ),
 ) -> None:
     """Evaluate track similarity with repeated per-user holdout splits."""
     try:
@@ -1425,6 +1439,8 @@ def evaluate_tracks(
             folds=folds,
             include_listened=include_listened,
             compare_baseline=compare_baseline,
+            popularity_penalty=popularity_penalty,
+            diversity=diversity,
         )
     except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)

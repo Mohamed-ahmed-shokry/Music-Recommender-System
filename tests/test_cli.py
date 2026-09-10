@@ -1669,6 +1669,26 @@ def test_evaluate_tracks_compare_baseline_prints_both_arms() -> None:
     assert "Popularity:" in result.output
 
 
+def test_evaluate_tracks_supports_ranking_knobs() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate-tracks",
+            "--top-k",
+            "5",
+            "--folds",
+            "1",
+            "--popularity-penalty",
+            "0.5",
+            "--diversity",
+            "0.7",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Track evaluation over 1 fold(s):" in result.output
+
+
 def test_prepare_track_data_reports_counts() -> None:
     result = runner.invoke(cli.app, ["prepare-track-data"])
 

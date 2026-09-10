@@ -104,6 +104,24 @@ def test_evaluate_track_holdout_rejects_invalid_parameters() -> None:
         evaluate_track_holdout(track_df(), track_meta_df(), include_listened="yes")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="compare_baseline must be a boolean"):
         evaluate_track_holdout(track_df(), track_meta_df(), compare_baseline="yes")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="popularity_penalty"):
+        evaluate_track_holdout(track_df(), track_meta_df(), popularity_penalty=1.5)
+    with pytest.raises(ValueError, match="diversity"):
+        evaluate_track_holdout(track_df(), track_meta_df(), diversity=-0.1)
+
+
+def test_evaluate_track_holdout_runs_with_tuning_knobs() -> None:
+    metrics = evaluate_track_holdout(
+        track_df(),
+        track_meta_df(),
+        top_k=2,
+        folds=1,
+        popularity_penalty=0.5,
+        diversity=0.6,
+    )
+
+    assert metrics["map_at_k"] >= 0.0
+    assert metrics["average_popularity"] >= 0.0
 
 
 def test_evaluate_track_holdout_compares_baseline() -> None:
