@@ -417,6 +417,7 @@ class TrackServingResources:
     track_ids: list[str]
     track_id_to_index: dict[str, int]
     similarity_matrix: np.ndarray
+    feature_matrix: np.ndarray
     user_track_matrix: pd.DataFrame
     track_stats: dict[str, TrackStats]
     track_lookup: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -432,6 +433,7 @@ def build_track_serving_resources(
     feature_df, feature_names = build_track_content_matrix(metadata_df)
     track_ids = [str(track_id) for track_id in feature_df.index.tolist()]
     track_id_to_index = {track_id: i for i, track_id in enumerate(track_ids)}
+    feature_matrix = np.asarray(feature_df.values, dtype=float)
     similarity_matrix = cosine_similarity(feature_df.values)
     user_track_matrix = interactions_df.pivot_table(
         index="user_id",
@@ -455,6 +457,7 @@ def build_track_serving_resources(
         track_ids=track_ids,
         track_id_to_index=track_id_to_index,
         similarity_matrix=similarity_matrix,
+        feature_matrix=feature_matrix,
         user_track_matrix=user_track_matrix,
         track_stats=build_track_stats(interactions_df),
         track_lookup=lookup,

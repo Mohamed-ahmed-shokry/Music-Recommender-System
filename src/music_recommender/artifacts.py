@@ -702,6 +702,19 @@ def _validate_track_bundle(bundle: Any) -> None:
         raise ValueError(
             "Artifact track bundle has invalid feature names. Retrain the model."
         )
+    feature_matrix = getattr(bundle, "feature_matrix", None)
+    if feature_matrix is None:
+        raise ValueError(
+            "Artifact track bundle is missing audio feature data. Retrain the model."
+        )
+    if (
+        not isinstance(feature_matrix, np.ndarray)
+        or feature_matrix.shape != (len(track_ids), len(feature_names))
+        or not np.all(np.isfinite(feature_matrix))
+    ):
+        raise ValueError(
+            "Artifact track feature matrix is inconsistent. Retrain the model."
+        )
     user_track_matrix = bundle.user_track_matrix
     if not isinstance(user_track_matrix, pd.DataFrame) or not {
         str(column) for column in user_track_matrix.columns

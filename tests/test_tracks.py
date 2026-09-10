@@ -175,6 +175,7 @@ def test_build_track_serving_resources() -> None:
     assert resources.track_ids == ["track_1", "track_2"]
     assert resources.track_id_to_index == {"track_1": 0, "track_2": 1}
     assert resources.similarity_matrix.shape == (2, 2)
+    assert resources.feature_matrix.shape == (2, 12)
     assert resources.track_lookup["track_1"]["artist_name"] == "Artist A"
     assert list(resources.user_track_matrix.index) == ["user_1", "user_2"]
     assert set(resources.track_stats) <= {"track_1", "track_2"}

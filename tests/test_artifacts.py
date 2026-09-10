@@ -216,6 +216,7 @@ def test_artifact_bundle_round_trips_track_bundle(tmp_path: Path) -> None:
     assert loaded_artifact.track_bundle is not None
     assert loaded_artifact.track_bundle.track_ids == ["track_1", "track_2"]
     assert loaded_artifact.track_bundle.similarity_matrix.shape == (2, 2)
+    assert loaded_artifact.track_bundle.feature_matrix.shape == (2, 12)
 
 
 def test_artifact_without_track_bundle_defaults_to_none(tmp_path: Path) -> None:
@@ -285,6 +286,8 @@ def _track_bundle_artifact(tmp_path: Path):
             {"track_1": {"track_id": "track_1"}},
             "statistics are inconsistent",
         ),
+        ("feature_matrix", None, "missing audio feature data"),
+        ("feature_matrix", np.zeros((1, 1)), "feature matrix is inconsistent"),
     ],
 )
 def test_artifact_rejects_inconsistent_track_bundle_fields(
