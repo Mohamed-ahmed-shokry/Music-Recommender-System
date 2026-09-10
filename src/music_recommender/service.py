@@ -523,9 +523,11 @@ class RecommenderService:
         user_id: str,
         top_k: int,
         include_listened: bool = False,
+        popularity_penalty: float = 0.0,
+        diversity: float = 0.0,
     ) -> dict[str, Any]:
         """Recommend tracks for a user with audio-feature similarity."""
-        validate_ranking_parameters(top_k)
+        validate_ranking_parameters(top_k, diversity, popularity_penalty)
         resources = self._track_resources()
         if user_id not in resources.user_track_matrix.index:
             raise ValueError(f"Unknown user_id: {user_id}")
@@ -536,6 +538,10 @@ class RecommenderService:
             track_id_to_index=resources.track_id_to_index,
             top_k=top_k,
             include_listened=include_listened,
+            track_stats=resources.track_stats,
+            feature_matrix=resources.feature_matrix,
+            popularity_penalty=popularity_penalty,
+            diversity=diversity,
         )
         return {
             "user_id": user_id,

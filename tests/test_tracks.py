@@ -151,6 +151,110 @@ def test_recommend_tracks_for_user() -> None:
     assert recommend_tracks_for_user("user_3", empty_matrix, sim, mapping) == []
 
 
+def test_recommend_tracks_for_user_penalty_demotes_popular_track() -> None:
+    # user_1 listened to track_1; track_2 (unheard) is highly similar but the
+    # most popular. With a penalty, the less-identical track_3 should win.
+    user_track_matrix = pd.DataFrame(
+        [[5.0, 0.0, 0.0]],
+        index=["user_1"],
+        columns=["track_1", "track_2", "track_3"],
+    )
+    sim = np.array(
+        [
+            [1.0, 0.9, 0.2],
+            [0.9, 1.0, 0.1],
+            [0.2, 0.1, 1.0],
+        ]
+    )
+    mapping = {"track_1": 0, "track_2": 1, "track_3": 2}
+    track_stats = {
+        "track_1": {"total_plays": 5},
+        "track_2": {"total_plays": 90},
+        "track_3": {"total_plays": 4},
+    }
+
+    baseline = recommend_tracks_for_user(
+        "user_1", user_track_matrix, sim, mapping, top_k=2
+    )
+    assert [rec["track_id"] for rec in baseline] == ["track_2", "track_3"]
+
+    penalized = recommend_tracks_for_user(
+        "user_1",
+        user_track_matrix,
+        sim,
+        mapping,
+        top_k=2,
+        track_stats=track_stats,
+        popularity_penalty=1.0,
+    )
+    assert [rec["track_id"] for rec in penalized] == ["track_3", "track_2"]
+
+
+def test_recommend_tracks_for_user_diversity_breaks_near_duplicates() -> None:
+    # track_2 and track_3 both score highly and share nearly identical audio
+    # features; diversity should promote the distinct track_4 instead.
+    user_track_matrix = pd.DataFrame(
+        [[5.0, 0.0, 0.0, 0.0]],
+        index=["user_1"],
+        columns=["track_1", "track_2", "track_3", "track_4"],
+    )
+    sim = np.array(
+        [
+            [1.0, 0.9, 0.85, 0.1],
+            [0.9, 1.0, 0.98, 0.1],
+            [0.85, 0.98, 1.0, 0.1],
+            [0.1, 0.1, 0.1, 1.0],
+        ]
+    )
+    mapping = {"track_1": 0, "track_2": 1, "track_3": 2, "track_4": 3}
+    features = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.98, 0.01, 0.02],
+            [0.0, 1.0, 0.0],
+        ]
+    )
+
+    diversed = recommend_tracks_for_user(
+        "user_1",
+        user_track_matrix,
+        sim,
+        mapping,
+        top_k=3,
+        feature_matrix=features,
+        diversity=1.0,
+    )
+    assert diversed[0]["track_id"] == "track_2"
+    assert diversed[1]["track_id"] == "track_4"
+
+
+def test_recommend_tracks_for_user_rejects_invalid_knobs() -> None:
+    user_track_matrix = pd.DataFrame(
+        [[5.0, 0.0]],
+        index=["user_1"],
+        columns=["track_1", "track_2"],
+    )
+    sim = np.eye(2)
+    mapping = {"track_1": 0, "track_2": 1}
+    with pytest.raises(ValueError, match="popularity_penalty"):
+        recommend_tracks_for_user(
+            "user_1",
+            user_track_matrix,
+            sim,
+            mapping,
+            popularity_penalty=1.5,
+        )
+    with pytest.raises(ValueError, match="diversity"):
+        recommend_tracks_for_user(
+            "user_1",
+            user_track_matrix,
+            sim,
+            mapping,
+            diversity=-0.1,
+        )
+
+
 def test_get_similar_tracks() -> None:
     sim = np.array([[1.0, 0.9, 0.1], [0.9, 1.0, 0.2], [0.1, 0.2, 1.0]])
     mapping = {"track_1": 0, "track_2": 1, "track_3": 2}

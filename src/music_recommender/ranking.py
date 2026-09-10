@@ -59,6 +59,44 @@ def apply_popularity_penalty(
     return adjusted_scores
 
 
+def apply_track_popularity_penalty(
+    scores: np.ndarray,
+    index_to_track_id: dict[int, str],
+    track_stats: dict[str, dict[str, Any]] | None,
+    popularity_penalty: float,
+) -> np.ndarray:
+    """Reduce scores for globally popular tracks by a configurable amount."""
+    if popularity_penalty == 0 or not track_stats:
+        return scores.copy()
+
+    ranked_track_ids = sorted(
+        track_stats,
+        key=lambda track_id: (
+            -float(track_stats[track_id].get("total_plays", 0)),
+            track_id,
+        ),
+    )
+    rank_by_track_id = {
+        track_id: rank for rank, track_id in enumerate(ranked_track_ids, start=1)
+    }
+    max_rank = max(len(ranked_track_ids), 1)
+    score_scale = float(np.max(np.abs(scores)))
+    if score_scale == 0:
+        score_scale = 1.0
+
+    adjusted_scores = scores.astype(float).copy()
+    for track_index, track_id in index_to_track_id.items():
+        rank = rank_by_track_id.get(track_id)
+        if rank is None:
+            continue
+        popularity_weight = 1.0 if max_rank == 1 else 1 - (rank - 1) / (max_rank - 1)
+        adjusted_scores[track_index] -= (
+            popularity_penalty * popularity_weight * score_scale
+        )
+
+    return adjusted_scores
+
+
 def rerank_with_diversity(
     candidate_indices: list[int],
     scores: np.ndarray,

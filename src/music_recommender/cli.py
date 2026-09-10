@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, cast
 
+import numpy as np
 import typer
 
 from music_recommender import __version__
@@ -56,6 +57,7 @@ from music_recommender.tracking import (
 )
 from music_recommender.tracks import (
     build_track_content_matrix,
+    build_track_stats,
     get_similar_tracks,
     load_and_validate_track_interactions,
     load_and_validate_track_metadata,
@@ -1272,7 +1274,23 @@ def track_recommendations(
     user_id: str = typer.Option(..., help="User ID for recommendations."),
     top_k: int = DEFAULT_TOP_K,
     include_listened: bool = typer.Option(
-        False, "--include-listened/--exclude-listened"
+        False,
+        "--include-listened/--exclude-listened",
+        help="Include or exclude listened tracks in the recommendations.",
+    ),
+    popularity_penalty: float = typer.Option(
+        0.0,
+        "--popularity-penalty",
+        min=0.0,
+        max=1.0,
+        help="Penalize globally popular tracks (0.0 to 1.0).",
+    ),
+    diversity: float = typer.Option(
+        0.0,
+        "--diversity",
+        min=0.0,
+        max=1.0,
+        help="Diversify recommendations by audio features (0.0 to 1.0).",
     ),
 ) -> None:
     """Recommend tracks for a user using track similarity."""
@@ -1298,6 +1316,8 @@ def track_recommendations(
 
         track_similarity_matrix = cosine_similarity(feature_df.values)
 
+        track_stats = build_track_stats(df)
+
         # Get recommendations
         recommendations = recommend_tracks_for_user(
             user_id=user_id,
@@ -1306,6 +1326,10 @@ def track_recommendations(
             track_id_to_index=track_id_to_index,
             top_k=top_k,
             include_listened=include_listened,
+            track_stats=track_stats,
+            feature_matrix=np.asarray(feature_df.values, dtype=float),
+            popularity_penalty=popularity_penalty,
+            diversity=diversity,
         )
 
     except (FileNotFoundError, ValueError) as error:

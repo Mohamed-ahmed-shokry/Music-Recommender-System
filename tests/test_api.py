@@ -195,6 +195,8 @@ class FakeService:
         user_id: str,
         top_k: int,
         include_listened: bool,
+        popularity_penalty: float = 0.0,
+        diversity: float = 0.0,
     ) -> dict[str, object]:
         if user_id == "ghost":
             raise ValueError(f"Unknown user_id: {user_id}")
@@ -210,6 +212,8 @@ class FakeService:
                 }
             ][:top_k],
             "include_listened": include_listened,
+            "popularity_penalty": popularity_penalty,
+            "diversity": diversity,
         }
 
     def similar_tracks(
@@ -666,6 +670,8 @@ def test_invalid_artifact_keeps_api_alive_but_not_ready(
         ("get", "/tracks/catalog?offset=-1", {}),
         ("get", "/tracks/catalog?limit=101", {}),
         ("get", "/recommend/user/user_1?diversity=1.1", {}),
+        ("get", "/tracks/recommend/user_1?diversity=1.1", {}),
+        ("get", "/tracks/recommend/user_1?popularity_penalty=-0.1", {}),
         ("get", "/similar-artists/artist_1?method=unknown", {}),
         (
             "post",

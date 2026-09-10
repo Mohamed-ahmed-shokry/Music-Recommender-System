@@ -536,6 +536,29 @@ def test_recommend_tracks_rejects_unknown_user_and_top_k(
         service.recommend_tracks(user_id="user_1", top_k=0)
 
 
+def test_recommend_tracks_accepts_ranking_knobs(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    result = service.recommend_tracks(
+        user_id="user_1",
+        top_k=3,
+        popularity_penalty=0.4,
+        diversity=0.6,
+    )
+
+    assert result["strategy"] == "track_similarity"
+    assert len(result["recommendations"]) == 3
+
+
+def test_recommend_tracks_rejects_invalid_ranking_knobs(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    with pytest.raises(ValueError, match="popularity_penalty"):
+        service.recommend_tracks(user_id="user_1", top_k=3, popularity_penalty=1.2)
+    with pytest.raises(ValueError, match="diversity"):
+        service.recommend_tracks(user_id="user_1", top_k=3, diversity=-0.5)
+
+
 def test_similar_tracks_returns_enriched_similarity(tmp_path: Path) -> None:
     service = create_service(tmp_path)
 

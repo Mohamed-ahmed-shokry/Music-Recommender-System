@@ -1686,6 +1686,26 @@ def test_track_recommendations_command_prints_tracks() -> None:
     assert "Track recommendations for user_1:" in result.output
 
 
+def test_track_recommendations_command_supports_ranking_knobs() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "track-recommendations",
+            "--user-id",
+            "user_1",
+            "--top-k",
+            "3",
+            "--popularity-penalty",
+            "0.5",
+            "--diversity",
+            "0.7",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Track recommendations for user_1:" in result.output
+
+
 def test_similar_tracks_command_prints_tracks() -> None:
     result = runner.invoke(
         cli.app, ["similar-tracks", "--track-id", "track_1", "--top-k", "3"]

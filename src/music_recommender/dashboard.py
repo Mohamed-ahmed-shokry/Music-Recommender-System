@@ -466,6 +466,24 @@ def _render_tracks_tab(
             "Include previously listened tracks",
             key="tracks_include_listened",
         )
+        popularity_penalty = st.slider(
+            "Popularity penalty",
+            0.0,
+            1.0,
+            0.0,
+            0.05,
+            key="tracks_popularity_penalty",
+            help="Reduce scores for globally popular tracks.",
+        )
+        diversity = st.slider(
+            "Diversity",
+            0.0,
+            1.0,
+            0.0,
+            0.05,
+            key="tracks_diversity",
+            help="Diversify recommendations by audio features.",
+        )
         submitted = st.form_submit_button(
             "Recommend tracks",
             type="primary",
@@ -478,6 +496,8 @@ def _render_tracks_tab(
                 user_id=user_id,
                 top_k=top_k,
                 include_listened=include_listened,
+                popularity_penalty=popularity_penalty,
+                diversity=diversity,
             )
         )
 

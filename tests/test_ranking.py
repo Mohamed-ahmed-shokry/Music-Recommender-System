@@ -3,6 +3,7 @@ import pytest
 
 from music_recommender.ranking import (
     apply_popularity_penalty,
+    apply_track_popularity_penalty,
     rerank_with_diversity,
     validate_ranking_parameters,
 )
@@ -165,3 +166,71 @@ def test_diversity_reranking_handles_zero_norm_vectors() -> None:
     )
 
     assert len(reranked) == 2
+
+
+def test_track_popularity_penalty_reduces_popular_track_score() -> None:
+    scores = np.array([1.0, 0.8, 0.6])
+    index_to_track_id = {0: "hit", 1: "mid", 2: "niche"}
+    track_stats = {
+        "hit": {"total_plays": 100},
+        "mid": {"total_plays": 30},
+        "niche": {"total_plays": 5},
+    }
+
+    adjusted = apply_track_popularity_penalty(
+        scores,
+        index_to_track_id,
+        track_stats,
+        popularity_penalty=1.0,
+    )
+
+    assert adjusted[0] < adjusted[1] < adjusted[2]
+
+
+def test_track_popularity_penalty_returns_copy_without_penalty_or_stats() -> None:
+    scores = np.array([1.0, 0.5])
+
+    adjusted = apply_track_popularity_penalty(
+        scores,
+        {0: "track_1"},
+        None,
+        popularity_penalty=0.0,
+    )
+
+    assert (adjusted == scores).all()
+    assert adjusted is not scores
+
+
+def test_track_popularity_penalty_defaults_scale_when_all_scores_are_zero() -> None:
+    scores = np.zeros(2)
+    index_to_track_id = {0: "hit", 1: "niche"}
+    track_stats = {
+        "hit": {"total_plays": 40},
+        "niche": {"total_plays": 1},
+    }
+
+    adjusted = apply_track_popularity_penalty(
+        scores,
+        index_to_track_id,
+        track_stats,
+        popularity_penalty=1.0,
+    )
+
+    assert adjusted[0] == -1.0
+    assert adjusted[1] == 0.0
+
+
+def test_track_popularity_penalty_skips_tracks_missing_from_stats() -> None:
+    scores = np.array([1.0, 0.5])
+    index_to_track_id = {0: "tracked", 1: "untracked"}
+    track_stats = {"tracked": {"total_plays": 9}}
+
+    adjusted = apply_track_popularity_penalty(
+        scores,
+        index_to_track_id,
+        track_stats,
+        popularity_penalty=1.0,
+    )
+
+    assert adjusted[0] < 1.0
+    assert adjusted[1] == 0.5

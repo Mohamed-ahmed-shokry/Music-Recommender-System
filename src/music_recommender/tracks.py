@@ -10,6 +10,12 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
+from music_recommender.ranking import (
+    apply_track_popularity_penalty,
+    rerank_with_diversity,
+    validate_ranking_parameters,
+)
+
 TRACK_REQUIRED_COLUMNS = (
     "user_id",
     "track_id",
@@ -291,12 +297,17 @@ def recommend_tracks_for_user(
     track_id_to_index: dict[str, int],
     top_k: int = 10,
     include_listened: bool = False,
+    track_stats: dict[str, TrackStats] | None = None,
+    feature_matrix: np.ndarray | None = None,
+    popularity_penalty: float = 0.0,
+    diversity: float = 0.0,
 ) -> list[dict[str, Any]]:
     """Recommend tracks for a user based on track similarity.
 
     Uses a simple collaborative filtering approach: find similar tracks
     to the user's listening history and rank by similarity score.
     """
+    validate_ranking_parameters(top_k, diversity, popularity_penalty)
     if user_id not in user_track_matrix.index:
         return []
 
@@ -317,22 +328,42 @@ def recommend_tracks_for_user(
     # Compute average similarity to listened tracks for all tracks
     similarity_scores = track_similarity_matrix[:, listened_indices].mean(axis=1)
 
+    adjusted_scores = apply_track_popularity_penalty(
+        scores=similarity_scores,
+        index_to_track_id={
+            index: track_id for track_id, index in track_id_to_index.items()
+        },
+        track_stats=track_stats,
+        popularity_penalty=popularity_penalty,
+    )
+
     # Create ranked list
-    ranked_indices = np.argsort(similarity_scores)[::-1]
+    ranked_indices = np.argsort(adjusted_scores)[::-1]
+
+    index_to_track_id = {v: k for k, v in track_id_to_index.items()}
+    candidate_indices = [
+        int(index)
+        for index in ranked_indices
+        if include_listened or index_to_track_id[int(index)] not in listened_tracks
+    ]
+    if diversity > 0 and len(candidate_indices) > 1 and feature_matrix is not None:
+        diversity_factors = feature_matrix
+    else:
+        diversity_factors = np.empty((0, 0))
+    final_indices = rerank_with_diversity(
+        candidate_indices=candidate_indices,
+        scores=adjusted_scores,
+        artist_factors=diversity_factors,
+        top_k=top_k,
+        diversity=diversity,
+    )
 
     recommendations: list[dict[str, Any]] = []
-    index_to_track_id = {v: k for k, v in track_id_to_index.items()}
-
-    for idx in ranked_indices:
-        track_id = index_to_track_id[idx]
-        if not include_listened and track_id in listened_tracks:
-            continue
-        if len(recommendations) >= top_k:
-            break
+    for idx in final_indices:
         recommendations.append(
             {
-                "track_id": track_id,
-                "score": float(similarity_scores[idx]),
+                "track_id": index_to_track_id[idx],
+                "score": float(adjusted_scores[idx]),
             }
         )
 
