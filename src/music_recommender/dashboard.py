@@ -60,12 +60,20 @@ def recommendation_frame(payload: dict[str, Any]) -> pd.DataFrame:
         else:
             name = str(recommendation.get("artist_name", "Unknown artist"))
             rec_id = str(recommendation.get("artist_id", ""))
+        components = recommendation.get("score_components")
+        scores = ""
+        if isinstance(components, dict):
+            scores = "content {content:.3f} · collab {collab:.3f}".format(
+                content=float(components.get("content_score", 0.0)),
+                collab=float(components.get("collaborative_score", 0.0)),
+            )
         rows.append(
             {
                 "Rank": rank,
                 "Artist": name,
                 "Artist ID": rec_id,
                 "Score": round(float(recommendation.get("score", 0.0)), 4),
+                "Score components": scores,
                 "Popularity rank": recommendation.get("popularity_rank"),
                 "Why": " · ".join(str(reason) for reason in reasons),
             }
@@ -78,6 +86,7 @@ def recommendation_frame(payload: dict[str, Any]) -> pd.DataFrame:
             "Artist",
             "Artist ID",
             "Score",
+            "Score components",
             "Popularity rank",
             "Why",
         ],

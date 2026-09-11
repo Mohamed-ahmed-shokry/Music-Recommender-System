@@ -267,7 +267,31 @@ def test_recommendation_frame_supports_similarity_responses() -> None:
     assert frame.loc[0, "Rank"] == 1
     assert frame.loc[0, "Artist"] == "B"
     assert frame.loc[0, "Score"] == 0.8123
-    assert frame.loc[0, "Why"] == "Shares pop · Matches bright"
+    assert frame.loc[0, "Score components"] == ""
+
+
+def test_recommendation_frame_renders_hybrid_score_components() -> None:
+    frame = recommendation_frame(
+        {
+            "recommendations": [
+                {
+                    "track_id": "track_1",
+                    "track_name": "Song A",
+                    "artist_name": "Artist A",
+                    "score": 0.75,
+                    "score_components": {
+                        "content_score": 0.6,
+                        "collaborative_score": 0.9,
+                        "hybrid_score": 0.75,
+                    },
+                    "reasons": ["Because you listened to Song B"],
+                }
+            ]
+        }
+    )
+
+    assert frame.loc[0, "Score components"] == "content 0.600 · collab 0.900"
+    assert frame.loc[0, "Why"] == "Because you listened to Song B"
 
 
 def test_catalog_frame_uses_service_search_and_formats_metadata() -> None:

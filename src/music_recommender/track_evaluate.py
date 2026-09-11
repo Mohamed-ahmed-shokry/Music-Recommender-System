@@ -177,6 +177,10 @@ def evaluate_track_holdout(
             str(row.track_id): str(row.track_name)
             for row in metadata_df.itertuples(index=False)
         }
+        track_artist_lookup = {
+            str(row.track_id): str(row.artist_name)
+            for row in metadata_df.itertuples(index=False)
+        }
         for user_id, user_test in test_df.groupby("user_id"):
             relevant = sorted({str(track_id) for track_id in user_test["track_id"]})
             artist_taste_per_track = None
@@ -204,6 +208,7 @@ def evaluate_track_holdout(
                 diversity=diversity,
                 explain=True,
                 track_name_lookup=track_name_lookup,
+                track_artist_lookup=track_artist_lookup,
                 artist_taste_per_track=artist_taste_per_track,
                 content_weight=content_weight,
             )

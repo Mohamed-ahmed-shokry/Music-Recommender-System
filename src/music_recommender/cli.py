@@ -1377,6 +1377,13 @@ def track_recommendations(
                 strict=True,
             )
         )
+        track_artist_name_lookup = dict(
+            zip(
+                metadata_df["track_id"].astype(str),
+                metadata_df["artist_name"].astype(str),
+                strict=True,
+            )
+        )
 
         artist_taste_per_track = None
         if method == "hybrid":
@@ -1416,6 +1423,7 @@ def track_recommendations(
             diversity=diversity,
             explain=explain,
             track_name_lookup=track_name_lookup,
+            track_artist_lookup=track_artist_name_lookup,
             artist_taste_per_track=artist_taste_per_track,
             content_weight=content_weight,
         )

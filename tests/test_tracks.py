@@ -196,6 +196,58 @@ def test_recommend_tracks_for_user_hybrid_blend() -> None:
     assert "score_components" not in pure[0]
 
 
+def test_recommend_tracks_for_user_hybrid_explains_artist_affinity() -> None:
+    user_track_matrix = pd.DataFrame(
+        [[5.0, 0.0], [0.0, 4.0]],
+        index=["user_1", "user_2"],
+        columns=["track_1", "track_2"],
+    )
+    sim = np.array([[1.0, 0.2], [0.2, 1.0]])
+    mapping = {"track_1": 0, "track_2": 1}
+    artist_taste_per_track = np.array([0.05, 0.95])
+    recs = recommend_tracks_for_user(
+        "user_1",
+        user_track_matrix,
+        sim,
+        mapping,
+        top_k=1,
+        explain=True,
+        track_name_lookup={"track_1": "Song A", "track_2": "Song B"},
+        track_artist_lookup={"track_2": "Artist B"},
+        artist_taste_per_track=artist_taste_per_track,
+        content_weight=0.25,
+    )
+    assert "Artist affinity: Artist B" in recs[0]["reasons"]
+    assert "Because you listened to Song A" in recs[0]["reasons"]
+
+    # Without a lookup, hybrid explanations only carry content reasons.
+    no_lookup = recommend_tracks_for_user(
+        "user_1",
+        user_track_matrix,
+        sim,
+        mapping,
+        top_k=1,
+        explain=True,
+        artist_taste_per_track=artist_taste_per_track,
+        content_weight=0.25,
+    )
+    assert all("Artist affinity" not in reason for reason in no_lookup[0]["reasons"])
+
+    # A zero collaborative contribution is not presented as artist affinity.
+    zero_taste = recommend_tracks_for_user(
+        "user_1",
+        user_track_matrix,
+        sim,
+        mapping,
+        top_k=1,
+        explain=True,
+        track_artist_lookup={"track_2": "Artist B"},
+        artist_taste_per_track=np.array([0.0, 0.0]),
+        content_weight=0.25,
+    )
+    assert all("Artist affinity" not in reason for reason in zero_taste[0]["reasons"])
+
+
 def test_recommend_tracks_for_user_rejects_invalid_hybrid_inputs() -> None:
     user_track_matrix = pd.DataFrame(
         [[5.0, 0.0]],

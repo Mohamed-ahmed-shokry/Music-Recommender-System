@@ -409,16 +409,19 @@ def recommend_tracks_for_user(
     diversity: float = 0.0,
     explain: bool = False,
     track_name_lookup: dict[str, str] | None = None,
+    track_artist_lookup: dict[str, str] | None = None,
     artist_taste_per_track: np.ndarray | None = None,
     content_weight: float = 1.0,
 ) -> list[dict[str, Any]]:
     """Recommend tracks for a user based on audio-feature similarity.
 
-    Passive a per-track artist-taste vector with ``content_weight`` to blend
+    Pass a per-track artist-taste vector with ``content_weight`` to blend
     into a hybrid strategy: ``artist_taste_per_track`` carries collaborative
     artist affinities and ``content_weight`` balances them against the
     audio-feature similarity ("content"). A weight of 1.0 keeps the pure
-    similarity strategy.
+    similarity strategy. When ``explain`` is set and ``track_artist_lookup``
+    is provided for a hybrid run, recommendations also list the artist whose
+    affinity drove the collaborative half.
     """
     validate_ranking_parameters(top_k, diversity, popularity_penalty)
     if type(explain) is not bool:
@@ -526,6 +529,10 @@ def recommend_tracks_for_user(
             recommendation["reasons"] = [
                 f"Because you listened to {name}" for name in names
             ]
+            if hybrid and taste_unit[idx] > 0 and track_artist_lookup is not None:
+                artist_name = track_artist_lookup.get(str(recommendation["track_id"]))
+                if artist_name is not None:
+                    recommendation["reasons"].append(f"Artist affinity: {artist_name}")
         recommendations.append(recommendation)
 
     return recommendations

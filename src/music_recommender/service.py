@@ -581,6 +581,10 @@ class RecommenderService:
             track_id: str(entry["track_name"])
             for track_id, entry in resources.track_lookup.items()
         }
+        track_artist_lookup = {
+            track_id: str(entry["artist_name"])
+            for track_id, entry in resources.track_lookup.items()
+        }
         recommendations = recommend_tracks_for_user(
             user_id=user_id,
             user_track_matrix=resources.user_track_matrix,
@@ -594,6 +598,7 @@ class RecommenderService:
             diversity=diversity,
             explain=explain,
             track_name_lookup=track_name_lookup,
+            track_artist_lookup=track_artist_lookup,
             artist_taste_per_track=artist_taste_per_track,
             content_weight=content_weight,
         )

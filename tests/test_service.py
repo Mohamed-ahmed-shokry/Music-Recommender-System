@@ -853,6 +853,27 @@ def test_recommend_tracks_hybrid_method(tmp_path: Path) -> None:
     }
 
 
+def test_recommend_tracks_hybrid_explains_artist_affinity(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    result = service.recommend_tracks(
+        user_id="user_1",
+        top_k=3,
+        method="hybrid",
+        content_weight=0.5,
+        explain=True,
+    )
+
+    assert result["strategy"] == "track_hybrid"
+    artist_reasons = [
+        reason
+        for rec in result["recommendations"]
+        for reason in rec.get("reasons") or []
+        if reason.startswith("Artist affinity:")
+    ]
+    assert artist_reasons
+
+
 def test_recommend_tracks_hybrid_rejects_user_absent_from_taste_model(
     tmp_path: Path,
 ) -> None:
