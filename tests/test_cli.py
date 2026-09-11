@@ -1689,6 +1689,27 @@ def test_evaluate_tracks_supports_ranking_knobs() -> None:
     assert "Track evaluation over 1 fold(s):" in result.output
 
 
+def test_evaluate_tracks_writes_report(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(cli, "REPORTS_DIR", tmp_path)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate-tracks",
+            "--top-k",
+            "5",
+            "--folds",
+            "1",
+            "--report-path",
+            "clf_track",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Wrote track evaluation report to:" in result.output
+    assert (tmp_path / "clf_track.json").exists()
+
+
 def test_prepare_track_data_reports_counts() -> None:
     result = runner.invoke(cli.app, ["prepare-track-data"])
 

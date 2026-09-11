@@ -1,9 +1,13 @@
+import json
+
 import pandas as pd
 import pytest
 
 from music_recommender.track_evaluate import (
     evaluate_track_holdout,
+    load_track_report,
     train_test_split_tracks_by_user,
+    write_track_report,
 )
 
 
@@ -158,3 +162,42 @@ def test_evaluate_track_holdout_requires_held_out_tracks() -> None:
 
     with pytest.raises(ValueError, match="No held-out track interactions"):
         evaluate_track_holdout(df, track_meta_df(), top_k=2)
+
+
+def test_write_track_report_roundtrip(tmp_path) -> None:
+    metrics = evaluate_track_holdout(track_df(), track_meta_df(), top_k=2, folds=1)
+
+    written = write_track_report(
+        metrics,
+        tmp_path,
+        top_k=2,
+        folds=1,
+        report_name="holdout",
+    )
+
+    assert written == tmp_path / "holdout.json"
+    report = load_track_report(written)
+    assert report["top_k"] == 2
+    assert report["folds"] == 1
+    assert set(report["metrics"]) == set(metrics)
+
+
+def test_write_track_report_stores_arms_when_compared(tmp_path) -> None:
+    metrics = evaluate_track_holdout(
+        track_df(), track_meta_df(), top_k=2, folds=1, compare_baseline=True
+    )
+
+    written = write_track_report(metrics, tmp_path, top_k=2, folds=1)
+
+    report = load_track_report(written)
+    assert set(report["metrics"]) == {"similarity", "popularity"}
+
+
+def test_load_track_report_rejects_missing_and_invalid_files(tmp_path) -> None:
+    with pytest.raises(FileNotFoundError, match="not found"):
+        load_track_report(tmp_path / "missing.json")
+
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text(json.dumps({"arms": {}}), encoding="utf-8")
+    with pytest.raises(ValueError, match="not a track evaluation report"):
+        load_track_report(invalid)

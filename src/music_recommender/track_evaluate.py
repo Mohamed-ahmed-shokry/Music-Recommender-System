@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 import pandas as pd
 
@@ -189,3 +194,48 @@ def evaluate_track_holdout(
             for metric in popularity_folds[0]
         },
     }
+
+
+def write_track_report(
+    metrics: dict[str, float] | dict[str, dict[str, float]],
+    report_dir: str | Path,
+    *,
+    top_k: int,
+    folds: int,
+    report_name: str | None = None,
+) -> Path:
+    """Persist a track evaluation run as a JSON report.
+
+    The report records the generated-at timestamp, the evaluation
+    configuration, and the per-arm metrics under a stable schema so results
+    from different runs can be compared side by side. The parent directory is
+    created if needed.
+    """
+    report_path = Path(report_dir) / f"{report_name or 'track_evaluation'}.json"
+    Path(report_dir).mkdir(parents=True, exist_ok=True)
+    report = {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "top_k": top_k,
+        "folds": folds,
+        "metrics": metrics,
+    }
+    report_path.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return report_path
+
+
+def load_track_report(report_path: Path) -> dict[str, Any]:
+    """Load and validate a persisted track evaluation report."""
+    if not report_path.exists():
+        raise FileNotFoundError(f"Track report not found: {report_path}")
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            f"Failed to parse track report '{report_path}': {error}"
+        ) from error
+    if not isinstance(report, dict) or "metrics" not in report:
+        raise ValueError(f"File '{report_path}' is not a track evaluation report.")
+    return report

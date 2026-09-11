@@ -48,7 +48,10 @@ from music_recommender.model import train_and_save_model
 from music_recommender.preprocessing import prepare_training_data
 from music_recommender.recommend import format_recommendations
 from music_recommender.service import RecommenderService
-from music_recommender.track_evaluate import evaluate_track_holdout
+from music_recommender.track_evaluate import (
+    evaluate_track_holdout,
+    write_track_report,
+)
 from music_recommender.tracking import (
     DEFAULT_EVALUATION_EXPERIMENT,
     DEFAULT_TRAINING_EXPERIMENT,
@@ -1427,6 +1430,11 @@ def evaluate_tracks(
         max=1.0,
         help="Diversify recommendations by audio features (0.0 to 1.0).",
     ),
+    report_path: str = typer.Option(
+        None,
+        "--report-path",
+        help="Write the evaluation JSON report to this path.",
+    ),
 ) -> None:
     """Evaluate track similarity with repeated per-user holdout splits."""
     try:
@@ -1455,6 +1463,15 @@ def evaluate_tracks(
         _print_track_metric_row(
             "Similarity", cast(dict[str, float], metrics), top_k, header=False
         )
+    if report_path:
+        written = write_track_report(
+            metrics,
+            str(REPORTS_DIR),
+            top_k=top_k,
+            folds=folds,
+            report_name=report_path,
+        )
+        typer.echo(f"Wrote track evaluation report to: {written}")
 
 
 def _print_track_metric_row(
