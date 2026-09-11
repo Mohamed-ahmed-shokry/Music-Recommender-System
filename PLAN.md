@@ -3,6 +3,23 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
+## Current milestone (0.13.0)
+
+- Phase 37 — Hybrid artist-taste explainability: track recommendations in
+  hybrid mode explain the collaborative driver ("Artist affinity: X") next
+  to the content reasons, and the dashboard renders `score_components` for
+  hybrid hits so the blended score is visible where README promises it.
+- Phase 38 — Structured logging: a shared `configure_logging` helper, request
+  logging in the API middleware, and INFO logs for training, artifact
+  load/build, and the CLI train/eval commands close the observability gap.
+- Phase 39 — Track-surface quality sweep: fix audit-found bugs (spotify
+  duplicate init, redundant CLI except tuple, `--report-path` semantics),
+  remove dead config, and add tests for the uncovered behavior (LTR API +
+  dashboard, ablation summary render, quality-threshold errors, track
+  validators, empty-result CLI branches).
+- Phase 40 — Docs and release: refresh README roadmap and TOC, CHANGELOG,
+  and ship/label 0.13.0.
+
 ## Completed
 
 - Phase 1 — Core ALS + hybrid artist recommendations, artifact bundle, CLI.
@@ -19,49 +36,10 @@ It is updated incrementally as phases land.
   sample track CSVs, `prepare-track-data`, `track-recommendations`,
   `similar-tracks`.
 
-## In progress
+## Completed (track era, 0.9→0.12)
 
-- Phase 10 — Docs refresh (README, CHANGELOG, data README, PLAN).
-- Phase 11 — Coverage for new modules (tracks, spotify) — done, keep ≥75%.
-- Phase 12 — Track recommendations via API + dashboard tab — done.
-- Phase 13 — Spotify import pipeline (`spotify-import-catalog`) — done.
-- Phase 14 — Strict quality gate (`--fail-on-quality-gate`) + scheduled
-  `quality-gate` workflow with ablation report upload — done.
-- Phase 15 — Track bundle persistence in the versioned artifact (optional
-  field, legacy fallback, train + serve wiring) — done.
-- Phase 16 — Track holdout evaluation (`track_evaluate`, `evaluate-tracks`)
-  reusing the shared ranking metrics — done.
-- Phase 17 — Coverage sweep to 96% (track validators, CSV fallback, track
-  CLI paths, Spotify client) — done.
-- Release 0.5.0 — shipped code-wise (tag `v0.5.0`); the release workflow's
-  verify job is red for a pre-existing reason (see Phase 18), so GHCR
-  publication did NOT happen.
-- Phase 18 — CI triage: bisected the Linux red to pre-existing
-  `FORCE_COLOR`-sensitive CLI output assertions (red since Aug 31, before
-  this work); fixed via hermetic `_TYPER_FORCE_DISABLE_TERMINAL` test env,
-  fixed nondeterministic ablation arm order, and added pinned JUnit failure
-  annotations for future diagnosis.
-- Phase 19 — Track popularity statistics + novelty/average-popularity in
-  `evaluate-tracks` — done.
-- Phase 20 — Dashboard track catalog search — done.
-- Release 0.6.0 — shipped and published (tag `v0.6.0`; release run #2
-  succeeded, both GHCR images live). CI green on main for the first time
-  since Aug 30.
-
-Note: the `v0.5.0` tag never published images (its release run failed
-verify on the pre-existing CI red). Treat 0.6.0 as the published release.
-
-- Phase 21 — Dependabot #5 triaged by bumping the upload-artifact pin to
-  verified v7.0.1 in-repo (supersedes the PR).
-- Phase 22 — Track catalog parity (`browse_tracks` + `GET /tracks/catalog`).
-
-- Release 0.7.0 — shipped (tag `v0.7.0`).
-- Phase 23 — Dependabot triage by bumping remaining action pins
-  (`setup-uv` v10.0.1, `login-action` v4.6.0, `attest` v4.2.2; verified
-  SHAs), closing PRs #1, #3, and #4 (PR #5 already superseded).
-- Phase 24 — Dashboard track catalog table on the shared service contract.
-- Release 0.8.0 — shipped and published (tag `v0.8.0`, release run #4
-  succeeded, both GHCR images live).
+- Phase 10 — Docs refresh (README, CHANGELOG, data README, PLAN) — ongoing
+  habit, refreshed with each release.
 - Phase 25 — Track popularity baseline (`recommend_popular_tracks`) with
   `evaluate-tracks --compare-baseline` reporting both arms.
 - Release 0.9.0 — shipped and published (tag `v0.9.0`, release run #5
@@ -105,11 +83,31 @@ verify on the pre-existing CI red). Treat 0.6.0 as the published release.
 - Release 0.12.0 — shipped and published (tag `v0.12.0`, release run
   34652949643 succeeded, both GHCR images live).
 
-## Next steps
+## Historical (0.5→0.8 era, later superseded in scope by the track era)
 
-1. Plan 0.13.0 scope — candidates: dashboard track-explanation coverage
-   display, artist taste explainability (which artists drive each hybrid
-   hit), and Jupyter walkthrough notebooks.
+- Release 0.5.0 — shipped code-wise (tag `v0.5.0`); the release workflow's
+  verify job was red for a pre-existing reason, so GHCR publication did NOT
+  happen. Treat 0.6.0 as the published release.
+- Phase 18 — CI triage: fixed pre-existing `FORCE_COLOR`-sensitive CLI output
+  assertions via a hermetic `_TYPER_FORCE_DISABLE_TERMINAL` test env, fixed
+  nondeterministic ablation arm order, pinned JUnit failure annotations.
+- Release 0.6.0 — shipped and published (tag `v0.6.0`; first release whose
+  CI was green on main since Aug 30).
+- Phase 21 — Dependabot #5 triaged by pinning upload-artifact v7.0.1 in-repo.
+- Release 0.7.0 — shipped (tag `v0.7.0`).
+- Phase 23 — Dependabot triage: `setup-uv` v10.0.1, `login-action` v4.6.0,
+  `attest` v4.2.2 pinned (verified SHAs), closing PRs #1/#3/#4/#5.
+- Release 0.8.0 — shipped and published (tag `v0.8.0`, release run #4
+  succeeded, both GHCR images live).
+
+## Next steps (after 0.13.0)
+
+1. Artist-taste contributor stats in the artifact (top artists per user) for
+   cheaper serving-time explainability.
+2. Notebook-driven walkthroughs in `notebooks/` covering training, serving,
+   and track evaluation.
+3. Cross-surface evaluation parity report (artist vs. track metrics on the
+   same data window).
 
 ## Quality gates (every change)
 
