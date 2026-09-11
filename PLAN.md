@@ -78,8 +78,8 @@ verify on the pre-existing CI red). Treat 0.6.0 as the published release.
 - Phase 29 — Top tracks baseline surfaced across surfaces: `popular_tracks`
   helper, `RecommenderService.popular_tracks`, `GET /tracks/popular`, and a
   `popular-tracks` CLI command.
-- Release 0.10.0 — shipped and published (tag `v0.10.0`, release run #6
-  succeeded, both GHCR images live).
+- Release 0.10.0 — shipped and published (tag `v0.10.0`, release run
+  34545220536 succeeded, both GHCR images live).
 - Phase 30 — Track recommendation explanations (`explain` parity): reasons
   citing listened tracks on the function, service, API, CLI, and dashboard.
 - Phase 31 — Cold-start fallback: users without track listening history get
@@ -90,12 +90,12 @@ verify on the pre-existing CI red). Treat 0.6.0 as the published release.
   keeps `evaluate-tracks` output parity with the artist evaluator.
 - Phase 34 — Track evaluation also reports `serendipity_at_k`, surfacing
   whether relevant recommendations come from the popularity long tail.
+- Release 0.11.0 — shipped and published (tag `v0.11.0`, release run
+  34546595097 succeeded, both GHCR images live).
 
 ## Next steps
 
-1. Release 0.11.0 (tag `v0.11.0`, verify release workflow publishes both
-   GHCR images).
-2. Plan 0.12.0 scope — candidates: hybrid taste-driven track
+1. Plan 0.12.0 scope — candidates: hybrid taste-driven track
    recommendations (ALS artist affinities mapped to tracks), dashboard
    track-explanation coverage display, and Jupyter walkthrough notebooks.
 
