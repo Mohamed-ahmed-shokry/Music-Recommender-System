@@ -1531,6 +1531,7 @@ def _print_track_metric_row(
     typer.echo(f"  Catalog coverage: {metrics['catalog_coverage']:.4f}")
     typer.echo(f"  Average popularity: {metrics['average_popularity']:.4f}")
     typer.echo(f"  Novelty@{top_k}: {metrics['novelty_at_k']:.4f}")
+    typer.echo(f"  Explanation coverage: {metrics['explanation_coverage']:.4f}")
 
 
 if __name__ == "__main__":

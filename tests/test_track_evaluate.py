@@ -93,10 +93,12 @@ def test_evaluate_track_holdout_returns_bounded_metrics() -> None:
         "catalog_coverage",
         "average_popularity",
         "novelty_at_k",
+        "explanation_coverage",
     }
     assert all(value >= 0.0 for value in metrics.values())
     assert metrics["catalog_coverage"] <= 1.0
     assert metrics["novelty_at_k"] <= 1.0
+    assert metrics["explanation_coverage"] <= 1.0
 
 
 def test_evaluate_track_holdout_rejects_invalid_parameters() -> None:
@@ -145,6 +147,7 @@ def test_evaluate_track_holdout_compares_baseline() -> None:
             "catalog_coverage",
             "average_popularity",
             "novelty_at_k",
+            "explanation_coverage",
         }
 
 

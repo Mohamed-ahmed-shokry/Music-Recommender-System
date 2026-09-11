@@ -13,6 +13,7 @@ import pandas as pd
 from music_recommender.evaluate import (
     average_popularity,
     catalog_coverage,
+    explanation_coverage,
     map_at_k,
     ndcg_at_k,
     novelty_at_k,
@@ -73,6 +74,7 @@ def _summarize_track_lists(
     top_k: int,
     catalog: set[str],
     resources: TrackServingResources,
+    explanation_coverage_value: float = 0.0,
 ) -> dict[str, float]:
     """Average ranking metrics over per-user recommendation lists."""
     precisions = [
@@ -97,6 +99,7 @@ def _summarize_track_lists(
             recommended_lists, resources.track_stats
         ),
         "novelty_at_k": novelty_at_k(recommended_lists, resources.track_stats),
+        "explanation_coverage": explanation_coverage_value,
     }
 
 
@@ -137,25 +140,31 @@ def evaluate_track_holdout(
         similarity_lists: list[list[str]] = []
         popularity_lists: list[list[str]] = []
         relevant_lists: list[list[str]] = []
+        explained_recommendations: list[list[dict[str, Any]]] = []
+        track_name_lookup = {
+            str(row.track_id): str(row.track_name)
+            for row in metadata_df.itertuples(index=False)
+        }
         for user_id, user_test in test_df.groupby("user_id"):
             relevant = sorted({str(track_id) for track_id in user_test["track_id"]})
-            similarity_lists.append(
-                [
-                    rec["track_id"]
-                    for rec in recommend_tracks_for_user(
-                        user_id=str(user_id),
-                        user_track_matrix=resources.user_track_matrix,
-                        track_similarity_matrix=resources.similarity_matrix,
-                        track_id_to_index=resources.track_id_to_index,
-                        top_k=top_k,
-                        include_listened=include_listened,
-                        track_stats=resources.track_stats,
-                        feature_matrix=resources.feature_matrix,
-                        popularity_penalty=popularity_penalty,
-                        diversity=diversity,
-                    )
-                ]
+            similarity_recommendations = recommend_tracks_for_user(
+                user_id=str(user_id),
+                user_track_matrix=resources.user_track_matrix,
+                track_similarity_matrix=resources.similarity_matrix,
+                track_id_to_index=resources.track_id_to_index,
+                top_k=top_k,
+                include_listened=include_listened,
+                track_stats=resources.track_stats,
+                feature_matrix=resources.feature_matrix,
+                popularity_penalty=popularity_penalty,
+                diversity=diversity,
+                explain=True,
+                track_name_lookup=track_name_lookup,
             )
+            similarity_lists.append(
+                [rec["track_id"] for rec in similarity_recommendations]
+            )
+            explained_recommendations.append(similarity_recommendations)
             relevant_lists.append(relevant)
             if compare_baseline:
                 popularity_lists.append(
@@ -172,7 +181,14 @@ def evaluate_track_holdout(
                 )
         similarity_folds.append(
             _summarize_track_lists(
-                similarity_lists, relevant_lists, top_k, catalog, resources
+                similarity_lists,
+                relevant_lists,
+                top_k,
+                catalog,
+                resources,
+                explanation_coverage_value=explanation_coverage(
+                    explained_recommendations
+                ),
             )
         )
         if compare_baseline:
