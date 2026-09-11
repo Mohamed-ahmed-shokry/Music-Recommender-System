@@ -58,6 +58,7 @@ The current system:
 - explains recommendations with score components and matched metadata;
 - serves popular fallback recommendations for unknown users;
 - finds similar artists from ALS factors, metadata, or a hybrid of both;
+- recommends tracks with an optional hybrid artist-taste + audio-feature blend;
 - exposes searchable, filterable artist catalog discovery;
 - stores everything needed for serving in a versioned artifact bundle;
 - compares ALS, popularity, content-only, and hybrid strategies;
@@ -490,20 +491,24 @@ uv run python -m music_recommender.cli popular-tracks --top-k 10
 ```
 
 Tune track recommendations with a popularity penalty or audio-feature
-diversity, matching the artist-side knobs, and show why each track was
-recommended:
+diversity, matching the artist-side knobs, show why each track was
+recommended, or blend collaborative artist taste into the ranking:
 
 ```bash
 uv run python -m music_recommender.cli track-recommendations --user-id user_1 --top-k 10 --popularity-penalty 0.3 --diversity 0.5 --explain
+uv run python -m music_recommender.cli track-recommendations --user-id user_1 --top-k 10 --method hybrid --content-weight 0.5
 ```
 
 Users with a profile but no track history get popularity fallbacks so track
-recommendations never come back empty.
+recommendations never come back empty. Hybrid hits include
+`score_components` showing the content, collaborative, and blended scores.
 
-Evaluate track similarity with repeated per-user holdouts:
+Evaluate track similarity with repeated per-user holdouts, optionally with
+the hybrid arm that trains the artist-taste model on each fold:
 
 ```bash
 uv run python -m music_recommender.cli evaluate-tracks --top-k 10 --folds 2
+uv run python -m music_recommender.cli evaluate-tracks --top-k 10 --folds 2 --method hybrid --content-weight 0.5
 ```
 
 Track evaluation reports precision, recall, MAP, NDCG, catalog coverage,
@@ -549,7 +554,7 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/popular-artists?top_k=10` | Popular artist recommendations |
 | `GET` | `/recommend/user/{user_id}?top_k=10&content_weight=0.25&explain=true` | Hybrid personalized or fallback recommendations |
 | `GET` | `/recommend/user/{user_id}/ltr?top_k=10&diversity=0.2&popularity_penalty=0.1` | LTR re-ranked personalized recommendations |
-| `GET` | `/tracks/recommend/{user_id}?top_k=10&popularity_penalty=0.1&diversity=0.2&explain=true` | Track recommendations with audio-feature similarity, ranking knobs, and explanations |
+| `GET` | `/tracks/recommend/{user_id}?top_k=10&popularity_penalty=0.1&diversity=0.2&explain=true&method=hybrid&content_weight=0.5` | Track recommendations with audio-feature similarity, optional hybrid artist-taste blend, ranking knobs, and explanations |
 | `GET` | `/tracks/similar/{track_id}?top_k=10` | Tracks similar to a selected track by audio features |
 | `GET` | `/tracks/popular?top_k=10` | Popular track recommendations |
 | `GET` | `/tracks/catalog?query=hit&artist=Drake&limit=25` | Search and page through the track catalog |
@@ -569,7 +574,7 @@ curl "http://127.0.0.1:8000/popular-artists?top_k=10"
 curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10&content_weight=0.25&explain=true"
 curl "http://127.0.0.1:8000/recommend/user/user_1?top_k=10&diversity=0.2&popularity_penalty=0.1"
 curl "http://127.0.0.1:8000/recommend/user/user_1/ltr?top_k=10&diversity=0.2&popularity_penalty=0.1"
-curl "http://127.0.0.1:8000/tracks/recommend/user_1?top_k=10&popularity_penalty=0.1&diversity=0.2&explain=true"
+curl "http://127.0.0.1:8000/tracks/recommend/user_1?top_k=10&popularity_penalty=0.1&diversity=0.2&explain=true&method=hybrid&content_weight=0.5"
 curl "http://127.0.0.1:8000/tracks/similar/track_1?top_k=10"
 curl "http://127.0.0.1:8000/tracks/popular?top_k=10"
 curl "http://127.0.0.1:8000/tracks/catalog?query=hit&artist=Drake&limit=25"
@@ -667,12 +672,12 @@ docker build --target dashboard-runtime --tag music-recommender-dashboard .
 docker run --rm --publish 8501:8501 music-recommender-dashboard
 ```
 
-Version tags that match `pyproject.toml`, for example `v0.11.0`, run the complete
+Version tags that match `pyproject.toml`, for example `v0.12.0`, run the complete
 quality gate and publish both images to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-api:0.11.0
-docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-dashboard:0.11.0
+docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-api:0.12.0
+docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-dashboard:0.12.0
 ```
 
 Published images receive full, major/minor, major, and stable `latest` tags.

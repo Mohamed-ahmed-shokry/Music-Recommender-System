@@ -7,6 +7,29 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-12
+
+### Added
+
+- Hybrid taste-driven track recommendations (`method=hybrid`): a small ALS
+  model fit on artist plays captures collaborative artist taste, which is
+  mapped to per-track affinities and blended with the audio-feature
+  ("content") similarity via `content.py::hybrid_scores`. `content_weight`
+  balances the two signals (0.0 = pure artist taste, 1.0 = pure content),
+  matching the artist-side hybrid math. Hybrid recommendations carry
+  `score_components` with content, collaborative, and hybrid scores.
+- Hybrid support across surfaces: `recommend_tracks_for_user`,
+  `RecommenderService.recommend_tracks` (`method`, `content_weight`),
+  `GET /tracks/recommend/{user_id}?method=hybrid&content_weight=0.5`, the
+  `track-recommendations --method --content-weight` CLI, and a Method
+  selector + Artist-taste slider on the dashboard Tracks tab.
+- Hybrid track evaluation: `evaluate_track_holdout` and the
+  `evaluate-tracks` CLI accept `method`/`content_weight`, training the
+  artist-taste model on each fold's held-in interactions so the hybrid arm
+  can be costed side-by-side with the pure content arm.
+- New track helpers for reuse: `train_track_artist_taste`,
+  `artist_taste_scores_for_user`, and `artist_affinity_to_track_scores`.
+
 ## [0.11.0] - 2026-09-11
 
 ### Added
@@ -319,7 +342,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Pinned release actions to immutable commits and disabled reusable caches and
   persisted checkout credentials in artifact-publishing jobs.
 
-[Unreleased]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.12.0
 [0.11.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.11.0
 [0.10.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.10.0
 [0.9.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.9.0

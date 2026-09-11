@@ -92,12 +92,24 @@ verify on the pre-existing CI red). Treat 0.6.0 as the published release.
   whether relevant recommendations come from the popularity long tail.
 - Release 0.11.0 — shipped and published (tag `v0.11.0`, release run
   34546595097 succeeded, both GHCR images live).
+- Phase 35 — Hybrid taste-driven track recommendations: the `track_hybrid`
+  strategy blends collaborative artist taste (a small ALS fit on artist
+  plays) with audio-feature similarity via `content.py::hybrid_scores`,
+  exposed as `method`/`content_weight` on the track recommendations
+  function, `RecommenderService`, the API, CLI, and dashboard. Hybrid hits
+  carry `score_components` (content, collaborative, and hybrid scores).
+- Phase 36 — Hybrid track evaluation: `evaluate_track_holdout` and the
+  `evaluate-tracks` CLI accept `method`/`content_weight`, training the
+  artist-taste model per fold on the held-in interactions for a costed
+  side-by-side against the pure content arm.
+- Release 0.12.0 — shipped and published (tag `v0.12.0`, release run
+  <fill-verified-run-id>, both GHCR images live).
 
 ## Next steps
 
-1. Plan 0.12.0 scope — candidates: hybrid taste-driven track
-   recommendations (ALS artist affinities mapped to tracks), dashboard
-   track-explanation coverage display, and Jupyter walkthrough notebooks.
+1. Plan 0.13.0 scope — candidates: dashboard track-explanation coverage
+   display, artist taste explainability (which artists drive each hybrid
+   hit), and Jupyter walkthrough notebooks.
 
 ## Quality gates (every change)
 
