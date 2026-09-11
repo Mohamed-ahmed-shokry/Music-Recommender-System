@@ -523,16 +523,21 @@ class RecommenderService:
         self,
         user_id: str,
         top_k: int,
-        include_listened: bool = False,
-        popularity_penalty: float = 0.0,
-        diversity: float = 0.0,
+        include_listened: bool | None = None,
+        popularity_penalty: float | None = None,
+        diversity: float | None = None,
         explain: bool = False,
     ) -> dict[str, Any]:
         """Recommend tracks for a user with audio-feature similarity.
 
-        Users with no listening history fall back to popular tracks instead of
+        Ranking knobs fall back to the champion settings stored on the
+        artifact, matching the artist recommendation surfaces. Users with no
+        track listening history fall back to popular tracks instead of
         receiving an empty list.
         """
+        include_listened, popularity_penalty, diversity = self._ranking_overrides(
+            include_listened, popularity_penalty, diversity
+        )
         validate_ranking_parameters(top_k, diversity, popularity_penalty)
         if type(explain) is not bool:
             raise ValueError("explain must be a boolean.")

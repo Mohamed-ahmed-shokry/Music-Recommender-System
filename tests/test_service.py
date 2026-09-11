@@ -725,6 +725,68 @@ def test_track_resources_reports_missing_csv_data(
         service._track_resources()
 
 
+def test_recommend_tracks_honors_champion_ranking_config(tmp_path: Path) -> None:
+    from music_recommender.tracks import build_track_serving_resources
+
+    champion = {
+        "include_listened": False,
+        "popularity_penalty": 1.0,
+        "diversity": 0.0,
+    }
+    service = create_service(tmp_path, ranking_config=champion)
+    track_df = pd.DataFrame(
+        {
+            "user_id": ["user_9", "user_a", "user_a"],
+            "track_id": ["track_9", "track_10", "track_11"],
+            "track_name": ["Rare Song", "Popular Song", "Obscure Song"],
+            "artist_id": ["artist_9"] * 3,
+            "artist_name": ["Rare Artist"] * 3,
+            "play_count": [5, 100, 2],
+        }
+    )
+    meta_df = pd.DataFrame(
+        {
+            "track_id": ["track_9", "track_10", "track_11"],
+            "track_name": ["Rare Song", "Popular Song", "Obscure Song"],
+            "artist_id": ["artist_9"] * 3,
+            "artist_name": ["Rare Artist"] * 3,
+            "album_id": ["album_9", "album_10", "album_11"],
+            "album_name": ["Rare Album"] * 3,
+            "duration_ms": [200000] * 3,
+            "popularity": [10, 90, 5],
+            "explicit": [False] * 3,
+            "danceability": [0.5, 0.5, 0.5],
+            "energy": [0.5, 0.5, 0.5],
+            "key": [0, 0, 0],
+            "loudness": [-6.0, -6.0, -6.0],
+            "mode": [1, 1, 1],
+            "speechiness": [0.05, 0.05, 0.05],
+            "acousticness": [0.1, 0.1, 0.1],
+            "instrumentalness": [0.0, 0.0, 0.0],
+            "liveness": [0.1, 0.1, 0.1],
+            "valence": [0.5, 0.5, 0.5],
+            "tempo": [110.0, 110.0, 110.0],
+            "time_signature": [4, 4, 4],
+        }
+    )
+    resources = build_track_serving_resources(track_df, meta_df)
+    # track_10 is most similar to the listened track_9 but also the most
+    # popular; the champion penalty should demote it below track_11.
+    resources.similarity_matrix = np.array(
+        [
+            [1.0, 0.99, 0.2],
+            [0.99, 1.0, 0.1],
+            [0.2, 0.1, 1.0],
+        ]
+    )
+    service.artifact.track_bundle = resources
+
+    result = service.recommend_tracks(user_id="user_9", top_k=2)
+
+    assert result["strategy"] == "track_similarity"
+    assert result["recommendations"][0]["track_id"] == "track_11"
+
+
 def test_recommend_tracks_prefers_bundled_resources(tmp_path: Path) -> None:
     from music_recommender.tracks import build_track_serving_resources
 
