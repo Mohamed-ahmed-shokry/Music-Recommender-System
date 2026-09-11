@@ -103,7 +103,7 @@ verify on the pre-existing CI red). Treat 0.6.0 as the published release.
   artist-taste model per fold on the held-in interactions for a costed
   side-by-side against the pure content arm.
 - Release 0.12.0 — shipped and published (tag `v0.12.0`, release run
-  <fill-verified-run-id>, both GHCR images live).
+  34652949643 succeeded, both GHCR images live).
 
 ## Next steps
 
