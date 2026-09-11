@@ -42,6 +42,7 @@ from music_recommender.tracks import (
     TrackServingResources,
     get_similar_tracks,
     load_track_serving_resources,
+    popular_tracks,
     recommend_tracks_for_user,
 )
 
@@ -549,6 +550,18 @@ class RecommenderService:
             "recommendations": [
                 self._enrich_track_recommendation(resources, rec)
                 for rec in recommendations
+            ],
+        }
+
+    def popular_tracks(self, top_k: int) -> dict[str, Any]:
+        """Return globally popular tracks from the track data."""
+        validate_ranking_parameters(top_k)
+        resources = self._track_resources()
+        return {
+            "strategy": "popular_baseline",
+            "recommendations": [
+                self._enrich_track_recommendation(resources, rec)
+                for rec in popular_tracks(resources.track_stats, top_k=top_k)
             ],
         }
 

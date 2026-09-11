@@ -375,6 +375,15 @@ def similar_tracks(
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
+@app.get("/tracks/popular")
+def popular_tracks(top_k: PositiveTopK = 10) -> dict[str, object]:
+    """Return globally popular tracks from the track data."""
+    try:
+        return get_service().popular_tracks(top_k=top_k)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
 @app.get("/tracks/catalog")
 def browse_tracks(
     query: OptionalCatalogText = None,

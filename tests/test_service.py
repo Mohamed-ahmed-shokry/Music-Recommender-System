@@ -570,6 +570,19 @@ def test_similar_tracks_returns_enriched_similarity(tmp_path: Path) -> None:
     assert all(item["track_id"] != "track_1" for item in result["similar_tracks"])
 
 
+def test_popular_tracks_returns_ranked_hits(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    result = service.popular_tracks(top_k=2)
+
+    assert result["strategy"] == "popular_baseline"
+    assert len(result["recommendations"]) == 2
+    assert {item["popularity_rank"] for item in result["recommendations"]} == {1, 2}
+
+    with pytest.raises(ValueError, match="top_k"):
+        service.popular_tracks(top_k=0)
+
+
 def test_similar_tracks_rejects_unknown_track(tmp_path: Path) -> None:
     service = create_service(tmp_path)
 

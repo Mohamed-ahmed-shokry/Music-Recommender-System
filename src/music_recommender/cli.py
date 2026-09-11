@@ -66,6 +66,9 @@ from music_recommender.tracks import (
     load_and_validate_track_metadata,
     recommend_tracks_for_user,
 )
+from music_recommender.tracks import (
+    popular_tracks as rank_tracks_by_popularity,
+)
 
 # Optional Spotify imports
 try:
@@ -1270,6 +1273,31 @@ def prepare_track_data(
     typer.echo(f"Artists: {df['artist_id'].nunique()}")
     typer.echo(f"Interactions: {len(df)}")
     typer.echo(f"Track metadata rows: {len(metadata_df)}")
+
+
+@app.command()
+def popular_tracks(top_k: int = DEFAULT_TOP_K) -> None:
+    """Show globally popular tracks from the track data."""
+    try:
+        df = load_and_validate_track_interactions(RAW_TRACK_DATA_PATH)
+        track_stats = build_track_stats(df)
+        recommendations = rank_tracks_by_popularity(track_stats, top_k=top_k)
+
+        metadata_df = load_and_validate_track_metadata(RAW_TRACK_METADATA_PATH, df)
+        lookup = {
+            row.track_id: row.track_name for row in metadata_df.itertuples(index=False)
+        }
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo("Popular tracks:")
+    if not recommendations:
+        typer.echo("  No tracks available.")
+    else:
+        for i, rec in enumerate(recommendations, 1):
+            track_name = lookup.get(rec["track_id"], rec["track_id"])
+            typer.echo(f"  {i}. {track_name} (plays: {rec['score']:.0f})")
 
 
 @app.command()

@@ -24,6 +24,19 @@ class FakeService:
             ][:top_k],
         }
 
+    def popular_tracks(self, top_k: int) -> dict[str, object]:
+        return {
+            "strategy": "popular_baseline",
+            "recommendations": [
+                {
+                    "track_id": "track_1",
+                    "track_name": "Hit",
+                    "artist_name": "Test Artist",
+                    "score": 10.0,
+                }
+            ][:top_k],
+        }
+
     def browse_artists(
         self,
         *,
@@ -915,6 +928,19 @@ def test_track_catalog_route_rejects_invalid_pagination() -> None:
         response = client.get("/tracks/catalog", params={"offset": -1})
 
     assert response.status_code == 422
+
+
+def test_popular_tracks_route_returns_hits() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/tracks/popular", params={"top_k": 1})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["strategy"] == "popular_baseline"
+    assert body["recommendations"][0]["track_id"] == "track_1"
 
 
 @pytest.mark.parametrize(

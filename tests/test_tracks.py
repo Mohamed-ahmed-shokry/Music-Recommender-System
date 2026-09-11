@@ -13,6 +13,7 @@ from music_recommender.tracks import (
     load_and_validate_track_metadata,
     load_track_serving_resources,
     normalize_track_interactions,
+    popular_tracks,
     recommend_popular_tracks,
     recommend_tracks_for_user,
     validate_track_interactions,
@@ -261,6 +262,20 @@ def test_get_similar_tracks() -> None:
     out = get_similar_tracks("track_1", sim, mapping, top_k=1)
     assert out[0]["track_id"] == "track_2"
     assert get_similar_tracks("missing", sim, mapping) == []
+
+
+def test_popular_tracks_ranks_globally() -> None:
+    resources = build_track_serving_resources(valid_track_df(), valid_metadata_df())
+
+    top = popular_tracks(resources.track_stats, top_k=1)
+
+    assert len(top) == 1
+    assert top[0]["track_id"] == "track_1"
+    assert top[0]["popularity_rank"] == 1
+    assert top[0]["score"] == 12
+
+    with pytest.raises(ValueError, match="top_k"):
+        popular_tracks(resources.track_stats, top_k=0)
 
 
 def test_load_track_files_roundtrip(tmp_path: Path) -> None:

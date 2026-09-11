@@ -1727,6 +1727,14 @@ def test_track_recommendations_command_prints_tracks() -> None:
     assert "Track recommendations for user_1:" in result.output
 
 
+def test_popular_tracks_command_prints_ranked_hits() -> None:
+    result = runner.invoke(cli.app, ["popular-tracks", "--top-k", "3"])
+
+    assert result.exit_code == 0
+    assert "Popular tracks:" in result.output
+    assert "plays:" in result.output
+
+
 def test_track_recommendations_command_supports_ranking_knobs() -> None:
     result = runner.invoke(
         cli.app,

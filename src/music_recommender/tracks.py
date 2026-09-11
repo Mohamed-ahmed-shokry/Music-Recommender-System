@@ -384,15 +384,8 @@ def recommend_popular_tracks(
     listened_tracks = set(
         user_track_matrix.columns[user_track_matrix.loc[user_id] > 0].tolist()
     )
-    ranked = sorted(
-        track_stats,
-        key=lambda track_id: (
-            -float(track_stats[track_id].get("total_plays", 0)),
-            track_id,
-        ),
-    )
     recommendations: list[dict[str, Any]] = []
-    for track_id in ranked:
+    for track_id, score in _ranked_track_plays(track_stats):
         if not include_listened and track_id in listened_tracks:
             continue
         if len(recommendations) >= top_k:
@@ -400,10 +393,49 @@ def recommend_popular_tracks(
         recommendations.append(
             {
                 "track_id": track_id,
-                "score": float(track_stats[track_id].get("total_plays", 0)),
+                "score": score,
             }
         )
     return recommendations
+
+
+def popular_tracks(
+    track_stats: dict[str, TrackStats],
+    top_k: int,
+) -> list[dict[str, Any]]:
+    """Return tracks ranked by training-set popularity."""
+    validate_ranking_parameters(top_k)
+    recommendations: list[dict[str, Any]] = []
+    for track_id, score in _ranked_track_plays(track_stats):
+        stats = track_stats[track_id]
+        recommendations.append(
+            {
+                "track_id": track_id,
+                "track_name": str(stats.get("track_name", "")),
+                "score": score,
+                "popularity_rank": len(recommendations) + 1,
+            }
+        )
+        if len(recommendations) == top_k:
+            break
+    return recommendations
+
+
+def _ranked_track_plays(
+    track_stats: dict[str, TrackStats],
+) -> list[tuple[str, float]]:
+    """Return track IDs ranked by total plays, ties broken by ID."""
+    ranked = sorted(
+        track_stats,
+        key=lambda track_id: (
+            -float(track_stats[track_id].get("total_plays", 0)),
+            track_id,
+        ),
+    )
+    return [
+        (track_id, float(track_stats[track_id].get("total_plays", 0)))
+        for track_id in ranked
+    ]
 
 
 def get_similar_tracks(
