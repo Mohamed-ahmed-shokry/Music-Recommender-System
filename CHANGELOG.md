@@ -7,6 +7,30 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-11
+
+### Added
+
+- Popularity penalty and diversity knobs for track recommendations, matched to
+  the artist side. `recommend_tracks_for_user` applies an MMR-style diversity
+  pass over the audio-feature matrix and a play-ranked popularity penalty; the
+  service (`popularity_penalty`, `diversity`), API
+  (`GET /tracks/recommend/{user_id}?popularity_penalty=&diversity=`), CLI
+  (`track-recommendations --popularity-penalty --diversity`), and dashboard
+  Tracks tab all expose them.
+- Audio-feature matrix persisted on `TrackServingResources` (`feature_matrix`)
+  and validated on artifact bundles so diversity reranking works for both
+  live-CSV and bundled track resources.
+- Tunable track evaluation: `evaluate_track_holdout` and `evaluate-tracks`
+  forward the same popularity-penalty and diversity knobs into the holdout
+  recommender for tuning experiments.
+- Persistent track evaluation reports: `write_track_report` /
+  `load_track_report` and `evaluate-tracks --report-path`, storing the run
+  configuration and per-arm metrics under a stable schema in `reports/`.
+- Top tracks baseline surfaced across surfaces: the `popular_tracks` helper,
+  `RecommenderService.popular_tracks`, `GET /tracks/popular`, and a
+  `popular-tracks` CLI command.
+
 ## [0.9.0] - 2026-09-08
 
 ### Added
@@ -275,7 +299,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Pinned release actions to immutable commits and disabled reusable caches and
   persisted checkout credentials in artifact-publishing jobs.
 
-[Unreleased]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.10.0
 [0.9.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.9.0
 [0.8.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.8.0
 [0.7.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.7.0

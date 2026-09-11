@@ -64,16 +64,30 @@ verify on the pre-existing CI red). Treat 0.6.0 as the published release.
   succeeded, both GHCR images live).
 - Phase 25 — Track popularity baseline (`recommend_popular_tracks`) with
   `evaluate-tracks --compare-baseline` reporting both arms.
-- Release 0.9.0 — shipped (tag `v0.9.0`, release workflow running).
+- Release 0.9.0 — shipped and published (tag `v0.9.0`, release run #5
+  succeeded, both GHCR images live).
+- Phase 26 — Track ranking knobs (popularity penalty + audio-feature
+  diversity) exposed across service, API, CLI, and dashboard, with the
+  audio-feature matrix persisted on `TrackServingResources` and validated on
+  artifact bundles.
+- Phase 27 — Tunable track evaluation: `evaluate_track_holdout` and
+  `evaluate-tracks` accept the same penalty/diversity knobs.
+- Phase 28 — Track evaluation reports: `write_track_report` /
+  `load_track_report` and `evaluate-tracks --report-path` write stable JSON
+  run reports to `reports/`.
+- Phase 29 — Top tracks baseline surfaced across surfaces: `popular_tracks`
+  helper, `RecommenderService.popular_tracks`, `GET /tracks/popular`, and a
+  `popular-tracks` CLI command.
 
 ## Next steps
 
-1. Confirm the `v0.9.0` release workflow publishes both GHCR images.
-2. Plan 0.10.0 scope.
+1. Release 0.10.0 (tag `v0.10.0`, verify release workflow publishes both
+   GHCR images).
+2. Plan 0.11.0 scope.
 
 ## Quality gates (every change)
 
-- `uv run pytest -q` — 468+ tests must pass.
+- `uv run pytest -q` — 560+ tests must pass.
 - `uv run ruff check .`
 - `uv run mypy`
 - Coverage ≥75% (`pytest --cov`).
