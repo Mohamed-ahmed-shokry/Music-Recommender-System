@@ -7,6 +7,26 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-11
+
+### Added
+
+- Track recommendation explanations (`explain`), matching the artist side.
+  `recommend_tracks_for_user` attaches reasons citing the listened tracks
+  that drove each recommendation; the service, API
+  (`GET /tracks/recommend/{user_id}?explain=true`), CLI
+  (`track-recommendations --explain`), and dashboard Tracks tab (Why column)
+  all expose them.
+- Cold-start fallback for track recommendations: users with a listening
+  profile but no track history receive popular tracks
+  (`strategy: popular_fallback`) instead of an empty list.
+- Track recommendations honor the artifact champion ranking config via
+  `_ranking_overrides` when callers omit `popularity_penalty`, `diversity`,
+  or `include_listened`, matching the artist surfaces.
+- `explanation_coverage` and `serendipity_at_k` metrics in track holdout
+  evaluation and `evaluate-tracks` output, for parity with the artist
+  evaluator.
+
 ## [0.10.0] - 2026-09-11
 
 ### Added
@@ -299,7 +319,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Pinned release actions to immutable commits and disabled reusable caches and
   persisted checkout credentials in artifact-publishing jobs.
 
-[Unreleased]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.11.0
 [0.10.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.10.0
 [0.9.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.9.0
 [0.8.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.8.0
