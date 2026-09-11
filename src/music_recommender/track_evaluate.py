@@ -19,6 +19,7 @@ from music_recommender.evaluate import (
     novelty_at_k,
     precision_at_k,
     recall_at_k,
+    serendipity_at_k,
 )
 from music_recommender.ranking import validate_ranking_parameters
 from music_recommender.tracks import (
@@ -89,6 +90,10 @@ def _summarize_track_lists(
         ndcg_at_k(recommended, relevant, top_k)
         for recommended, relevant in zip(recommended_lists, relevant_lists, strict=True)
     ]
+    serendipities = [
+        serendipity_at_k(recommended, relevant, resources.track_stats, top_k)
+        for recommended, relevant in zip(recommended_lists, relevant_lists, strict=True)
+    ]
     return {
         "precision_at_k": float(np.mean(precisions)),
         "recall_at_k": float(np.mean(recalls)),
@@ -99,6 +104,7 @@ def _summarize_track_lists(
             recommended_lists, resources.track_stats
         ),
         "novelty_at_k": novelty_at_k(recommended_lists, resources.track_stats),
+        "serendipity_at_k": float(np.mean(serendipities)),
         "explanation_coverage": explanation_coverage_value,
     }
 
