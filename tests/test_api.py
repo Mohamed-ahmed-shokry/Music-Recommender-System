@@ -316,6 +316,30 @@ def test_health_route_uses_loaded_service() -> None:
     assert response.json()["artifact_version"] == "4.0"
 
 
+def test_request_logging_emits_method_path_and_status(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    with (
+        TestClient(api_main.app) as client,
+        caplog.at_level(logging.INFO, logger="music_recommender.api"),
+    ):
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    request_logs = [
+        record
+        for record in caplog.records
+        if "request method=GET path=/health" in record.getMessage()
+    ]
+    assert request_logs
+    assert " status=200 " in request_logs[0].getMessage()
+
+
 def test_openapi_document_exposes_project_metadata() -> None:
     with TestClient(api_main.app) as client:
         response = client.get("/openapi.json")

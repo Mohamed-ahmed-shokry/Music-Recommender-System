@@ -40,6 +40,30 @@ def test_als_model_can_train_on_tiny_matrix() -> None:
     assert model.item_factors.shape[0] == 3
 
 
+def test_training_emits_device_and_shape_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="music_recommender.model"):
+        train_als_model(
+            user_item_matrix=tiny_matrix(),
+            factors=4,
+            regularization=0.01,
+            iterations=2,
+            alpha=10.0,
+            use_gpu=False,
+        )
+
+    training_logs = [
+        record
+        for record in caplog.records
+        if record.getMessage().startswith("trained_als")
+    ]
+    assert training_logs
+    assert "users=3 items=3 factors=4" in training_logs[0].getMessage()
+
+
 def test_saved_model_can_be_loaded(tmp_path: Path) -> None:
     model = train_als_model(
         user_item_matrix=tiny_matrix(),

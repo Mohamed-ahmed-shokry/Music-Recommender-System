@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import warnings
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -19,6 +20,8 @@ from music_recommender.content import ContentArtifacts
 from music_recommender.preprocessing import Mappings
 from music_recommender.tracks import TrackServingResources
 from music_recommender.utils import atomic_joblib_dump, is_finite_number
+
+logger = logging.getLogger(__name__)
 
 ARTIFACT_VERSION = "4.0"
 
@@ -194,6 +197,14 @@ def load_artifact(path: str | Path = ARTIFACT_BUNDLE_PATH) -> RecommenderArtifac
         raise
     except Exception as error:
         raise ValueError("Artifact structure is invalid. Retrain the model.") from error
+    logger.info(
+        "loaded_artifact version=%s users=%s artists=%s tracks=%s ltr=%s",
+        artifact.version,
+        artifact.metadata.get("num_users", "?"),
+        artifact.metadata.get("num_artists", "?"),
+        "yes" if artifact.track_bundle is not None else "no",
+        "yes" if artifact.ltr_model is not None else "no",
+    )
     return artifact
 
 

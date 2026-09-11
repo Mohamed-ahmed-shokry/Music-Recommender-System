@@ -108,6 +108,28 @@ def test_artifact_bundle_saves_and_loads(tmp_path: Path) -> None:
     assert "artist_2" in loaded_artifact.artist_stats
 
 
+def test_loading_artifact_emits_summary_log(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    artifact = create_test_artifact(tmp_path)
+    artifact_path = tmp_path / "artifact.joblib"
+    save_artifact(artifact, artifact_path)
+
+    with caplog.at_level(logging.INFO, logger="music_recommender.artifacts"):
+        load_artifact(artifact_path)
+
+    load_logs = [
+        record
+        for record in caplog.records
+        if record.getMessage().startswith("loaded_artifact")
+    ]
+    assert load_logs
+    assert "version=4.0 users=2 artists=3" in load_logs[0].getMessage()
+
+
 def test_artifact_without_ranking_config_defaults_to_neutral(tmp_path: Path) -> None:
     artifact = create_test_artifact(tmp_path)
     del artifact.ranking_config

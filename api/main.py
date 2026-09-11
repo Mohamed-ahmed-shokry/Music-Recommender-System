@@ -1,5 +1,6 @@
 """FastAPI app for serving music recommendations."""
 
+import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -13,7 +14,12 @@ from api.middleware import RequestSafetyMiddleware
 from music_recommender import __version__
 from music_recommender.config import DEFAULT_CONTENT_WEIGHT, REPORTS_DIR
 from music_recommender.evaluate import load_ablation_summary_report
+from music_recommender.logging_setup import configure_logging
 from music_recommender.service import RecommenderService
+
+configure_logging()
+
+logger = logging.getLogger("music_recommender.api.main")
 
 _CORS_ORIGINS_ENV = "CORS_ORIGINS"
 _CORS_ORIGINS_RAW = os.getenv(_CORS_ORIGINS_ENV, "*")
@@ -99,9 +105,14 @@ def load_service() -> None:
     try:
         service = RecommenderService.from_artifacts()
         service_load_error = None
+        logger.info(
+            "service_loaded users=%s",
+            service.artifact.metadata.get("num_users"),
+        )
     except (FileNotFoundError, ValueError) as error:
         service = None
         service_load_error = str(error)
+        logger.warning("service_unavailable reason=%s", error)
 
 
 @asynccontextmanager

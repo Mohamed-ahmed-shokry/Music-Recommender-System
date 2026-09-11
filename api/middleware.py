@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from time import perf_counter
 from uuid import uuid4
@@ -9,6 +10,8 @@ from uuid import uuid4
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+logger = logging.getLogger("music_recommender.api.middleware")
 
 _REQUEST_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
@@ -51,6 +54,14 @@ class RequestSafetyMiddleware:
                 response_headers["x-request-id"] = request_id
                 response_headers["x-process-time"] = (
                     f"{perf_counter() - started_at:.6f}"
+                )
+                logger.info(
+                    "request method=%s path=%s status=%d request_id=%s duration=%.3fs",
+                    scope.get("method"),
+                    scope.get("path"),
+                    message.get("status", -1),
+                    request_id,
+                    perf_counter() - started_at,
                 )
             await send(message)
 

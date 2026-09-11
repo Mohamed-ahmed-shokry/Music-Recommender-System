@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import warnings
 from pathlib import Path
+from time import perf_counter
 from typing import TYPE_CHECKING
 
 import joblib
@@ -42,6 +44,8 @@ from music_recommender.utils import atomic_joblib_dump, is_finite_number
 
 if TYPE_CHECKING:
     from implicit.als import AlternatingLeastSquares
+
+logger = logging.getLogger(__name__)
 
 
 def _create_als_model(
@@ -93,6 +97,7 @@ def train_als_model(
         use_gpu=use_gpu,
     )
     item_user_matrix = (user_item_matrix * alpha).T.tocsr()
+    started_at = perf_counter()
     try:
         model = _create_als_model(
             factors=factors,
@@ -134,6 +139,16 @@ def train_als_model(
         model = model.to_cpu()
         model.training_device = "gpu"
         model.gpu_fallback_reason = None
+    logger.info(
+        "trained_als model device=%s users=%d items=%d factors=%d alpha=%s "
+        "duration=%.2fs",
+        model.training_device,
+        user_item_matrix.shape[0],
+        user_item_matrix.shape[1],
+        factors,
+        alpha,
+        perf_counter() - started_at,
+    )
     return model
 
 
@@ -310,4 +325,11 @@ def train_and_save_model(
     )
     save_artifact(artifact, artifact_path)
     save_model(model, model_path)
+    logger.info(
+        "training_complete users=%d artists=%d content_weight=%s gpu=%s",
+        user_item_matrix.shape[0],
+        user_item_matrix.shape[1],
+        content_weight,
+        use_gpu,
+    )
     return model, user_item_matrix, mappings

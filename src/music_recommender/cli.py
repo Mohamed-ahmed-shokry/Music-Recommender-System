@@ -43,6 +43,7 @@ from music_recommender.evaluate import (
     write_ablation_report,
     write_ablation_summary_report,
 )
+from music_recommender.logging_setup import configure_logging
 from music_recommender.metadata import load_and_validate_artist_metadata
 from music_recommender.model import train_and_save_model
 from music_recommender.preprocessing import prepare_training_data
@@ -112,6 +113,7 @@ def main(
     ),
 ) -> None:
     """Train, evaluate, and serve hybrid artist recommendations."""
+    configure_logging()
 
 
 def _format_artifact_age(created_at: str) -> str:
