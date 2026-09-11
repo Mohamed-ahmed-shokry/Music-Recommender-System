@@ -5,6 +5,8 @@ import pandas as pd
 import pytest
 
 from music_recommender.tracks import (
+    artist_affinity_to_track_scores,
+    artist_taste_scores_for_user,
     build_track_content_matrix,
     build_track_serving_resources,
     build_track_stats,
@@ -16,6 +18,7 @@ from music_recommender.tracks import (
     popular_tracks,
     recommend_popular_tracks,
     recommend_tracks_for_user,
+    train_track_artist_taste,
     validate_track_interactions,
     validate_track_metadata,
 )
@@ -150,6 +153,127 @@ def test_recommend_tracks_for_user() -> None:
         [[0.0, 0.0]], index=["user_3"], columns=["track_1", "track_2"]
     )
     assert recommend_tracks_for_user("user_3", empty_matrix, sim, mapping) == []
+
+
+def test_recommend_tracks_for_user_hybrid_blend() -> None:
+    user_track_matrix = pd.DataFrame(
+        [[5.0, 0.0], [0.0, 4.0]],
+        index=["user_1", "user_2"],
+        columns=["track_1", "track_2"],
+    )
+    sim = np.array([[1.0, 0.2], [0.2, 1.0]])
+    mapping = {"track_1": 0, "track_2": 1}
+    # User 1 listens to track_1 but strongly prefers artists track_2 maps to.
+    artist_taste_per_track = np.array([0.1, 0.9])
+    recs = recommend_tracks_for_user(
+        "user_1",
+        user_track_matrix,
+        sim,
+        mapping,
+        top_k=1,
+        artist_taste_per_track=artist_taste_per_track,
+        content_weight=0.25,
+    )
+    assert recs
+    assert recs[0]["track_id"] == "track_2"
+    components = recs[0]["score_components"]
+    assert set(components) == {
+        "content_score",
+        "collaborative_score",
+        "hybrid_score",
+    }
+
+    # A pure content weight reproduces the similarity ranking.
+    pure = recommend_tracks_for_user(
+        "user_1",
+        user_track_matrix,
+        sim,
+        mapping,
+        top_k=1,
+        content_weight=1.0,
+    )
+    assert pure[0]["track_id"] == "track_2"
+    assert "score_components" not in pure[0]
+
+
+def test_recommend_tracks_for_user_rejects_invalid_hybrid_inputs() -> None:
+    user_track_matrix = pd.DataFrame(
+        [[5.0, 0.0]],
+        index=["user_1"],
+        columns=["track_1", "track_2"],
+    )
+    sim = np.array([[1.0, 0.2], [0.2, 1.0]])
+    mapping = {"track_1": 0, "track_2": 1}
+    with pytest.raises(ValueError, match="artist_taste_per_track must be a finite"):
+        recommend_tracks_for_user(
+            "user_1",
+            user_track_matrix,
+            sim,
+            mapping,
+            artist_taste_per_track=np.array([0.1, np.nan]),
+            content_weight=0.5,
+        )
+    with pytest.raises(ValueError, match="artist_taste_per_track must be a finite"):
+        recommend_tracks_for_user(
+            "user_1",
+            user_track_matrix,
+            sim,
+            mapping,
+            artist_taste_per_track=np.array([0.1, 0.2, 0.3]),
+            content_weight=0.5,
+        )
+    with pytest.raises(ValueError, match="content_weight"):
+        recommend_tracks_for_user(
+            "user_1",
+            user_track_matrix,
+            sim,
+            mapping,
+            artist_taste_per_track=np.array([0.1, 0.9]),
+            content_weight=1.5,
+        )
+
+
+def test_artist_taste_scores_for_user_and_track_map() -> None:
+    df = pd.DataFrame(
+        {
+            "user_id": ["user_1", "user_1", "user_2"],
+            "track_id": ["track_1", "track_2", "track_1"],
+            "track_name": ["Song A1", "Song A2", "Song A1"],
+            "artist_id": ["artist_1", "artist_2", "artist_1"],
+            "artist_name": ["Artist One", "Artist Two", "Artist One"],
+            "play_count": [3, 2, 5],
+        }
+    )
+    model, user_ids, artist_ids = train_track_artist_taste(df)
+    assert list(user_ids) == ["user_1", "user_2"]
+    assert list(artist_ids) == ["artist_1", "artist_2"]
+
+    artist_scores = artist_taste_scores_for_user(model, user_ids, artist_ids, "user_1")
+    assert artist_scores is not None
+    assert artist_scores.shape == (len(artist_ids),)
+
+    track_artists = {"track_1": "artist_1", "track_2": "artist_3"}
+    track_id_to_index = {"track_1": 0, "track_2": 1}
+    per_track = artist_affinity_to_track_scores(
+        artist_scores=artist_scores,
+        artist_id_to_index=artist_ids,
+        track_id_to_index=track_id_to_index,
+        track_artists=track_artists,
+    )
+    assert per_track.shape == (2,)
+    assert np.isfinite(per_track).all()
+
+    unknown_user = artist_taste_scores_for_user(model, user_ids, artist_ids, "ghost")
+    assert unknown_user is None
+    assert np.allclose(
+        artist_affinity_to_track_scores(
+            artist_scores=np.array([0.25, 0.75]),
+            artist_id_to_index={"artist_1": 0, "artist_2": 1},
+            track_id_to_index=track_id_to_index,
+            track_artists=track_artists,
+        ),
+        np.array([0.25, 0.0]),
+    )
 
 
 def test_recommend_tracks_for_user_explains_reasons() -> None:

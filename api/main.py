@@ -347,8 +347,14 @@ def recommend_tracks(
     diversity: UnitInterval = 0.0,
     popularity_penalty: UnitInterval = 0.0,
     explain: bool = False,
+    method: Literal["similarity", "hybrid"] = "similarity",
+    content_weight: UnitInterval | None = None,
 ) -> dict[str, object]:
-    """Return track recommendations for a user with audio-feature similarity."""
+    """Return track recommendations for a user with audio-feature similarity.
+
+    The ``hybrid`` method blends collaborative artist taste with the
+    audio-feature content scores.
+    """
     try:
         return get_service().recommend_tracks(
             user_id=user_id,
@@ -357,6 +363,8 @@ def recommend_tracks(
             diversity=diversity,
             popularity_penalty=popularity_penalty,
             explain=explain,
+            method=method,
+            content_weight=content_weight,
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

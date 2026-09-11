@@ -131,6 +131,43 @@ def test_evaluate_track_holdout_runs_with_tuning_knobs() -> None:
     assert metrics["average_popularity"] >= 0.0
 
 
+def test_evaluate_track_holdout_hybrid_method() -> None:
+    metrics = evaluate_track_holdout(
+        track_df(),
+        track_meta_df(),
+        top_k=2,
+        folds=1,
+        method="hybrid",
+        content_weight=0.5,
+    )
+
+    assert set(metrics) == {
+        "precision_at_k",
+        "recall_at_k",
+        "map_at_k",
+        "ndcg_at_k",
+        "catalog_coverage",
+        "average_popularity",
+        "novelty_at_k",
+        "serendipity_at_k",
+        "explanation_coverage",
+    }
+    assert metrics["catalog_coverage"] <= 1.0
+
+
+def test_evaluate_track_holdout_rejects_invalid_method_and_weight() -> None:
+    with pytest.raises(ValueError, match="method must be one of"):
+        evaluate_track_holdout(track_df(), track_meta_df(), top_k=2, method="bogus")
+    with pytest.raises(ValueError, match="content_weight"):
+        evaluate_track_holdout(
+            track_df(),
+            track_meta_df(),
+            top_k=2,
+            method="hybrid",
+            content_weight=1.5,
+        )
+
+
 def test_evaluate_track_holdout_compares_baseline() -> None:
     metrics = evaluate_track_holdout(
         track_df(), track_meta_df(), top_k=2, folds=1, compare_baseline=True

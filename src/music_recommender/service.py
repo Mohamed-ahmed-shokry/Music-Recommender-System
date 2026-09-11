@@ -40,6 +40,7 @@ from music_recommender.recommend import (
 )
 from music_recommender.tracks import (
     TrackServingResources,
+    artist_affinity_to_track_scores,
     get_similar_tracks,
     load_track_serving_resources,
     popular_tracks,
@@ -527,14 +528,20 @@ class RecommenderService:
         popularity_penalty: float | None = None,
         diversity: float | None = None,
         explain: bool = False,
+        method: str = "similarity",
+        content_weight: float | None = None,
     ) -> dict[str, Any]:
         """Recommend tracks for a user with audio-feature similarity.
 
-        Ranking knobs fall back to the champion settings stored on the
-        artifact, matching the artist recommendation surfaces. Users with no
-        track listening history fall back to popular tracks instead of
-        receiving an empty list.
+        The ``hybrid`` method blends collaborative artist taste (ALS) with the
+        audio-feature content scores. Ranking knobs fall back to the champion
+        settings stored on the artifact, matching the artist recommendation
+        surfaces. Users with no track listening history fall back to popular
+        tracks instead of receiving an empty list.
         """
+        if method not in ("similarity", "hybrid"):
+            raise ValueError("method must be one of: similarity, hybrid.")
+        content_weight = self._content_weight(content_weight)
         include_listened, popularity_penalty, diversity = self._ranking_overrides(
             include_listened, popularity_penalty, diversity
         )
@@ -553,6 +560,23 @@ class RecommenderService:
                     for rec in popular_tracks(resources.track_stats, top_k=top_k)
                 ],
             }
+        track_artists = {
+            track_id: str(entry["artist_id"])
+            for track_id, entry in resources.track_lookup.items()
+        }
+        artist_taste_per_track = None
+        if method == "hybrid":
+            if user_id not in self.artifact.mappings["user_id_to_index"]:
+                raise ValueError(
+                    f"Unknown user_id for hybrid track recommendations: {user_id}"
+                )
+            artist_scores = self._collaborative_scores_for_user(user_id)
+            artist_taste_per_track = artist_affinity_to_track_scores(
+                artist_scores=artist_scores,
+                artist_id_to_index=self.artifact.mappings["artist_id_to_index"],
+                track_id_to_index=resources.track_id_to_index,
+                track_artists=track_artists,
+            )
         track_name_lookup = {
             track_id: str(entry["track_name"])
             for track_id, entry in resources.track_lookup.items()
@@ -570,10 +594,13 @@ class RecommenderService:
             diversity=diversity,
             explain=explain,
             track_name_lookup=track_name_lookup,
+            artist_taste_per_track=artist_taste_per_track,
+            content_weight=content_weight,
         )
         return {
             "user_id": user_id,
-            "strategy": "track_similarity",
+            "method": method,
+            "strategy": "track_hybrid" if method == "hybrid" else "track_similarity",
             "recommendations": [
                 self._enrich_track_recommendation(resources, rec)
                 for rec in recommendations

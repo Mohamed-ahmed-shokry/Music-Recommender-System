@@ -211,12 +211,15 @@ class FakeService:
         popularity_penalty: float = 0.0,
         diversity: float = 0.0,
         explain: bool = False,
+        method: str = "similarity",
+        content_weight: float | None = None,
     ) -> dict[str, object]:
         if user_id == "ghost":
             raise ValueError(f"Unknown user_id: {user_id}")
         return {
             "user_id": user_id,
-            "strategy": "track_similarity",
+            "strategy": "track_hybrid" if method == "hybrid" else "track_similarity",
+            "method": method,
             "recommendations": [
                 {
                     "track_id": "track_1",
@@ -893,6 +896,36 @@ def test_track_recommend_route_returns_422_for_unknown_user() -> None:
 
     assert response.status_code == 422
     assert "Unknown user_id" in response.json()["detail"]
+
+
+def test_track_recommend_route_supports_hybrid_method() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get(
+            "/tracks/recommend/user_1",
+            params={"top_k": 1, "method": "hybrid", "content_weight": 0.5},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["method"] == "hybrid"
+    assert body["strategy"] == "track_hybrid"
+
+
+def test_track_recommend_route_rejects_invalid_method() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/tracks/recommend/user_1", params={"method": "bogus"})
+
+    assert response.status_code == 422
+    assert (
+        "Input should be 'similarity' or 'hybrid'"
+        in response.json()["detail"][0]["msg"]
+    )
 
 
 def test_similar_tracks_route_returns_similar_tracks() -> None:

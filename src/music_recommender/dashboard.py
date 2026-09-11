@@ -489,6 +489,21 @@ def _render_tracks_tab(
             value=True,
             key="tracks_explain",
         )
+        method = st.selectbox(
+            "Method",
+            ("similarity", "hybrid"),
+            key="tracks_method",
+            help="Hybrid blends artist taste with audio-feature similarity.",
+        )
+        content_weight = st.slider(
+            "Artist taste vs audio features",
+            0.0,
+            1.0,
+            0.25,
+            0.05,
+            key="tracks_content_weight",
+            help="1.0 favors audio features, 0.0 favors artist taste.",
+        )
         submitted = st.form_submit_button(
             "Recommend tracks",
             type="primary",
@@ -504,6 +519,8 @@ def _render_tracks_tab(
                 popularity_penalty=popularity_penalty,
                 diversity=diversity,
                 explain=explain,
+                method=method,
+                content_weight=content_weight,
             )
         )
 

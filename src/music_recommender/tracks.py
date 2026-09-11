@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
+from music_recommender.content import hybrid_scores, validate_content_weight
 from music_recommender.ranking import (
     apply_track_popularity_penalty,
     rerank_with_diversity,
@@ -292,6 +293,109 @@ def build_track_content_matrix(
     return feature_df, feature_names
 
 
+def _min_max_unit(values: np.ndarray) -> np.ndarray:
+    """Min-max normalize an array to the unit interval (zeros when flat)."""
+    span = float(values.max()) - float(values.min())
+    if span == 0:
+        return np.zeros(values.shape, dtype=float)
+    return (values - float(values.min())) / span
+
+
+def train_track_artist_taste(
+    track_df: pd.DataFrame,
+    *,
+    factors: int = 8,
+    regularization: float = 0.05,
+    iterations: int = 8,
+    alpha: float = 10.0,
+) -> tuple[Any, dict[str, int], dict[str, int]]:
+    """Train a lightweight implicit-ALS model over (user, artist) plays.
+
+    Grouped from track interactions, this yields a collaborative artist-taste
+    model for hybrid track recommendations. Returns the model along with the
+    user and artist index mappings.
+    """
+    if type(factors) is not int or factors < 1:
+        raise ValueError("factors must be a positive integer.")
+    if (
+        isinstance(regularization, bool)
+        or not isinstance(regularization, (int, float, np.number))
+        or not np.isfinite(regularization)
+        or regularization < 0
+    ):
+        raise ValueError("regularization must be a finite non-negative number.")
+    if type(iterations) is not int or iterations < 1:
+        raise ValueError("iterations must be a positive integer.")
+    df = normalize_track_interactions(track_df)
+    grouped = df.groupby(["user_id", "artist_id"], as_index=False)["play_count"].sum()
+    artist_names = (
+        df[["artist_id", "artist_name"]]
+        .drop_duplicates(subset="artist_id")
+        .set_index("artist_id")["artist_name"]
+    )
+    grouped["artist_name"] = grouped["artist_id"].map(artist_names).astype("string")
+    from music_recommender.model import train_als_model
+    from music_recommender.preprocessing import (
+        build_user_item_matrix,
+        create_id_mappings,
+    )
+
+    mappings = create_id_mappings(grouped)
+    matrix = build_user_item_matrix(
+        grouped,
+        mappings["user_id_to_index"],
+        mappings["artist_id_to_index"],
+    )
+    model = train_als_model(
+        user_item_matrix=matrix,
+        factors=factors,
+        regularization=float(regularization),
+        iterations=iterations,
+        alpha=alpha,
+        use_gpu=False,
+    )
+    return (
+        model,
+        mappings["user_id_to_index"],
+        mappings["artist_id_to_index"],
+    )
+
+
+def artist_affinity_to_track_scores(
+    artist_scores: np.ndarray,
+    artist_id_to_index: dict[str, int],
+    track_id_to_index: dict[str, int],
+    track_artists: dict[str, str],
+) -> np.ndarray:
+    """Map an artist-affinity vector to per-track scores via each track's artist.
+
+    Tracks whose artist is not in the affinity mapping receive a zero score.
+    """
+    per_track = np.zeros(len(track_id_to_index), dtype=float)
+    for track_id, index in track_id_to_index.items():
+        artist_id = track_artists.get(track_id)
+        if artist_id is not None and artist_id in artist_id_to_index:
+            per_track[index] = artist_scores[artist_id_to_index[artist_id]]
+    return per_track
+
+
+def artist_taste_scores_for_user(
+    model: Any,
+    user_id_to_index: dict[str, int],
+    artist_id_to_index: dict[str, int],
+    user_id: str,
+) -> np.ndarray | None:
+    """Return collaborative artist-taste scores for a user via the ALS model."""
+    if user_id not in user_id_to_index:
+        return None
+    user_latent = model.item_factors
+    artist_latent = model.user_factors
+    return cast(
+        np.ndarray,
+        artist_latent @ user_latent[user_id_to_index[user_id]],
+    )
+
+
 def recommend_tracks_for_user(
     user_id: str,
     user_track_matrix: pd.DataFrame,
@@ -305,15 +409,29 @@ def recommend_tracks_for_user(
     diversity: float = 0.0,
     explain: bool = False,
     track_name_lookup: dict[str, str] | None = None,
+    artist_taste_per_track: np.ndarray | None = None,
+    content_weight: float = 1.0,
 ) -> list[dict[str, Any]]:
-    """Recommend tracks for a user based on track similarity.
+    """Recommend tracks for a user based on audio-feature similarity.
 
-    Uses a simple collaborative filtering approach: find similar tracks
-    to the user's listening history and rank by similarity score.
+    Passive a per-track artist-taste vector with ``content_weight`` to blend
+    into a hybrid strategy: ``artist_taste_per_track`` carries collaborative
+    artist affinities and ``content_weight`` balances them against the
+    audio-feature similarity ("content"). A weight of 1.0 keeps the pure
+    similarity strategy.
     """
     validate_ranking_parameters(top_k, diversity, popularity_penalty)
     if type(explain) is not bool:
         raise ValueError("explain must be a boolean.")
+    if artist_taste_per_track is not None:
+        validate_content_weight(content_weight)
+        if len(artist_taste_per_track) != len(track_id_to_index) or not np.all(
+            np.isfinite(artist_taste_per_track)
+        ):
+            raise ValueError(
+                "artist_taste_per_track must be a finite vector aligned to "
+                "track_id_to_index."
+            )
     if user_id not in user_track_matrix.index:
         return []
 
@@ -335,8 +453,23 @@ def recommend_tracks_for_user(
     similarity_scores = track_similarity_matrix[:, listened_indices].mean(axis=1)
     listened_similarities = track_similarity_matrix[:, listened_indices]
 
+    hybrid = artist_taste_per_track is not None
+    if hybrid:
+        assert artist_taste_per_track is not None
+        content_unit = _min_max_unit(similarity_scores)
+        taste_unit = _min_max_unit(artist_taste_per_track)
+        blended_scores = hybrid_scores(
+            collaborative_scores=artist_taste_per_track,
+            content_scores=similarity_scores,
+            content_weight=content_weight,
+        )
+    else:
+        content_unit = similarity_scores
+        taste_unit = np.zeros(similarity_scores.shape)
+        blended_scores = similarity_scores
+
     adjusted_scores = apply_track_popularity_penalty(
-        scores=similarity_scores,
+        scores=blended_scores,
         index_to_track_id={
             index: track_id for track_id, index in track_id_to_index.items()
         },
@@ -372,6 +505,12 @@ def recommend_tracks_for_user(
             "track_id": track_id,
             "score": float(adjusted_scores[idx]),
         }
+        if hybrid and artist_taste_per_track is not None:
+            recommendation["score_components"] = {
+                "content_score": float(content_unit[idx]),
+                "collaborative_score": float(taste_unit[idx]),
+                "hybrid_score": float(blended_scores[idx]),
+            }
         if explain:
             contributor_indices = np.argsort(listened_similarities[idx])[::-1][
                 :_MAX_TRACK_EXPLANATION_SOURCES

@@ -832,3 +832,43 @@ def test_recommend_tracks_prefers_bundled_resources(tmp_path: Path) -> None:
 
     assert result["strategy"] == "track_similarity"
     assert result["recommendations"] == []
+
+
+def test_recommend_tracks_hybrid_method(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    result = service.recommend_tracks(
+        user_id="user_1", top_k=3, method="hybrid", content_weight=0.5
+    )
+
+    assert result["method"] == "hybrid"
+    assert result["strategy"] == "track_hybrid"
+    assert len(result["recommendations"]) == 3
+    first = result["recommendations"][0]
+    assert "score_components" in first
+    assert set(first["score_components"]) == {
+        "content_score",
+        "collaborative_score",
+        "hybrid_score",
+    }
+
+
+def test_recommend_tracks_hybrid_rejects_user_absent_from_taste_model(
+    tmp_path: Path,
+) -> None:
+    service = create_service(tmp_path)
+    del service.artifact.mappings["user_id_to_index"]["user_1"]
+
+    with pytest.raises(ValueError, match="Unknown user_id for hybrid"):
+        service.recommend_tracks(user_id="user_1", top_k=3, method="hybrid")
+
+
+def test_recommend_tracks_rejects_invalid_method_and_weight(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    with pytest.raises(ValueError, match="method must be one of"):
+        service.recommend_tracks(user_id="user_1", top_k=3, method="bogus")
+    with pytest.raises(ValueError, match="content_weight must be a finite number"):
+        service.recommend_tracks(
+            user_id="user_1", top_k=3, method="hybrid", content_weight=1.5
+        )

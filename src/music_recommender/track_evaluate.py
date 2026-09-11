@@ -10,6 +10,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from music_recommender.config import DEFAULT_CONTENT_WEIGHT
+from music_recommender.content import validate_content_weight
 from music_recommender.evaluate import (
     average_popularity,
     catalog_coverage,
@@ -24,10 +26,13 @@ from music_recommender.evaluate import (
 from music_recommender.ranking import validate_ranking_parameters
 from music_recommender.tracks import (
     TrackServingResources,
+    artist_affinity_to_track_scores,
+    artist_taste_scores_for_user,
     build_track_serving_resources,
     normalize_track_interactions,
     recommend_popular_tracks,
     recommend_tracks_for_user,
+    train_track_artist_taste,
 )
 
 
@@ -118,13 +123,21 @@ def evaluate_track_holdout(
     compare_baseline: bool = False,
     popularity_penalty: float = 0.0,
     diversity: float = 0.0,
+    method: str = "similarity",
+    content_weight: float = DEFAULT_CONTENT_WEIGHT,
 ) -> dict[str, float] | dict[str, dict[str, float]]:
-    """Evaluate track similarity with repeated per-user holdout splits.
+    """Evaluate track recommendations with repeated per-user holdout splits.
 
-    When ``compare_baseline`` is set, a global-popularity arm is evaluated on
-    the same holdouts, making the popularity-bias tradeoff explicit.
+    The evaluation arm runs the audio-feature ``similarity`` strategy by
+    default; pass ``method="hybrid"`` to blend collaborative artist taste
+    (trained on the same held-in interactions) with the audio features. When
+    ``compare_baseline`` is set, a global-popularity arm is evaluated on the
+    same holdouts, making the popularity-bias tradeoff explicit.
     """
     validate_ranking_parameters(top_k, diversity, popularity_penalty)
+    if method not in ("similarity", "hybrid"):
+        raise ValueError("method must be one of: similarity, hybrid.")
+    validate_content_weight(content_weight)
     if type(folds) is not int or folds < 1:
         raise ValueError("folds must be a positive integer.")
     if type(include_listened) is not bool:
@@ -143,6 +156,19 @@ def evaluate_track_holdout(
             )
         resources = build_track_serving_resources(train_df, metadata_df)
         catalog = set(resources.track_ids)
+        taste_model = None
+        user_id_to_index: dict[str, int] = {}
+        artist_id_to_index: dict[str, int] = {}
+        if method == "hybrid":
+            (
+                taste_model,
+                user_id_to_index,
+                artist_id_to_index,
+            ) = train_track_artist_taste(train_df)
+        track_artists = {
+            track_id: str(entry["artist_id"])
+            for track_id, entry in resources.track_lookup.items()
+        }
         similarity_lists: list[list[str]] = []
         popularity_lists: list[list[str]] = []
         relevant_lists: list[list[str]] = []
@@ -153,6 +179,18 @@ def evaluate_track_holdout(
         }
         for user_id, user_test in test_df.groupby("user_id"):
             relevant = sorted({str(track_id) for track_id in user_test["track_id"]})
+            artist_taste_per_track = None
+            if method == "hybrid":
+                artist_scores = artist_taste_scores_for_user(
+                    taste_model, user_id_to_index, artist_id_to_index, str(user_id)
+                )
+                if artist_scores is not None:
+                    artist_taste_per_track = artist_affinity_to_track_scores(
+                        artist_scores=artist_scores,
+                        artist_id_to_index=artist_id_to_index,
+                        track_id_to_index=resources.track_id_to_index,
+                        track_artists=track_artists,
+                    )
             similarity_recommendations = recommend_tracks_for_user(
                 user_id=str(user_id),
                 user_track_matrix=resources.user_track_matrix,
@@ -166,6 +204,8 @@ def evaluate_track_holdout(
                 diversity=diversity,
                 explain=True,
                 track_name_lookup=track_name_lookup,
+                artist_taste_per_track=artist_taste_per_track,
+                content_weight=content_weight,
             )
             similarity_lists.append(
                 [rec["track_id"] for rec in similarity_recommendations]

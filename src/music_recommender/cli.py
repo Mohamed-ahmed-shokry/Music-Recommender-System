@@ -59,12 +59,15 @@ from music_recommender.tracking import (
     tracking_run,
 )
 from music_recommender.tracks import (
+    artist_affinity_to_track_scores,
+    artist_taste_scores_for_user,
     build_track_content_matrix,
     build_track_stats,
     get_similar_tracks,
     load_and_validate_track_interactions,
     load_and_validate_track_metadata,
     recommend_tracks_for_user,
+    train_track_artist_taste,
 )
 from music_recommender.tracks import (
     popular_tracks as rank_tracks_by_popularity,
@@ -1328,8 +1331,22 @@ def track_recommendations(
         "--explain/--no-explain",
         help="Show why each track is recommended.",
     ),
+    method: str = typer.Option(
+        "similarity",
+        "--method",
+        help="Recommendation method: similarity or hybrid.",
+    ),
+    content_weight: float = typer.Option(
+        DEFAULT_CONTENT_WEIGHT,
+        "--content-weight",
+        min=0.0,
+        max=1.0,
+        help="Balance hybrid tracks between artist taste and audio features.",
+    ),
 ) -> None:
-    """Recommend tracks for a user using track similarity."""
+    """Recommend tracks for a user using track similarity (or hybrid)."""
+    if method not in ("similarity", "hybrid"):
+        raise typer.BadParameter("method must be one of: similarity, hybrid.")
     try:
         df = load_and_validate_track_interactions(RAW_TRACK_DATA_PATH)
         metadata_df = load_and_validate_track_metadata(RAW_TRACK_METADATA_PATH, df)
@@ -1361,6 +1378,30 @@ def track_recommendations(
             )
         )
 
+        artist_taste_per_track = None
+        if method == "hybrid":
+            model, user_id_to_index, artist_id_to_index = train_track_artist_taste(df)
+            artist_scores = artist_taste_scores_for_user(
+                model, user_id_to_index, artist_id_to_index, user_id
+            )
+            if artist_scores is None:
+                raise ValueError(
+                    f"Unknown user_id for hybrid track recommendations: {user_id}"
+                )
+            track_artists = dict(
+                zip(
+                    metadata_df["track_id"].astype(str),
+                    metadata_df["artist_id"].astype(str),
+                    strict=True,
+                )
+            )
+            artist_taste_per_track = artist_affinity_to_track_scores(
+                artist_scores=artist_scores,
+                artist_id_to_index=artist_id_to_index,
+                track_id_to_index=track_id_to_index,
+                track_artists=track_artists,
+            )
+
         # Get recommendations
         recommendations = recommend_tracks_for_user(
             user_id=user_id,
@@ -1375,13 +1416,15 @@ def track_recommendations(
             diversity=diversity,
             explain=explain,
             track_name_lookup=track_name_lookup,
+            artist_taste_per_track=artist_taste_per_track,
+            content_weight=content_weight,
         )
 
     except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
-    typer.echo(f"Track recommendations for {user_id}:")
+    typer.echo(f"Track recommendations for {user_id} (method: {method}):")
     if not recommendations:
         typer.echo("  No recommendations available.")
     else:
@@ -1474,6 +1517,18 @@ def evaluate_tracks(
         max=1.0,
         help="Diversify recommendations by audio features (0.0 to 1.0).",
     ),
+    method: str = typer.Option(
+        "similarity",
+        "--method",
+        help="Evaluation method: similarity or hybrid.",
+    ),
+    content_weight: float = typer.Option(
+        DEFAULT_CONTENT_WEIGHT,
+        "--content-weight",
+        min=0.0,
+        max=1.0,
+        help="Balance hybrid tracks between artist taste and audio features.",
+    ),
     report_path: str = typer.Option(
         None,
         "--report-path",
@@ -1493,6 +1548,8 @@ def evaluate_tracks(
             compare_baseline=compare_baseline,
             popularity_penalty=popularity_penalty,
             diversity=diversity,
+            method=method,
+            content_weight=content_weight,
         )
     except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)

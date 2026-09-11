@@ -1689,6 +1689,28 @@ def test_evaluate_tracks_supports_ranking_knobs() -> None:
     assert "Track evaluation over 1 fold(s):" in result.output
 
 
+def test_evaluate_tracks_hybrid_method_prints_metrics() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate-tracks",
+            "--top-k",
+            "5",
+            "--folds",
+            "1",
+            "--method",
+            "hybrid",
+            "--content-weight",
+            "0.5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Track evaluation over 1 fold(s):" in result.output
+    assert "Precision@5:" in result.output
+    assert "Catalog coverage:" in result.output
+
+
 def test_evaluate_tracks_writes_report(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(cli, "REPORTS_DIR", tmp_path)
 
@@ -1724,7 +1746,7 @@ def test_track_recommendations_command_prints_tracks() -> None:
     )
 
     assert result.exit_code == 0
-    assert "Track recommendations for user_1:" in result.output
+    assert "Track recommendations for user_1 (method: similarity):" in result.output
 
 
 def test_popular_tracks_command_prints_ranked_hits() -> None:
@@ -1752,7 +1774,7 @@ def test_track_recommendations_command_supports_ranking_knobs() -> None:
     )
 
     assert result.exit_code == 0
-    assert "Track recommendations for user_1:" in result.output
+    assert "Track recommendations for user_1 (method: similarity):" in result.output
 
 
 def test_track_recommendations_command_explains_reasons() -> None:
@@ -1770,6 +1792,42 @@ def test_track_recommendations_command_explains_reasons() -> None:
 
     assert result.exit_code == 0
     assert "- Because you listened to" in result.output
+
+
+def test_track_recommendations_command_hybrid_method() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "track-recommendations",
+            "--user-id",
+            "user_1",
+            "--top-k",
+            "3",
+            "--method",
+            "hybrid",
+            "--content-weight",
+            "0.5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Track recommendations for user_1 (method: hybrid):" in result.output
+
+
+def test_track_recommendations_command_rejects_invalid_method() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "track-recommendations",
+            "--user-id",
+            "user_1",
+            "--method",
+            "bogus",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "method must be one of: similarity, hybrid." in result.output
 
 
 def test_similar_tracks_command_prints_tracks() -> None:
