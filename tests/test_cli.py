@@ -1755,6 +1755,23 @@ def test_track_recommendations_command_supports_ranking_knobs() -> None:
     assert "Track recommendations for user_1:" in result.output
 
 
+def test_track_recommendations_command_explains_reasons() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "track-recommendations",
+            "--user-id",
+            "user_1",
+            "--top-k",
+            "1",
+            "--explain",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "- Because you listened to" in result.output
+
+
 def test_similar_tracks_command_prints_tracks() -> None:
     result = runner.invoke(
         cli.app, ["similar-tracks", "--track-id", "track_1", "--top-k", "3"]

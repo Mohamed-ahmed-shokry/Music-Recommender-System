@@ -526,12 +526,32 @@ class RecommenderService:
         include_listened: bool = False,
         popularity_penalty: float = 0.0,
         diversity: float = 0.0,
+        explain: bool = False,
     ) -> dict[str, Any]:
-        """Recommend tracks for a user with audio-feature similarity."""
+        """Recommend tracks for a user with audio-feature similarity.
+
+        Users with no listening history fall back to popular tracks instead of
+        receiving an empty list.
+        """
         validate_ranking_parameters(top_k, diversity, popularity_penalty)
+        if type(explain) is not bool:
+            raise ValueError("explain must be a boolean.")
         resources = self._track_resources()
         if user_id not in resources.user_track_matrix.index:
             raise ValueError(f"Unknown user_id: {user_id}")
+        if float(resources.user_track_matrix.loc[user_id].sum()) == 0:
+            return {
+                "user_id": user_id,
+                "strategy": "popular_fallback",
+                "recommendations": [
+                    self._enrich_track_recommendation(resources, rec)
+                    for rec in popular_tracks(resources.track_stats, top_k=top_k)
+                ],
+            }
+        track_name_lookup = {
+            track_id: str(entry["track_name"])
+            for track_id, entry in resources.track_lookup.items()
+        }
         recommendations = recommend_tracks_for_user(
             user_id=user_id,
             user_track_matrix=resources.user_track_matrix,
@@ -543,6 +563,8 @@ class RecommenderService:
             feature_matrix=resources.feature_matrix,
             popularity_penalty=popularity_penalty,
             diversity=diversity,
+            explain=explain,
+            track_name_lookup=track_name_lookup,
         )
         return {
             "user_id": user_id,

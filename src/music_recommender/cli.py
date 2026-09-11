@@ -1323,6 +1323,11 @@ def track_recommendations(
         max=1.0,
         help="Diversify recommendations by audio features (0.0 to 1.0).",
     ),
+    explain: bool = typer.Option(
+        False,
+        "--explain/--no-explain",
+        help="Show why each track is recommended.",
+    ),
 ) -> None:
     """Recommend tracks for a user using track similarity."""
     try:
@@ -1348,6 +1353,13 @@ def track_recommendations(
         track_similarity_matrix = cosine_similarity(feature_df.values)
 
         track_stats = build_track_stats(df)
+        track_name_lookup = dict(
+            zip(
+                metadata_df["track_id"].astype(str),
+                metadata_df["track_name"].astype(str),
+                strict=True,
+            )
+        )
 
         # Get recommendations
         recommendations = recommend_tracks_for_user(
@@ -1361,6 +1373,8 @@ def track_recommendations(
             feature_matrix=np.asarray(feature_df.values, dtype=float),
             popularity_penalty=popularity_penalty,
             diversity=diversity,
+            explain=explain,
+            track_name_lookup=track_name_lookup,
         )
 
     except (FileNotFoundError, ValueError) as error:
@@ -1382,6 +1396,8 @@ def track_recommendations(
             typer.echo(
                 f"  {i}. {track_name} by {artist_name} (score: {rec['score']:.4f})"
             )
+            for reason in rec.get("reasons") or []:
+                typer.echo(f"     - {reason}")
 
 
 @app.command()

@@ -34,6 +34,8 @@ TRACK_TEXT_COLUMNS = (
 
 TrackStats = dict[str, str | int | float]
 
+_MAX_TRACK_EXPLANATION_SOURCES = 3
+
 
 def load_track_interactions(path: str | Path) -> pd.DataFrame:
     """Load track-level interaction data from a CSV file."""
@@ -301,6 +303,8 @@ def recommend_tracks_for_user(
     feature_matrix: np.ndarray | None = None,
     popularity_penalty: float = 0.0,
     diversity: float = 0.0,
+    explain: bool = False,
+    track_name_lookup: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Recommend tracks for a user based on track similarity.
 
@@ -308,6 +312,8 @@ def recommend_tracks_for_user(
     to the user's listening history and rank by similarity score.
     """
     validate_ranking_parameters(top_k, diversity, popularity_penalty)
+    if type(explain) is not bool:
+        raise ValueError("explain must be a boolean.")
     if user_id not in user_track_matrix.index:
         return []
 
@@ -327,6 +333,7 @@ def recommend_tracks_for_user(
 
     # Compute average similarity to listened tracks for all tracks
     similarity_scores = track_similarity_matrix[:, listened_indices].mean(axis=1)
+    listened_similarities = track_similarity_matrix[:, listened_indices]
 
     adjusted_scores = apply_track_popularity_penalty(
         scores=similarity_scores,
@@ -360,12 +367,27 @@ def recommend_tracks_for_user(
 
     recommendations: list[dict[str, Any]] = []
     for idx in final_indices:
-        recommendations.append(
-            {
-                "track_id": index_to_track_id[idx],
-                "score": float(adjusted_scores[idx]),
-            }
-        )
+        track_id = index_to_track_id[idx]
+        recommendation: dict[str, Any] = {
+            "track_id": track_id,
+            "score": float(adjusted_scores[idx]),
+        }
+        if explain:
+            contributor_indices = np.argsort(listened_similarities[idx])[::-1][
+                :_MAX_TRACK_EXPLANATION_SOURCES
+            ]
+            names = []
+            for contributor in contributor_indices:
+                track_id = listened_tracks[contributor]
+                if track_name_lookup is not None:
+                    name = track_name_lookup.get(track_id, track_id)
+                else:
+                    name = track_id
+                names.append(name)
+            recommendation["reasons"] = [
+                f"Because you listened to {name}" for name in names
+            ]
+        recommendations.append(recommendation)
 
     return recommendations
 

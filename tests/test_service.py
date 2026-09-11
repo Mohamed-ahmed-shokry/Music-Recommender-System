@@ -559,6 +559,82 @@ def test_recommend_tracks_rejects_invalid_ranking_knobs(tmp_path: Path) -> None:
         service.recommend_tracks(user_id="user_1", top_k=3, diversity=-0.5)
 
 
+def test_recommend_tracks_explains_reasons(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+
+    result = service.recommend_tracks(user_id="user_1", top_k=3, explain=True)
+
+    assert result["strategy"] == "track_similarity"
+    first = result["recommendations"][0]
+    assert first["reasons"]
+    assert first["reasons"][0].startswith("Because you listened to")
+
+    plain = service.recommend_tracks(user_id="user_1", top_k=3)
+    assert "reasons" not in plain["recommendations"][0]
+
+    with pytest.raises(ValueError, match="explain"):
+        service.recommend_tracks(user_id="user_1", top_k=3, explain=1)
+
+
+def test_recommend_tracks_cold_start_falls_back_to_popular(tmp_path: Path) -> None:
+    from music_recommender.tracks import build_track_serving_resources
+
+    service = create_service(tmp_path)
+    track_df = pd.DataFrame(
+        {
+            "user_id": ["user_9", "user_9"],
+            "track_id": ["track_9", "track_10"],
+            "track_name": ["Rare Song", "Common Song"],
+            "artist_id": ["artist_9", "artist_9"],
+            "artist_name": ["Rare Artist", "Rare Artist"],
+            "play_count": [1, 20],
+        }
+    )
+    meta_df = pd.DataFrame(
+        {
+            "track_id": ["track_9", "track_10"],
+            "track_name": ["Rare Song", "Common Song"],
+            "artist_id": ["artist_9", "artist_9"],
+            "artist_name": ["Rare Artist", "Rare Artist"],
+            "album_id": ["album_9", "album_10"],
+            "album_name": ["Rare Album", "Common Album"],
+            "duration_ms": [200000, 200000],
+            "popularity": [10, 70],
+            "explicit": [False, False],
+            "danceability": [0.5, 0.5],
+            "energy": [0.5, 0.5],
+            "key": [0, 0],
+            "loudness": [-6.0, -6.0],
+            "mode": [1, 1],
+            "speechiness": [0.05, 0.05],
+            "acousticness": [0.1, 0.1],
+            "instrumentalness": [0.0, 0.0],
+            "liveness": [0.1, 0.1],
+            "valence": [0.5, 0.5],
+            "tempo": [110.0, 110.0],
+            "time_signature": [4, 4],
+        }
+    )
+    resources = build_track_serving_resources(track_df, meta_df)
+    zero_row = pd.DataFrame(
+        [[0.0, 0.0]],
+        index=["user_8"],
+        columns=resources.user_track_matrix.columns,
+    )
+    resources.user_track_matrix = pd.concat(
+        [resources.user_track_matrix, zero_row], axis=0
+    )
+    service.artifact.track_bundle = resources
+
+    fallback = service.recommend_tracks(user_id="user_8", top_k=1)
+
+    assert fallback["strategy"] == "popular_fallback"
+    assert fallback["recommendations"][0]["track_id"] == "track_10"
+
+    ranked = service.recommend_tracks(user_id="user_9", top_k=1)
+    assert ranked["strategy"] == "track_similarity"
+
+
 def test_similar_tracks_returns_enriched_similarity(tmp_path: Path) -> None:
     service = create_service(tmp_path)
 

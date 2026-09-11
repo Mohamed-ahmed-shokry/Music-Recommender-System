@@ -346,6 +346,7 @@ def recommend_tracks(
     include_listened: bool = False,
     diversity: UnitInterval = 0.0,
     popularity_penalty: UnitInterval = 0.0,
+    explain: bool = False,
 ) -> dict[str, object]:
     """Return track recommendations for a user with audio-feature similarity."""
     try:
@@ -355,6 +356,7 @@ def recommend_tracks(
             include_listened=include_listened,
             diversity=diversity,
             popularity_penalty=popularity_penalty,
+            explain=explain,
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

@@ -210,6 +210,7 @@ class FakeService:
         include_listened: bool,
         popularity_penalty: float = 0.0,
         diversity: float = 0.0,
+        explain: bool = False,
     ) -> dict[str, object]:
         if user_id == "ghost":
             raise ValueError(f"Unknown user_id: {user_id}")
@@ -222,6 +223,7 @@ class FakeService:
                     "track_name": "Hit",
                     "artist_name": "Test Artist",
                     "score": 0.95,
+                    "reasons": ["Because you listened to Hit"] if explain else [],
                 }
             ][:top_k],
             "include_listened": include_listened,
@@ -866,6 +868,20 @@ def test_track_recommend_route_returns_track_recommendations() -> None:
     body = response.json()
     assert body["strategy"] == "track_similarity"
     assert body["recommendations"][0]["track_id"] == "track_1"
+
+
+def test_track_recommend_route_explains_reasons() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get(
+            "/tracks/recommend/user_1", params={"top_k": 1, "explain": True}
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recommendations"][0]["reasons"] == ["Because you listened to Hit"]
 
 
 def test_track_recommend_route_returns_422_for_unknown_user() -> None:

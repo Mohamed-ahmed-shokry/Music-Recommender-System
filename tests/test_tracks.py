@@ -152,6 +152,48 @@ def test_recommend_tracks_for_user() -> None:
     assert recommend_tracks_for_user("user_3", empty_matrix, sim, mapping) == []
 
 
+def test_recommend_tracks_for_user_explains_reasons() -> None:
+    user_track_matrix = pd.DataFrame(
+        [[5.0, 0.0, 0.0]],
+        index=["user_1"],
+        columns=["track_1", "track_2", "track_3"],
+    )
+    sim = np.array(
+        [
+            [1.0, 0.9, 0.2],
+            [0.9, 1.0, 0.1],
+            [0.2, 0.1, 1.0],
+        ]
+    )
+    mapping = {"track_1": 0, "track_2": 1, "track_3": 2}
+    lookup = {"track_1": "Mirror", "track_2": "Spark", "track_3": "Ember"}
+
+    recs = recommend_tracks_for_user(
+        "user_1",
+        user_track_matrix,
+        sim,
+        mapping,
+        top_k=1,
+        explain=True,
+        track_name_lookup=lookup,
+    )
+    assert recs[0]["reasons"] == ["Because you listened to Mirror"]
+
+    plain = recommend_tracks_for_user(
+        "user_1", user_track_matrix, sim, mapping, top_k=1
+    )
+    assert "reasons" not in plain[0]
+
+    with pytest.raises(ValueError, match="explain"):
+        recommend_tracks_for_user(
+            "user_1",
+            user_track_matrix,
+            sim,
+            mapping,
+            explain=1,
+        )
+
+
 def test_recommend_tracks_for_user_penalty_demotes_popular_track() -> None:
     # user_1 listened to track_1; track_2 (unheard) is highly similar but the
     # most popular. With a penalty, the less-identical track_3 should win.

@@ -484,6 +484,11 @@ def _render_tracks_tab(
             key="tracks_diversity",
             help="Diversify recommendations by audio features.",
         )
+        explain = st.checkbox(
+            "Show recommendation reasons",
+            value=True,
+            key="tracks_explain",
+        )
         submitted = st.form_submit_button(
             "Recommend tracks",
             type="primary",
@@ -498,6 +503,7 @@ def _render_tracks_tab(
                 include_listened=include_listened,
                 popularity_penalty=popularity_penalty,
                 diversity=diversity,
+                explain=explain,
             )
         )
 
