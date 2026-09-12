@@ -188,8 +188,6 @@ def fetch_audio_features(
 ) -> list[SpotifyAudioFeatures | None]:
     """Fetch audio features for multiple tracks (max 100 per request)."""
     features: list[SpotifyAudioFeatures | None] = []
-    """Fetch audio features for multiple tracks (max 100 per request)."""
-    features = []
     for i in range(0, len(track_ids), 100):
         batch = track_ids[i : i + 100]
         data = client.audio_features(batch)

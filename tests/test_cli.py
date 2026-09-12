@@ -14,7 +14,11 @@ from typer.testing import CliRunner
 
 import music_recommender.cli as cli
 from music_recommender import __version__
-from music_recommender.cli import _format_artifact_age, _parse_csv_option
+from music_recommender.cli import (
+    _check_quality_threshold,
+    _format_artifact_age,
+    _parse_csv_option,
+)
 from music_recommender.tracking import ExperimentTrackingError
 
 runner = CliRunner()
@@ -550,6 +554,40 @@ def test_evaluate_command_fails_when_strict_quality_gate_fails(monkeypatch) -> N
     assert result.exit_code == 1
     assert "quality gate failed" in result.output
     assert trained == []
+
+
+@pytest.mark.parametrize(
+    ("threshold_spec", "expected_error"),
+    [
+        ("ndcg_at_k", "Expected 'metric=value'"),
+        ("ndcg_at_k=", "Must be a number"),
+        ("=0.4", "Expected 'metric=value'"),
+        ("ndcg_at_k=turbo", "Must be a number"),
+        ("missing_metric=0.5", "Unknown metric 'missing_metric'"),
+    ],
+)
+def test_check_quality_threshold_rejects_invalid_specs(
+    threshold_spec: str,
+    expected_error: str,
+) -> None:
+    with pytest.raises(ValueError, match=expected_error):
+        _check_quality_threshold(
+            {"ndcg_at_k": 0.4, "precision_at_k": 0.2}, threshold_spec
+        )
+
+
+def test_check_quality_threshold_accepts_met_or_exceeded_metrics() -> None:
+    assert _check_quality_threshold(
+        {"ndcg_at_k": 0.4, "precision_at_k": 0.2},
+        "ndcg_at_k=0.4, precision_at_k=0.15",
+    )
+
+
+def test_check_quality_threshold_fails_when_a_metric_is_below_floor() -> None:
+    assert not _check_quality_threshold(
+        {"ndcg_at_k": 0.4, "precision_at_k": 0.2},
+        "ndcg_at_k=0.4, precision_at_k=0.25",
+    )
 
 
 def test_evaluate_command_promotion_reports_retrain_failure(monkeypatch) -> None:
@@ -1722,7 +1760,7 @@ def test_evaluate_tracks_writes_report(tmp_path, monkeypatch) -> None:
             "5",
             "--folds",
             "1",
-            "--report-path",
+            "--report-name",
             "clf_track",
         ],
     )

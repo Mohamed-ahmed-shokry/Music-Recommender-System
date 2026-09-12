@@ -127,6 +127,29 @@ class FakeService:
             ][:top_k],
         }
 
+    def recommend_user_ltr(
+        self,
+        user_id: str,
+        top_k: int,
+        include_listened: bool,
+        diversity: float,
+        popularity_penalty: float,
+    ) -> dict[str, object]:
+        return {
+            "user_id": user_id,
+            "strategy": "ltr_ranked",
+            "recommendations": [
+                {
+                    "artist_id": "artist_4",
+                    "artist_name": "D",
+                    "score": 0.85,
+                }
+            ][:top_k],
+            "include_listened": include_listened,
+            "diversity": diversity,
+            "popularity_penalty": popularity_penalty,
+        }
+
     def recommend_session(
         self,
         artist_ids: list[str],
@@ -556,6 +579,46 @@ def test_recommend_user_route_accepts_hybrid_params() -> None:
     assert body["strategy"] == "hybrid_personalized"
     assert body["content_weight"] == 0.4
     assert body["recommendations"][0]["reasons"]
+
+
+def test_recommend_user_ltr_route_returns_ltr_ranked_hits() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get(
+            "/recommend/user/user_1/ltr",
+            params={"top_k": 1, "diversity": 0.2, "popularity_penalty": 0.1},
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["strategy"] == "ltr_ranked"
+    assert body["recommendations"][0]["artist_id"] == "artist_4"
+    assert body["diversity"] == 0.2
+    assert body["popularity_penalty"] == 0.1
+
+
+def test_recommend_user_ltr_route_turns_value_errors_into_422() -> None:
+    class FailingLtrService(FakeService):
+        def recommend_user_ltr(
+            self,
+            user_id: str,
+            top_k: int,
+            include_listened: bool,
+            diversity: float,
+            popularity_penalty: float,
+        ) -> dict[str, object]:
+            raise ValueError("The LTR model is not available for this user.")
+
+    with TestClient(api_main.app) as client:
+        api_main.service = FailingLtrService()
+        api_main.service_load_error = None
+
+        response = client.get("/recommend/user/user_1/ltr")
+
+    assert response.status_code == 422
+    assert "LTR model is not available" in response.json()["detail"]
 
 
 def test_artist_catalog_route_accepts_search_filters_and_pagination() -> None:

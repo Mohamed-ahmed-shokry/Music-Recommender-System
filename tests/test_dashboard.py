@@ -7,6 +7,7 @@ from streamlit.testing.v1 import AppTest
 
 from music_recommender.dashboard import (
     DASHBOARD_ARTIFACT_ENV_VAR,
+    _ablation_ranking_rows,
     catalog_frame,
     load_dashboard_service,
     recommendation_frame,
@@ -208,11 +209,40 @@ def dashboard_script(service) -> None:
     render_dashboard(service)
 
 
+def ablation_summary_script(summary) -> None:
+    from music_recommender.dashboard import _render_ablation_summary_body
+
+    _render_ablation_summary_body(summary)
+
+
 class MessageFakeService(FakeDashboardService):
     def recommend_user(self, **_: Any) -> dict[str, object]:
         response = self._recommendation_response("popular_fallback")
         response["message"] = "Unknown listener, returning popular artists."
         return response
+
+
+class MoreTracksCatalogService(FakeDashboardService):
+    def browse_tracks(
+        self,
+        *,
+        query: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, object]:
+        return {"total": 5, "has_more": True, "tracks": []}
+
+
+def test_dashboard_tracks_catalog_caption_reports_truncated_results() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(MoreTracksCatalogService(),),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(
+        caption.value.startswith("Showing the first 0 of 5") for caption in app.caption
+    )
 
 
 class EmptyFakeService(FakeDashboardService):
@@ -345,6 +375,101 @@ def test_dashboard_personalized_form_displays_results() -> None:
         caption.value == "Strategy: Hybrid Personalized" for caption in app.caption
     )
     assert any("Rank" in dataframe.value.columns for dataframe in app.dataframe)
+
+
+class LtrDashboardService(FakeDashboardService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.artifact.ltr_model = object()
+
+    def recommend_user_ltr(self, **_: Any) -> dict[str, object]:
+        return {
+            "strategy": "ltr_ranked",
+            "recommendations": [
+                {
+                    "artist_id": "artist_2",
+                    "artist_name": "B",
+                    "score": 0.9,
+                }
+            ],
+        }
+
+
+def test_dashboard_personalized_form_uses_ltr_when_enabled() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(LtrDashboardService(),),
+        default_timeout=10,
+    ).run()
+
+    app.checkbox[2].check().run()
+    app.button[0].click().run()
+
+    assert not app.exception
+    assert any(caption.value == "Strategy: Ltr Ranked" for caption in app.caption)
+
+
+def test_ablation_ranking_rows_shapes_summary_data() -> None:
+    summary = {
+        "reports_loaded": 2,
+        "ranking": [
+            {"knob": "diversity", "mean_impact": 0.12345},
+            {"knob": "popularity_penalty", "mean_impact": -0.05},
+        ],
+        "knobs": {
+            "diversity": {"std_impact": 0.02, "count": 2},
+            "popularity_penalty": {},
+        },
+    }
+
+    frame = _ablation_ranking_rows(summary)
+
+    assert frame.loc[0, "Knob"] == "diversity"
+    assert frame.loc[0, "Mean Impact"] == 0.1235
+    assert frame.loc[0, "Std Impact"] == 0.02
+    assert frame.loc[0, "Runs"] == 2
+    assert frame.loc[1, "Std Impact"] == 0.0
+    assert frame.loc[1, "Runs"] == 0
+
+
+def test_ablation_ranking_rows_returns_empty_frame_for_no_data() -> None:
+    frame = _ablation_ranking_rows({"ranking": [], "knobs": {}})
+
+    assert frame.empty
+
+
+def test_ablation_summary_body_renders_ranking_table() -> None:
+    summary = {
+        "reports_loaded": 2,
+        "ranking": [{"knob": "diversity", "mean_impact": 0.12345}],
+        "knobs": {"diversity": {"std_impact": 0.02, "count": 2}},
+    }
+    app = AppTest.from_function(
+        ablation_summary_script,
+        args=(summary,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert app.subheader[0].value == "Knob Importance by Mean Total Impact"
+    assert app.dataframe[0].value.loc[0, "Knob"] == "diversity"
+    assert any(
+        "Aggregated from 2 ablation report(s)" in caption.value
+        for caption in app.caption
+    )
+
+
+def test_ablation_summary_body_reports_empty_ranking() -> None:
+    app = AppTest.from_function(
+        ablation_summary_script,
+        args=({"ranking": [], "knobs": {}, "reports_loaded": 0},),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(
+        info.value == "No knob importance data in the summary." for info in app.info
+    )
 
 
 def test_dashboard_entrypoint_explains_missing_artifact(

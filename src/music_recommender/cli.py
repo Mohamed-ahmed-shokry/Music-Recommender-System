@@ -1065,7 +1065,7 @@ def spotify_artist(
     try:
         client, _ = _get_spotify_client()
         artist = fetch_artist(client, artist_id)
-    except (ValueError, Exception) as error:
+    except Exception as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
@@ -1093,7 +1093,7 @@ def spotify_artists(
     try:
         client, _ = _get_spotify_client()
         artists = fetch_artists(client, ids)
-    except (ValueError, Exception) as error:
+    except Exception as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
@@ -1110,7 +1110,7 @@ def spotify_artist_top_tracks(
     try:
         client, _ = _get_spotify_client()
         tracks = fetch_artist_top_tracks(client, artist_id, country=country)
-    except (ValueError, Exception) as error:
+    except Exception as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
@@ -1130,7 +1130,7 @@ def spotify_related_artists(
     try:
         client, _ = _get_spotify_client()
         artists = get_artist_related_artists(client, artist_id)
-    except (ValueError, Exception) as error:
+    except Exception as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
@@ -1150,7 +1150,7 @@ def spotify_search_artists(
     try:
         client, _ = _get_spotify_client()
         artists = search_artists(client, query, limit=limit)
-    except (ValueError, Exception) as error:
+    except Exception as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
@@ -1170,7 +1170,7 @@ def spotify_search_tracks(
     try:
         client, _ = _get_spotify_client()
         tracks = search_tracks(client, query, limit=limit)
-    except (ValueError, Exception) as error:
+    except Exception as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
@@ -1197,7 +1197,7 @@ def spotify_audio_features(
     try:
         client, _ = _get_spotify_client()
         features = fetch_audio_features(client, ids)
-    except (ValueError, Exception) as error:
+    except Exception as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
@@ -1252,7 +1252,7 @@ def spotify_import_catalog(
         output_path = Path(output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         frame.to_csv(output_path, index=False)
-    except (ValueError, Exception) as error:
+    except Exception as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
@@ -1539,10 +1539,12 @@ def evaluate_tracks(
         max=1.0,
         help="Balance hybrid tracks between artist taste and audio features.",
     ),
-    report_path: str = typer.Option(
+    report_name: str = typer.Option(
         None,
-        "--report-path",
-        help="Write the evaluation JSON report to this path.",
+        "--report-name",
+        help=(
+            "Name for the evaluation JSON report (stored under the reports directory)."
+        ),
     ),
 ) -> None:
     """Evaluate track similarity with repeated per-user holdout splits."""
@@ -1574,13 +1576,13 @@ def evaluate_tracks(
         _print_track_metric_row(
             "Similarity", cast(dict[str, float], metrics), top_k, header=False
         )
-    if report_path:
+    if report_name:
         written = write_track_report(
             metrics,
             str(REPORTS_DIR),
             top_k=top_k,
             folds=folds,
-            report_name=report_path,
+            report_name=report_name,
         )
         typer.echo(f"Wrote track evaluation report to: {written}")
 

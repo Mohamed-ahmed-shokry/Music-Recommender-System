@@ -98,6 +98,30 @@ def test_track_conflicting_artist_raises() -> None:
         validate_track_interactions(df)
 
 
+def test_track_artist_id_maps_to_multiple_names_raises() -> None:
+    df = valid_track_df()
+    df.loc[2, "artist_name"] = "Artist B"
+    with pytest.raises(ValueError, match="multiple artist names"):
+        validate_track_interactions(df)
+
+
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        lambda df: df.assign(user_id=["user_1", None, "user_2"]),
+        lambda df: df.assign(track_name=["Song A1", " ", "Song A1"]),
+        lambda df: df.assign(play_count=["5", "3", "7"]),
+        lambda df: df.assign(play_count=[5.0, np.inf, 7.0]),
+        lambda df: df.assign(play_count=[5, -3, 7]),
+    ],
+)
+def test_track_interactions_reject_bad_values(
+    mutator,
+) -> None:
+    with pytest.raises(ValueError):
+        validate_track_interactions(mutator(valid_track_df()))
+
+
 def test_track_normalization_aggregates() -> None:
     df = pd.DataFrame(
         {
@@ -123,6 +147,25 @@ def test_track_metadata_validation_and_coverage() -> None:
     dup = pd.concat([valid_metadata_df(), valid_metadata_df().iloc[[0]]])
     with pytest.raises(ValueError, match="Duplicate track"):
         validate_track_metadata(dup)
+    with pytest.raises(ValueError, match="not found in metadata"):
+        validate_track_metadata(
+            valid_metadata_df().drop(index=1),
+            valid_track_df(),
+        )
+    with pytest.raises(ValueError, match="empty"):
+        validate_track_metadata(pd.DataFrame(columns=valid_metadata_df().columns))
+
+
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        lambda df: df.assign(album_name=["Album A", None]),
+        lambda df: df.assign(album_name=["Album A", " "]),
+    ],
+)
+def test_track_metadata_rejects_bad_values(mutator) -> None:
+    with pytest.raises(ValueError):
+        validate_track_metadata(mutator(valid_metadata_df()))
     missing = valid_metadata_df().iloc[[0]]
     with pytest.raises(ValueError, match="not found in metadata"):
         validate_track_metadata(missing, valid_track_df())

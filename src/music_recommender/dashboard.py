@@ -605,42 +605,32 @@ def _render_catalog_tab(service: RecommenderService) -> None:
     )
 
 
-def _render_ablation_summary_tab(service: RecommenderService) -> None:
-    st.write("Aggregated knob-importance summary across ablation reports.")
-    st.caption(
-        "Run `music_recommender.cli ablation-summary` to generate the summary from "
-        "persisted ablation reports."
-    )
-    try:
-        from music_recommender.config import REPORTS_DIR
-        from music_recommender.evaluate import load_ablation_summary_report
-
-        summary = load_ablation_summary_report(REPORTS_DIR / "ablation_summary.json")
-    except (FileNotFoundError, ValueError) as error:
-        st.warning(f"No ablation summary available: {error}")
-        st.info("Run `uv run music-recommender ablation-summary` to generate one.")
-        return
-
-    st.subheader("Knob Importance by Mean Total Impact")
+def _ablation_ranking_rows(summary: dict[str, Any]) -> pd.DataFrame:
+    """Shape the persisted ablation summary into a comparison table."""
     ranking_data = summary["ranking"]
     knobs_data = summary["knobs"]
+    rows = []
+    for item in ranking_data:
+        knob = item["knob"]
+        knob_info = knobs_data.get(knob, {})
+        rows.append(
+            {
+                "Knob": knob,
+                "Mean Impact": round(item["mean_impact"], 4),
+                "Std Impact": round(knob_info.get("std_impact", 0.0), 4),
+                "Runs": knob_info.get("count", 0),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _render_ablation_summary_body(summary: dict[str, Any]) -> None:
+    """Render the loaded ablation summary as a comparison table."""
+    st.subheader("Knob Importance by Mean Total Impact")
+    ranking_data = summary["ranking"]
 
     if ranking_data:
-        import pandas as pd
-
-        rows = []
-        for item in ranking_data:
-            knob = item["knob"]
-            knob_info = knobs_data.get(knob, {})
-            rows.append(
-                {
-                    "Knob": knob,
-                    "Mean Impact": round(item["mean_impact"], 4),
-                    "Std Impact": round(knob_info.get("std_impact", 0.0), 4),
-                    "Runs": knob_info.get("count", 0),
-                }
-            )
-        df = pd.DataFrame(rows)
+        df = _ablation_ranking_rows(summary)
         st.dataframe(
             df,
             hide_index=True,
@@ -657,6 +647,25 @@ def _render_ablation_summary_tab(service: RecommenderService) -> None:
         )
     else:
         st.info("No knob importance data in the summary.")
+
+
+def _render_ablation_summary_tab(service: RecommenderService) -> None:
+    st.write("Aggregated knob-importance summary across ablation reports.")
+    st.caption(
+        "Run `music_recommender.cli ablation-summary` to generate the summary from "
+        "persisted ablation reports."
+    )
+    try:
+        from music_recommender.config import REPORTS_DIR
+        from music_recommender.evaluate import load_ablation_summary_report
+
+        summary = load_ablation_summary_report(REPORTS_DIR / "ablation_summary.json")
+    except (FileNotFoundError, ValueError) as error:
+        st.warning(f"No ablation summary available: {error}")
+        st.info("Run `uv run music-recommender ablation-summary` to generate one.")
+        return
+
+    _render_ablation_summary_body(summary)
 
 
 def render_dashboard(service: RecommenderService) -> None:
