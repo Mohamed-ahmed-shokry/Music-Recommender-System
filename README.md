@@ -30,12 +30,16 @@ portfolio-ready architecture.
 - [Recommendation Strategies](#recommendation-strategies)
 - [Project Structure](#project-structure)
 - [Quickstart](#quickstart)
+- [GPU Support](#gpu-support)
 - [CLI Reference](#cli-reference)
 - [API Reference](#api-reference)
 - [Dashboard](#dashboard)
 - [Docker Deployment](#docker-deployment)
 - [Evaluation](#evaluation)
 - [Experiment Tracking](#experiment-tracking)
+- [Artifact Bundle](#artifact-bundle)
+- [Data Contract](#data-contract)
+- [Logging](#logging)
 - [Model Card](#model-card)
 - [Development](#development)
 - [Roadmap](#roadmap)
@@ -524,7 +528,7 @@ Tune the evaluated recommender with the same ranking knobs, and persist the
 run for later comparison:
 
 ```bash
-uv run python -m music_recommender.cli evaluate-tracks --top-k 10 --folds 2 --popularity-penalty 0.3 --diversity 0.5 --report-path track_tuned
+uv run python -m music_recommender.cli evaluate-tracks --top-k 10 --folds 2 --popularity-penalty 0.3 --diversity 0.5 --report-name track_tuned
 ```
 
 Track evaluation reports land in `reports/` as JSON (`track_evaluation.json`
@@ -672,12 +676,12 @@ docker build --target dashboard-runtime --tag music-recommender-dashboard .
 docker run --rm --publish 8501:8501 music-recommender-dashboard
 ```
 
-Version tags that match `pyproject.toml`, for example `v0.12.0`, run the complete
+Version tags that match `pyproject.toml`, for example `v0.13.0`, run the complete
 quality gate and publish both images to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-api:0.12.0
-docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-dashboard:0.12.0
+docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-api:0.13.0
+docker pull ghcr.io/mohamed-ahmed-shokry/music-recommender-dashboard:0.13.0
 ```
 
 Published images receive full, major/minor, major, and stable `latest` tags.
@@ -1090,6 +1094,23 @@ Artist metadata CSV files must include:
 Metadata validation rejects missing columns, duplicate artist IDs, empty genre or
 mood fields, and interaction artists that are not covered by metadata.
 
+## Logging
+
+The CLI and the API configure single-line structured logging on startup (see
+`music_recommender.logging_setup.configure_logging`). Library modules only emit
+through `logging.getLogger(__name__)`, so operators can filter by component:
+
+| Record prefix | Emitted by | Meaning |
+| --- | --- | --- |
+| `request method=… path=… status=… request_id=…` | API middleware | One line per HTTP response, including rejections |
+| `service_loaded users=…` / `service_unavailable reason=…` | API startup | Whether the artifact bundle loaded for serving |
+| `trained_als model device=… users=… items=…` | `train_als_model` | ALS fit summary with device, shape, and duration |
+| `training_complete users=… artists=…` | `train_and_save_model` | End of the persisted training pipeline |
+| `loaded_artifact version=… users=… artists=… tracks=… ltr=…` | `load_artifact` | Bundle summary whenever serving state loads |
+
+Correlate API requests with the `X-Request-Id` response header (echoed when the
+client sends one, generated otherwise) alongside `X-Process-Time`.
+
 ## Development
 
 Use the Makefile for common workflows:
@@ -1156,9 +1177,9 @@ publishing the API and dashboard images, then attach registry provenance.
 
 The pytest configuration treats warnings as errors and enforces at least 75%
 statement coverage across the application package and API. The current suite
-reaches 100% statement coverage; the two `__main__` entry points and one
-defensive guard are marked as deliberate exclusions because they only execute
-under `python -m` or the Streamlit runtime.
+covers roughly 96% of statements; long-tail gaps concentrate in
+Spotify-unavailable branches (mocked in CI), one defensive middleware branch,
+and the artifact-version migration shim.
 
 Current coverage focus:
 
@@ -1207,8 +1228,18 @@ See [PLAN.md](PLAN.md) for the full phased plan.
 - Add a CI quality gate that auto-promotes the winning setting when the A/B run
   passes a minimum quality threshold. ✓
 - Render the aggregated ablation summary in the Streamlit dashboard. ✓
-- Next: 0.5.0 release (track API, bundled track artifacts, Spotify import
-  pipeline, and track evaluation are all served).
+- Explain the collaborative driver behind hybrid track hits (`Artist affinity`
+  reasons) and surface blended score components in the dashboard. ✓ (0.13.0)
+- Structured request/training/serving logs (`configure_logging`) across the
+  CLI, API, training pipeline, and artifact loading. ✓ (0.13.0)
+- Quality sweep: fixed the Spotify duplicate init/docstring, redundant CLI
+  exception tuples, and the misleading `evaluate-tracks --report-path` option
+  (now `--report-name`); removed the unused `PROCESSED_DATA_DIR` config;
+  covered the LTR route, LTR dashboard branch, ablation rendering,
+  quality-threshold parsing, and track validator branches. ✓ (0.13.0)
+- Next: persist artist-taste contributor stats on the track artifact, add
+  notebook-driven walkthroughs under `notebooks/`, and publish a cross-surface
+  evaluation parity report.
 
 ## License
 

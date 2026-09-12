@@ -7,6 +7,45 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-12
+
+### Added
+
+- Hybrid track explanations now name the collaborative driver: with
+  `explain=true`, hybrid hits carry an `Artist affinity: <artist>` reason
+  whenever the recommended track's artist contributed positively on the
+  collaborative side (`track_artist_lookup`, wired through the service, CLI,
+  and track evaluation).
+- The dashboard `recommendation_frame` renders a `Score components` column
+  (`content … · collab …`) for hybrid responses instead of discarding the
+  blended score breakdown.
+- Structured logging: `music_recommender.logging_setup.configure_logging`
+  (idempotent) is configured by the CLI app callback and at API startup; the
+  API middleware logs one line per request (`method`, `path`, `status`,
+  `request_id`, `duration`), and the training pipeline, model fit, artifact
+  loading, and API service load emit summary records. Documented under
+  README "Logging".
+
+### Fixed
+
+- Removed a duplicated docstring/initializer in Spotify `fetch_audio_features`
+  and collapsed redundant `except (ValueError, Exception)` tuples in the CLI.
+- Renamed `evaluate-tracks --report-path` to `--report-name`: the value names
+  a file stored under the reports directory, not a path.
+- Removed the unused `config.PROCESSED_DATA_DIR`.
+- Extracted the dashboard ablation-summary table shaping
+  (`_ablation_ranking_rows`) and body rendering
+  (`_render_ablation_summary_body`) into testable units.
+
+### Tests
+
+- Covered the LTR API route (success + 422), the LTR dashboard branch, the
+  ablation-summary rendering, quality-threshold parsing edge cases, track
+  interaction/metadata validator branches, and the truncated track-catalog
+  caption; added logging tests for `configure_logging`, middleware request
+  lines, ALS training logs, and artifact-load logs. 611 tests, ~96.8%
+  statement coverage.
+
 ## [0.12.0] - 2026-09-12
 
 ### Added
@@ -342,7 +381,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Pinned release actions to immutable commits and disabled reusable caches and
   persisted checkout credentials in artifact-publishing jobs.
 
-[Unreleased]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.13.0
 [0.12.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.12.0
 [0.11.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.11.0
 [0.10.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.10.0
