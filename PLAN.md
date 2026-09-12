@@ -3,22 +3,26 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.13.0)
+## Current milestone (0.13.0) — shipped
 
 - Phase 37 — Hybrid artist-taste explainability: track recommendations in
   hybrid mode explain the collaborative driver ("Artist affinity: X") next
   to the content reasons, and the dashboard renders `score_components` for
   hybrid hits so the blended score is visible where README promises it.
+  (commit `4a896bd`)
 - Phase 38 — Structured logging: a shared `configure_logging` helper, request
   logging in the API middleware, and INFO logs for training, artifact
   load/build, and the CLI train/eval commands close the observability gap.
+  (commit `c30bfa7`)
 - Phase 39 — Track-surface quality sweep: fix audit-found bugs (spotify
   duplicate init, redundant CLI except tuple, `--report-path` semantics),
   remove dead config, and add tests for the uncovered behavior (LTR API +
   dashboard, ablation summary render, quality-threshold errors, track
-  validators, empty-result CLI branches).
-- Phase 40 — Docs and release: refresh README roadmap and TOC, CHANGELOG,
-  and ship/label 0.13.0.
+  validators, truncated track-catalog caption). (commit `18326f3`)
+- Phase 40 — Docs and release: refreshed README roadmap/TOC/Logging section,
+  CHANGELOG, bumped to 0.13.0. (commit `06e9606`)
+- Release 0.13.0 — shipped and published (tag `v0.13.0`, release run
+  34660611573 succeeded, both GHCR images live).
 
 ## Completed
 
@@ -111,7 +115,7 @@ It is updated incrementally as phases land.
 
 ## Quality gates (every change)
 
-- `uv run pytest -q` — 568+ tests must pass.
+- `uv run pytest -q` — 610+ tests must pass.
 - `uv run ruff check .`
 - `uv run mypy`
 - Coverage ≥75% (`pytest --cov`).
