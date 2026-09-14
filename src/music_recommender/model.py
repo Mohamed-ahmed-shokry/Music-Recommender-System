@@ -315,8 +315,8 @@ def train_and_save_model(
             len(taste_uidx),
             len(taste_aidx),
         )
-    except Exception:
-        logger.debug("taste_model_skip", exc_info=True)
+    except (ValueError, RuntimeError) as exc:
+        logger.warning("taste_model_skip reason=%s", exc)
     artifact = build_recommender_artifact(
         model=model,
         mappings=mappings,
