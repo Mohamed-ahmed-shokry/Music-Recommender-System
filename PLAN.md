@@ -120,7 +120,24 @@ It is updated incrementally as phases land.
 - Release 0.8.0 — shipped and published (tag `v0.8.0`, release run #4
   succeeded, both GHCR images live).
 
-## Next steps (after 0.14.0)
+## Current phase (0.15.0) — code quality and hardening
+
+- Phase 45 — Replace bare `assert` in production code with runtime guards
+  that raise `ValueError` (tracks.py `artist_taste_per_track` check).
+- Phase 46 — Narrow broad `except Exception` in taste-model training
+  (model.py) and log at `warning` level instead of `debug`.
+- Phase 47 — Move top-level `numpy` import in `cli.py` to local scope for
+  faster CLI startup.
+- Phase 48 — Remove `noqa: E501` suppressions in `ltr.py` by reformatting
+  long lines with intermediate variables.
+- Phase 49 — Add dedicated unit tests for `baselines.py` (`popular_artists`
+  with exclusions, empty stats, tie-breaking, top_k boundary).
+- Phase 50 — Expand `test_config.py` edge-case coverage (whitespace env var,
+  empty env var, invalid path).
+- Phase 51 — Docs and release: refresh PLAN, README, CHANGELOG, bump to
+  0.15.0.
+
+## Next steps (after 0.15.0)
 
 1. Artist-taste contributor stats in the artifact (top artists per user) for
    cheaper serving-time explainability.
@@ -132,7 +149,7 @@ It is updated incrementally as phases land.
 
 ## Quality gates (every change)
 
-- `uv run pytest -q` — 615+ tests must pass.
+- `uv run pytest -q` — tests must pass.
 - `uv run ruff check .`
 - `uv run mypy`
 - Coverage ≥75% (`pytest --cov`).
