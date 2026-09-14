@@ -7,6 +7,20 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-14
+
+### Added
+
+- Track evaluation now reports `unexpectedness_at_k` and
+  `intra_list_diversity`, closing the last two metric gaps with artist-side
+  evaluation. The CLI `evaluate-tracks` prints both metrics.
+- `evaluate_track_holdout` and the `evaluate-tracks` CLI accept
+  `--compare-all`, running similarity, popularity, and hybrid strategies in a
+  single pass and returning all three arms as a labelled dict. Mutually
+  exclusive with `--compare-baseline`.
+- Three notebook walkthroughs in `notebooks/`: data exploration (01),
+  API serving (02), and evaluation with compare_all (03).
+
 ## [0.13.0] - 2026-09-12
 
 ### Added
@@ -381,7 +395,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Pinned release actions to immutable commits and disabled reusable caches and
   persisted checkout credentials in artifact-publishing jobs.
 
-[Unreleased]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.13.0
 [0.12.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.12.0
 [0.11.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.11.0

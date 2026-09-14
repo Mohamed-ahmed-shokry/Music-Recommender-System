@@ -1237,9 +1237,14 @@ See [PLAN.md](PLAN.md) for the full phased plan.
   (now `--report-name`); removed the unused `PROCESSED_DATA_DIR` config;
   covered the LTR route, LTR dashboard branch, ablation rendering,
   quality-threshold parsing, and track validator branches. ✓ (0.13.0)
+- Track evaluation parity: added `unexpectedness_at_k` and
+  `intra_list_diversity` metrics, and `--compare-all` for multi-strategy
+  comparison in a single pass. ✓ (0.14.0)
+- Notebook walkthroughs: data exploration, API serving, and evaluation
+  under `notebooks/`. ✓ (0.14.0)
 - Next: persist artist-taste contributor stats on the track artifact, add
-  notebook-driven walkthroughs under `notebooks/`, and publish a cross-surface
-  evaluation parity report.
+  track-side ablation suite, and publish a cross-surface evaluation parity
+  report.
 
 ## License
 

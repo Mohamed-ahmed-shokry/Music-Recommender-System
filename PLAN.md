@@ -3,7 +3,23 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.13.0) — shipped
+## Current milestone (0.14.0) — shipped
+
+- Phase 41 — Track evaluation parity metrics: added `unexpectedness_at_k`
+  and `intra_list_diversity` to the track evaluator, closing the last two
+  metric gaps with artist-side evaluation. (commit `8031656`)
+- Phase 42 — Track compare-all mode: `evaluate_track_holdout` and the
+  `evaluate-tracks` CLI accept `--compare-all`, running similarity,
+  popularity, and hybrid strategies in a single pass for side-by-side
+  comparison. Mutually exclusive with `--compare-baseline`. (commit `b3f2625`)
+- Phase 43 — Notebook walkthroughs: three notebooks in `notebooks/` covering
+  data exploration, API serving, and evaluation with `compare_all`.
+  (commit `529bd81`)
+- Phase 44 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to
+  0.14.0.
+- Release 0.14.0 — shipped and published (tag `v0.14.0`).
+
+## Completed (0.13.0 era)
 
 - Phase 37 — Hybrid artist-taste explainability: track recommendations in
   hybrid mode explain the collaborative driver ("Artist affinity: X") next
@@ -104,18 +120,19 @@ It is updated incrementally as phases land.
 - Release 0.8.0 — shipped and published (tag `v0.8.0`, release run #4
   succeeded, both GHCR images live).
 
-## Next steps (after 0.13.0)
+## Next steps (after 0.14.0)
 
 1. Artist-taste contributor stats in the artifact (top artists per user) for
    cheaper serving-time explainability.
-2. Notebook-driven walkthroughs in `notebooks/` covering training, serving,
-   and track evaluation.
-3. Cross-surface evaluation parity report (artist vs. track metrics on the
-   same data window).
+2. Track-side ablation suite (parity with artist-side ablation reports).
+3. `compare-settings` / `strategy_leaderboard` / `--learn-to-rank` for track
+   evaluation (full CLI parity with `evaluate-artists`).
+4. Cross-surface evaluation parity report (artist vs. track metrics on the
+   same data window, single CLI command).
 
 ## Quality gates (every change)
 
-- `uv run pytest -q` — 610+ tests must pass.
+- `uv run pytest -q` — 615+ tests must pass.
 - `uv run ruff check .`
 - `uv run mypy`
 - Coverage ≥75% (`pytest --cov`).
