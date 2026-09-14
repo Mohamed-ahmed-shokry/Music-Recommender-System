@@ -196,6 +196,42 @@ def test_evaluate_track_holdout_compares_baseline() -> None:
         }
 
 
+def test_evaluate_track_holdout_compare_all_returns_three_arms() -> None:
+    metrics = evaluate_track_holdout(
+        track_df(), track_meta_df(), top_k=2, folds=1, compare_all=True
+    )
+
+    assert isinstance(metrics, dict)
+    assert set(metrics) == {"similarity", "popularity", "hybrid"}
+    for arm in metrics.values():
+        assert isinstance(arm, dict)
+        assert set(arm) == {
+            "precision_at_k",
+            "recall_at_k",
+            "map_at_k",
+            "ndcg_at_k",
+            "catalog_coverage",
+            "average_popularity",
+            "novelty_at_k",
+            "serendipity_at_k",
+            "explanation_coverage",
+            "unexpectedness_at_k",
+            "intra_list_diversity",
+        }
+        assert all(value >= 0.0 for value in arm.values())
+
+
+def test_evaluate_track_holdout_rejects_compare_all_with_baseline() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        evaluate_track_holdout(
+            track_df(),
+            track_meta_df(),
+            top_k=2,
+            compare_baseline=True,
+            compare_all=True,
+        )
+
+
 def test_evaluate_track_holdout_requires_held_out_tracks() -> None:
     df = pd.DataFrame(
         {

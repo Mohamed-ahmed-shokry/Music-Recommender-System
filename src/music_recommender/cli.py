@@ -1513,6 +1513,11 @@ def evaluate_tracks(
         "--compare-baseline/--no-compare-baseline",
         help="Compare track similarity against a global-popularity baseline.",
     ),
+    compare_all: bool = typer.Option(
+        False,
+        "--compare-all/--no-compare-all",
+        help="Compare similarity, popularity, and hybrid strategies in a single pass.",
+    ),
     popularity_penalty: float = typer.Option(
         0.0,
         "--popularity-penalty",
@@ -1558,6 +1563,7 @@ def evaluate_tracks(
             folds=folds,
             include_listened=include_listened,
             compare_baseline=compare_baseline,
+            compare_all=compare_all,
             popularity_penalty=popularity_penalty,
             diversity=diversity,
             method=method,
@@ -1568,7 +1574,12 @@ def evaluate_tracks(
         raise typer.Exit(code=1) from error
 
     typer.echo(f"Track evaluation over {folds} fold(s):")
-    if compare_baseline:
+    if compare_all:
+        metrics = cast(dict[str, dict[str, float]], metrics)
+        _print_track_metric_row("Similarity", metrics["similarity"], top_k)
+        _print_track_metric_row("Popularity", metrics["popularity"], top_k)
+        _print_track_metric_row("Hybrid", metrics["hybrid"], top_k)
+    elif compare_baseline:
         metrics = cast(dict[str, dict[str, float]], metrics)
         _print_track_metric_row("Similarity", metrics["similarity"], top_k)
         _print_track_metric_row("Popularity", metrics["popularity"], top_k)

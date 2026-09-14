@@ -1707,6 +1707,18 @@ def test_evaluate_tracks_compare_baseline_prints_both_arms() -> None:
     assert "Popularity:" in result.output
 
 
+def test_evaluate_tracks_compare_all_prints_three_arms() -> None:
+    result = runner.invoke(
+        cli.app,
+        ["evaluate-tracks", "--top-k", "5", "--folds", "1", "--compare-all"],
+    )
+
+    assert result.exit_code == 0
+    assert "Similarity:" in result.output
+    assert "Popularity:" in result.output
+    assert "Hybrid:" in result.output
+
+
 def test_evaluate_tracks_supports_ranking_knobs() -> None:
     result = runner.invoke(
         cli.app,
