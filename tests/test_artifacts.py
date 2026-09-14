@@ -182,6 +182,38 @@ def test_artifact_bundle_round_trips_ltr_model(tmp_path: Path) -> None:
     assert loaded_artifact.ltr_model == {"kind": "ridge"}
 
 
+def test_artifact_without_taste_model_defaults_to_none(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    del artifact.taste_model
+    del artifact.taste_user_id_to_index
+    del artifact.taste_artist_id_to_index
+    artifact_path = tmp_path / "legacy-taste.joblib"
+
+    save_artifact(artifact, artifact_path)
+    loaded_artifact = load_artifact(artifact_path)
+
+    assert loaded_artifact.taste_model is None
+    assert loaded_artifact.taste_user_id_to_index is None
+    assert loaded_artifact.taste_artist_id_to_index is None
+
+
+def test_artifact_bundle_round_trips_taste_model(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    taste_user_idx = {"user_1": 0, "user_2": 1}
+    taste_artist_idx = {"artist_1": 0, "artist_2": 1, "artist_3": 2}
+    artifact.taste_model = {"kind": "als", "factors": 8}
+    artifact.taste_user_id_to_index = taste_user_idx
+    artifact.taste_artist_id_to_index = taste_artist_idx
+    artifact_path = tmp_path / "taste.joblib"
+
+    save_artifact(artifact, artifact_path)
+    loaded_artifact = load_artifact(artifact_path)
+
+    assert loaded_artifact.taste_model == {"kind": "als", "factors": 8}
+    assert loaded_artifact.taste_user_id_to_index == taste_user_idx
+    assert loaded_artifact.taste_artist_id_to_index == taste_artist_idx
+
+
 def track_interactions_df() -> pd.DataFrame:
     return pd.DataFrame(
         {

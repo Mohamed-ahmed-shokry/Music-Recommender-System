@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, cast
@@ -92,6 +93,8 @@ try:
     SPOTIFY_AVAILABLE = True
 except ImportError:
     SPOTIFY_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 app = typer.Typer(help="Train and use an ALS music artist recommender.")
 
@@ -1400,10 +1403,12 @@ def track_recommendations(
                 taste_model = artifact.taste_model
                 user_id_to_index = artifact.taste_user_id_to_index
                 artist_id_to_index = artifact.taste_artist_id_to_index
+                logger.info("taste_model_source=artifact")
             else:
                 taste_model, user_id_to_index, artist_id_to_index = (
                     train_track_artist_taste(df)
                 )
+                logger.info("taste_model_source=trained")
             artist_scores = artist_taste_scores_for_user(
                 taste_model, user_id_to_index, artist_id_to_index, user_id
             )

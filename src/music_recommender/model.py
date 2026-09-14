@@ -310,6 +310,11 @@ def train_and_save_model(
         taste_model, taste_uidx, taste_aidx = train_track_artist_taste(
             track_bundle.interactions,
         )
+        logger.info(
+            "taste_model_trained users=%d artists=%d",
+            len(taste_uidx),
+            len(taste_aidx),
+        )
     except Exception:
         logger.debug("taste_model_skip", exc_info=True)
     artifact = build_recommender_artifact(
