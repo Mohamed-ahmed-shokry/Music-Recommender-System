@@ -50,6 +50,9 @@ class RecommenderArtifact:
     ranking_config: dict[str, Any]
     ltr_model: Any = None
     track_bundle: TrackServingResources | None = None
+    taste_model: Any = None
+    taste_user_id_to_index: dict[str, int] | None = None
+    taste_artist_id_to_index: dict[str, int] | None = None
 
     def __repr__(self) -> str:
         return (
@@ -129,6 +132,9 @@ def build_recommender_artifact(
     ranking_config: dict[str, Any],
     ltr_model: Any = None,
     track_bundle: TrackServingResources | None = None,
+    taste_model: Any = None,
+    taste_user_id_to_index: dict[str, int] | None = None,
+    taste_artist_id_to_index: dict[str, int] | None = None,
 ) -> RecommenderArtifact:
     """Build a versioned artifact from trained model state."""
     metadata = {
@@ -158,6 +164,9 @@ def build_recommender_artifact(
         ranking_config=ranking_config,
         ltr_model=ltr_model,
         track_bundle=track_bundle,
+        taste_model=taste_model,
+        taste_user_id_to_index=taste_user_id_to_index,
+        taste_artist_id_to_index=taste_artist_id_to_index,
     )
 
 
@@ -226,6 +235,14 @@ def _validate_loaded_artifact(artifact: Any) -> RecommenderArtifact:
     artifact.track_bundle = getattr(artifact, "track_bundle", None)
     if artifact.track_bundle is not None:
         _validate_track_bundle(artifact.track_bundle)
+
+    artifact.taste_model = getattr(artifact, "taste_model", None)
+    artifact.taste_user_id_to_index = getattr(
+        artifact, "taste_user_id_to_index", None
+    )
+    artifact.taste_artist_id_to_index = getattr(
+        artifact, "taste_artist_id_to_index", None
+    )
 
     if not isinstance(artifact.mappings, dict):
         raise ValueError("Artifact mappings are not a dictionary. Retrain the model.")

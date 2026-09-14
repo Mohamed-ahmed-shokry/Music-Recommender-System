@@ -303,6 +303,15 @@ def train_and_save_model(
         "diversity": diversity,
     }
     track_bundle = load_track_serving_resources(track_data_path, track_metadata_path)
+    taste_model, taste_uidx, taste_aidx = None, None, None
+    try:
+        from music_recommender.tracks import train_track_artist_taste
+
+        taste_model, taste_uidx, taste_aidx = train_track_artist_taste(
+            track_bundle.interactions,
+        )
+    except Exception:
+        logger.debug("taste_model_skip", exc_info=True)
     artifact = build_recommender_artifact(
         model=model,
         mappings=mappings,
@@ -322,6 +331,9 @@ def train_and_save_model(
             model=model,
             artist_stats=build_artist_stats(filtered_df),
         ),
+        taste_model=taste_model,
+        taste_user_id_to_index=taste_uidx,
+        taste_artist_id_to_index=taste_aidx,
     )
     save_artifact(artifact, artifact_path)
     save_model(model, model_path)

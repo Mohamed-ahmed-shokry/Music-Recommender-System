@@ -1389,9 +1389,23 @@ def track_recommendations(
 
         artist_taste_per_track = None
         if method == "hybrid":
-            model, user_id_to_index, artist_id_to_index = train_track_artist_taste(df)
+            from music_recommender.artifacts import load_artifact
+
+            artifact = load_artifact()
+            if (
+                artifact.taste_model is not None
+                and artifact.taste_user_id_to_index is not None
+                and artifact.taste_artist_id_to_index is not None
+            ):
+                taste_model = artifact.taste_model
+                user_id_to_index = artifact.taste_user_id_to_index
+                artist_id_to_index = artifact.taste_artist_id_to_index
+            else:
+                taste_model, user_id_to_index, artist_id_to_index = (
+                    train_track_artist_taste(df)
+                )
             artist_scores = artist_taste_scores_for_user(
-                model, user_id_to_index, artist_id_to_index, user_id
+                taste_model, user_id_to_index, artist_id_to_index, user_id
             )
             if artist_scores is None:
                 raise ValueError(
