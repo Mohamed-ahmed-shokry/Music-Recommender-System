@@ -95,6 +95,8 @@ def test_evaluate_track_holdout_returns_bounded_metrics() -> None:
         "novelty_at_k",
         "serendipity_at_k",
         "explanation_coverage",
+        "unexpectedness_at_k",
+        "intra_list_diversity",
     }
     assert all(value >= 0.0 for value in metrics.values())
     assert metrics["catalog_coverage"] <= 1.0
@@ -151,6 +153,8 @@ def test_evaluate_track_holdout_hybrid_method() -> None:
         "novelty_at_k",
         "serendipity_at_k",
         "explanation_coverage",
+        "unexpectedness_at_k",
+        "intra_list_diversity",
     }
     assert metrics["catalog_coverage"] <= 1.0
 
@@ -187,6 +191,8 @@ def test_evaluate_track_holdout_compares_baseline() -> None:
             "novelty_at_k",
             "serendipity_at_k",
             "explanation_coverage",
+            "unexpectedness_at_k",
+            "intra_list_diversity",
         }
 
 

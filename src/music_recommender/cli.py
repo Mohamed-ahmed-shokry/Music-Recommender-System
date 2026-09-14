@@ -1601,6 +1601,8 @@ def _print_track_metric_row(
     typer.echo(f"  Average popularity: {metrics['average_popularity']:.4f}")
     typer.echo(f"  Novelty@{top_k}: {metrics['novelty_at_k']:.4f}")
     typer.echo(f"  Serendipity@{top_k}: {metrics['serendipity_at_k']:.4f}")
+    typer.echo(f"  Unexpectedness@{top_k}: {metrics['unexpectedness_at_k']:.4f}")
+    typer.echo(f"  Intra-list diversity: {metrics['intra_list_diversity']:.4f}")
     typer.echo(f"  Explanation coverage: {metrics['explanation_coverage']:.4f}")
 
 

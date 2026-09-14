@@ -16,12 +16,14 @@ from music_recommender.evaluate import (
     average_popularity,
     catalog_coverage,
     explanation_coverage,
+    intra_list_diversity,
     map_at_k,
     ndcg_at_k,
     novelty_at_k,
     precision_at_k,
     recall_at_k,
     serendipity_at_k,
+    unexpectedness_at_k,
 )
 from music_recommender.ranking import validate_ranking_parameters
 from music_recommender.tracks import (
@@ -111,6 +113,21 @@ def _summarize_track_lists(
         "novelty_at_k": novelty_at_k(recommended_lists, resources.track_stats),
         "serendipity_at_k": float(np.mean(serendipities)),
         "explanation_coverage": explanation_coverage_value,
+        "unexpectedness_at_k": unexpectedness_at_k(
+            recommended_lists, resources.track_stats
+        ),
+        "intra_list_diversity": float(
+            np.mean(
+                [
+                    intra_list_diversity(
+                        recommended,
+                        resources.feature_matrix,
+                        resources.track_id_to_index,
+                    )
+                    for recommended in recommended_lists
+                ]
+            )
+        ),
     }
 
 
