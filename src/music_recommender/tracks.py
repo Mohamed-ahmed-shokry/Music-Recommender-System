@@ -458,7 +458,9 @@ def recommend_tracks_for_user(
 
     hybrid = artist_taste_per_track is not None
     if hybrid:
-        assert artist_taste_per_track is not None
+        if artist_taste_per_track is None:
+            msg = "artist_taste_per_track must not be None when hybrid is True"
+            raise ValueError(msg)
         content_unit = _min_max_unit(similarity_scores)
         taste_unit = _min_max_unit(artist_taste_per_track)
         blended_scores = hybrid_scores(
