@@ -120,31 +120,37 @@ It is updated incrementally as phases land.
 - Release 0.8.0 — shipped and published (tag `v0.8.0`, release run #4
   succeeded, both GHCR images live).
 
-## Current phase (0.15.0) — code quality and hardening
+## Current milestone (0.15.0) — shipped
 
 - Phase 45 — Replace bare `assert` in production code with runtime guards
   that raise `ValueError` (tracks.py `artist_taste_per_track` check).
+  (commit `3618412`)
 - Phase 46 — Narrow broad `except Exception` in taste-model training
-  (model.py) and log at `warning` level instead of `debug`.
+  (model.py) to `(ValueError, RuntimeError)` and log at `warning` level
+  instead of `debug`. (commit `4661ea4`)
 - Phase 47 — Move top-level `numpy` import in `cli.py` to local scope for
-  faster CLI startup.
+  faster CLI startup. (commit `09ce619`)
 - Phase 48 — Remove `noqa: E501` suppressions in `ltr.py` by reformatting
-  long lines with intermediate variables.
+  long lines with an intermediate variable. (commit `b800b00`)
 - Phase 49 — Add dedicated unit tests for `baselines.py` (`popular_artists`
   with exclusions, empty stats, tie-breaking, top_k boundary).
-- Phase 50 — Expand `test_config.py` edge-case coverage (whitespace env var,
-  empty env var, invalid path).
-- Phase 51 — Docs and release: refresh PLAN, README, CHANGELOG, bump to
+  (commit `bb3e62a`)
+- Phase 50 — Expand `test_config.py` edge-case coverage (blank env var,
+  whitespace stripping, home-expansion). (commit `f660deb`)
+- Phase 52 — Track-side A/B parity: `compare_track_parameter_settings` plus
+  `evaluate-tracks --compare-settings` mirroring `evaluate-artists`, with
+  labeled metric rows, winners-by-metric, and the overall leaderboard.
+  Mutually exclusive with `--compare-baseline` / `--compare-all`.
+  (commits `f0df062`, `6f1720b`, `cdc6396`)
+- Phase 51 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to
   0.15.0.
 
 ## Next steps (after 0.15.0)
 
-1. Artist-taste contributor stats in the artifact (top artists per user) for
-   cheaper serving-time explainability.
-2. Track-side ablation suite (parity with artist-side ablation reports).
-3. `compare-settings` / `strategy_leaderboard` / `--learn-to-rank` for track
-   evaluation (full CLI parity with `evaluate-artists`).
-4. Cross-surface evaluation parity report (artist vs. track metrics on the
+1. Track-side ablation suite (parity with artist-side ablation reports).
+2. `--learn-to-rank` for track evaluation (remaining CLI parity with
+   `evaluate-artists`).
+3. Cross-surface evaluation parity report (artist vs. track metrics on the
    same data window, single CLI command).
 
 ## Quality gates (every change)
