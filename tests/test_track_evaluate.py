@@ -3,7 +3,9 @@ import json
 import pandas as pd
 import pytest
 
+from music_recommender.evaluate import load_ablation_report, write_ablation_report
 from music_recommender.track_evaluate import (
+    ablate_track_parameter_settings,
     compare_track_parameter_settings,
     evaluate_track_holdout,
     load_track_report,
@@ -352,3 +354,84 @@ def test_load_track_report_rejects_missing_and_invalid_files(tmp_path) -> None:
     invalid.write_text(json.dumps({"arms": {}}), encoding="utf-8")
     with pytest.raises(ValueError, match="not a track evaluation report"):
         load_track_report(invalid)
+
+
+def test_ablate_track_parameter_settings_returns_arms_and_importance() -> None:
+    arm_metrics, importance, ranked_impacts = ablate_track_parameter_settings(
+        track_df(),
+        track_meta_df(),
+        champion={"popularity_penalty": 0.2, "diversity": 0.5},
+        top_k=2,
+        folds=1,
+    )
+
+    assert set(arm_metrics) == {
+        "champion",
+        "no_popularity_penalty",
+        "no_diversity",
+        "no_ranking",
+    }
+    assert set(importance) == {"popularity_penalty", "diversity", "ranking_settings"}
+    assert [knob for knob, _ in ranked_impacts] == sorted(
+        importance, key=lambda k: (-sum(abs(v) for v in importance[k].values()), k)
+    )
+
+
+def test_ablate_track_parameter_settings_supports_hybrid_parameters() -> None:
+    arm_metrics, _, _ = ablate_track_parameter_settings(
+        track_df(),
+        track_meta_df(),
+        champion={"popularity_penalty": 0.3},
+        top_k=2,
+        folds=1,
+        method="hybrid",
+        content_weight=0.7,
+    )
+
+    assert set(arm_metrics) == {
+        "champion",
+        "no_popularity_penalty",
+        "no_ranking",
+    }
+
+
+def test_ablate_track_parameter_settings_rejects_neutral_champion() -> None:
+    with pytest.raises(ValueError, match="already neutral; nothing to ablate"):
+        ablate_track_parameter_settings(
+            track_df(),
+            track_meta_df(),
+            champion={"popularity_penalty": 0.0},
+            top_k=2,
+        )
+
+
+def test_ablate_track_parameter_settings_rejects_unknown_ranking_knob() -> None:
+    with pytest.raises(ValueError, match="Unknown ranking parameter"):
+        ablate_track_parameter_settings(
+            track_df(),
+            track_meta_df(),
+            champion={"unknown_knob": 0.5},
+            top_k=2,
+        )
+
+
+def test_ablate_track_parameter_settings_report_roundtrip(tmp_path) -> None:
+    arm_metrics, _, _ = ablate_track_parameter_settings(
+        track_df(),
+        track_meta_df(),
+        champion={"popularity_penalty": 0.2},
+        top_k=2,
+        folds=1,
+    )
+
+    written = write_ablation_report(
+        arm_metrics,
+        tmp_path,
+        report_name="track_ablation",
+    )
+    assert written == tmp_path / "track_ablation.json"
+    report = load_ablation_report(written)
+    assert "importance" in report
+    assert "ranking" in report
+    assert set(report["arms"]) == set(arm_metrics)
+
