@@ -144,15 +144,13 @@ def train_ltr_ranker(
         )
         feature_rows.append(user_features)
 
+        summed_plays = user_df.groupby("artist_id")["play_count"].sum()
         play_by_artist = {
-            artist_id: float(plays)
-            for artist_id, plays in user_df.groupby("artist_id")["play_count"]
-            .sum()
-            .items()  # noqa: E501
+            artist_id: float(plays) for artist_id, plays in summed_plays.items()
         }
         positive_labels = np.array(
             [
-                play_by_artist.get(index_to_artist_id[idx], 0.0)  # noqa: E501
+                play_by_artist.get(index_to_artist_id[idx], 0.0)
                 for idx in positive_indices
             ],
             dtype=float,
