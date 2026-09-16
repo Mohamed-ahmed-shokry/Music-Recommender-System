@@ -7,6 +7,45 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-16
+
+### Added
+
+- Track-side A/B parity: `compare_track_parameter_settings` and the
+  `evaluate-tracks --compare-settings` option now mirror the artist-side
+  harness. Each semicolon-separated `label:key=value,...` setting runs the
+  same holdout with its reranking kwargs, printing one metric row per label
+  plus winners-by-metric and the overall leaderboard. Mutually exclusive
+  with `--compare-baseline` and `--compare-all`.
+- Dedicated unit tests for `baselines.popular_artists` covering popularity
+  ordering, exclusions, empty stats, tie-breaking, and invalid `top_k`.
+- Expanded `resolve_project_root` edge-case tests (blank environment value,
+  surrounding whitespace stripping, and home-directory expansion).
+
+### Fixed
+
+- Replaced the bare `assert artist_taste_per_track is not None` in
+  `recommend_tracks_for_user` with an explicit `ValueError` runtime guard
+  that survives `python -O` (optimized) execution.
+- Narrowed the taste-model training fallback in `train_and_save_model` from
+  a bare `except Exception` to `(ValueError, RuntimeError)` and elevated the
+  skip log from debug to warning so operators can see when the optional
+  artist-taste model is skipped.
+
+### Changed
+
+- `cli.py` now imports numpy locally inside `track-recommendations` instead
+  of at module load, reducing startup cost for every other CLI command.
+- Refactored the `ltr.py` grouped play-count feature build to remove both
+  `noqa: E501` suppressions using an intermediate variable.
+
+### Tests
+
+- 641 tests, ~96.6% statement coverage (up from 611 in 0.13.0); added
+  `test_baselines.py`, expanded `test_config.py`, and covered
+  `compare_track_parameter_settings` plus the new CLI option and its mutual
+  exclusion error.
+
 ## [0.14.0] - 2026-09-14
 
 ### Added
@@ -395,7 +434,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Pinned release actions to immutable commits and disabled reusable caches and
   persisted checkout credentials in artifact-publishing jobs.
 
-[Unreleased]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.13.0
 [0.12.0]: https://github.com/Mohamed-ahmed-shokry/Music-Recommender-System/releases/tag/v0.12.0
