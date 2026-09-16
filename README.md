@@ -524,6 +524,17 @@ the same holdouts:
 uv run python -m music_recommender.cli evaluate-tracks --top-k 10 --folds 2 --compare-baseline
 ```
 
+A/B test the same track-ranking knobs on identical holdouts, mirroring the
+artist-side `evaluate --compare-settings` harness. Each semicolon-separated
+label is `label:key=value,...`; an empty value list is the control. The
+command prints one metric row per label, the winners-by-metric list, and the
+overall best setting:
+
+```bash
+uv run python -m music_recommender.cli evaluate-tracks --top-k 10 --folds 2 \
+  --compare-settings "control:;penalty:popularity_penalty=0.3;diverse:popularity_penalty=0.3,diversity=0.5"
+```
+
 Tune the evaluated recommender with the same ranking knobs, and persist the
 run for later comparison:
 
@@ -1242,9 +1253,15 @@ See [PLAN.md](PLAN.md) for the full phased plan.
   comparison in a single pass. ✓ (0.14.0)
 - Notebook walkthroughs: data exploration, API serving, and evaluation
   under `notebooks/`. ✓ (0.14.0)
-- Next: persist artist-taste contributor stats on the track artifact, add
-  track-side ablation suite, and publish a cross-surface evaluation parity
-  report.
+- Code-quality and hardening sweep: replaced the production `assert` with a
+  runtime guard, narrowed the taste-model fallback exception and logged it at
+  warning level, lazily imported numpy in the CLI, removed `noqa: E501`
+  suppressions, and added dedicated baselines/config unit tests. ✓ (0.15.0)
+- Track-side A/B parity: `evaluate-tracks --compare-settings` mirroring the
+  artist-side harness, with labeled metric rows and a winners leaderboard.
+  ✓ (0.15.0)
+- Next: track-side ablation suite, `--learn-to-rank` for track evaluation,
+  and a cross-surface evaluation parity report.
 
 ## License
 
