@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from music_recommender.track_evaluate import (
+    compare_track_parameter_settings,
     evaluate_track_holdout,
     load_track_report,
     train_test_split_tracks_by_user,
@@ -246,6 +247,67 @@ def test_evaluate_track_holdout_requires_held_out_tracks() -> None:
 
     with pytest.raises(ValueError, match="No held-out track interactions"):
         evaluate_track_holdout(df, track_meta_df(), top_k=2)
+
+
+def test_compare_track_parameter_settings_returns_labeled_metrics() -> None:
+    comparison = compare_track_parameter_settings(
+        track_df(),
+        track_meta_df(),
+        top_k=2,
+        parameter_sets={
+            "control": {},
+            "penalty": {"popularity_penalty": 0.2},
+        },
+        folds=1,
+    )
+
+    assert set(comparison) == {"control", "penalty"}
+    for metrics in comparison.values():
+        assert set(metrics) == {
+            "precision_at_k",
+            "recall_at_k",
+            "map_at_k",
+            "ndcg_at_k",
+            "catalog_coverage",
+            "average_popularity",
+            "novelty_at_k",
+            "serendipity_at_k",
+            "explanation_coverage",
+            "unexpectedness_at_k",
+            "intra_list_diversity",
+        }
+        assert all(value >= 0.0 for value in metrics.values())
+
+
+def test_compare_track_parameter_settings_forwards_hybrid_knobs() -> None:
+    comparison = compare_track_parameter_settings(
+        track_df(),
+        track_meta_df(),
+        top_k=2,
+        parameter_sets={
+            "pure_content": {"method": "similarity"},
+            "blended": {"method": "hybrid", "content_weight": 0.5},
+        },
+        folds=1,
+    )
+
+    assert set(comparison) == {"pure_content", "blended"}
+
+
+def test_compare_track_parameter_settings_rejects_empty_sets() -> None:
+    with pytest.raises(ValueError, match="parameter_sets must not be empty"):
+        compare_track_parameter_settings(track_df(), track_meta_df(), top_k=2, parameter_sets={})
+
+
+def test_compare_track_parameter_settings_rejects_invalid_folds() -> None:
+    with pytest.raises(ValueError, match="folds must be a positive integer"):
+        compare_track_parameter_settings(
+            track_df(),
+            track_meta_df(),
+            top_k=2,
+            parameter_sets={"control": {}},
+            folds=0,
+        )
 
 
 def test_write_track_report_roundtrip(tmp_path) -> None:
