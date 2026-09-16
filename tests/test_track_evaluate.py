@@ -296,7 +296,12 @@ def test_compare_track_parameter_settings_forwards_hybrid_knobs() -> None:
 
 def test_compare_track_parameter_settings_rejects_empty_sets() -> None:
     with pytest.raises(ValueError, match="parameter_sets must not be empty"):
-        compare_track_parameter_settings(track_df(), track_meta_df(), top_k=2, parameter_sets={})
+        compare_track_parameter_settings(
+            track_df(),
+            track_meta_df(),
+            top_k=2,
+            parameter_sets={},
+        )
 
 
 def test_compare_track_parameter_settings_rejects_invalid_folds() -> None:
