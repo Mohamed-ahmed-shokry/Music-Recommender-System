@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -13,7 +14,10 @@ import pandas as pd
 from music_recommender.config import DEFAULT_CONTENT_WEIGHT
 from music_recommender.content import validate_content_weight
 from music_recommender.evaluate import (
+    ABLATION_CHAMPION_LABEL,
+    ablation_importances,
     average_popularity,
+    build_ablation_settings,
     catalog_coverage,
     explanation_coverage,
     intra_list_diversity,
@@ -360,6 +364,43 @@ def compare_track_parameter_settings(
         )
         results[label] = cast(dict[str, float], metrics)
     return results
+
+
+def ablate_track_parameter_settings(
+    df: pd.DataFrame,
+    metadata_df: pd.DataFrame,
+    champion: Mapping[str, Any],
+    top_k: int = 10,
+    folds: int = 1,
+    method: str = "similarity",
+    content_weight: float = DEFAULT_CONTENT_WEIGHT,
+) -> tuple[
+    dict[str, dict[str, float]],
+    dict[str, dict[str, float]],
+    list[tuple[str, float]],
+]:
+    """Ablate active ranking parameters of a champion config on track holdouts.
+
+    Builds ablation arms from ``champion`` using ``build_ablation_settings``,
+    evaluates each arm via ``compare_track_parameter_settings`` with the
+    specified base ``method`` and ``content_weight``, and calculates the
+    per-metric importance and ranked knob impacts relative to the champion.
+    """
+    settings = build_ablation_settings(champion)
+    for arm_kwargs in settings.values():
+        arm_kwargs.setdefault("method", method)
+        arm_kwargs.setdefault("content_weight", content_weight)
+    arm_metrics = compare_track_parameter_settings(
+        df=df,
+        metadata_df=metadata_df,
+        top_k=top_k,
+        parameter_sets=settings,
+        folds=folds,
+    )
+    importance, ranked_impacts = ablation_importances(
+        arm_metrics, champion_label=ABLATION_CHAMPION_LABEL
+    )
+    return arm_metrics, importance, ranked_impacts
 
 
 def write_track_report(
