@@ -237,9 +237,7 @@ def _validate_loaded_artifact(artifact: Any) -> RecommenderArtifact:
         _validate_track_bundle(artifact.track_bundle)
 
     artifact.taste_model = getattr(artifact, "taste_model", None)
-    artifact.taste_user_id_to_index = getattr(
-        artifact, "taste_user_id_to_index", None
-    )
+    artifact.taste_user_id_to_index = getattr(artifact, "taste_user_id_to_index", None)
     artifact.taste_artist_id_to_index = getattr(
         artifact, "taste_artist_id_to_index", None
     )
