@@ -51,6 +51,7 @@ from music_recommender.preprocessing import prepare_training_data
 from music_recommender.recommend import format_recommendations
 from music_recommender.service import RecommenderService
 from music_recommender.track_evaluate import (
+    compare_track_parameter_settings,
     evaluate_track_holdout,
     write_track_report,
 )
@@ -1537,6 +1538,15 @@ def evaluate_tracks(
         "--compare-all/--no-compare-all",
         help="Compare similarity, popularity, and hybrid strategies in a single pass.",
     ),
+    compare_settings: str | None = typer.Option(
+        None,
+        "--compare-settings",
+        help=(
+            "A/B test track reranking settings as 'label:key=value,...;label2:...'. "
+            "Same holdout for every label. Example: "
+            "'control:;penalty:popularity_penalty=0.2,diversity=0.5'."
+        ),
+    ),
     popularity_penalty: float = typer.Option(
         0.0,
         "--popularity-penalty",
@@ -1572,43 +1582,72 @@ def evaluate_tracks(
     ),
 ) -> None:
     """Evaluate track similarity with repeated per-user holdout splits."""
+    if compare_settings is not None and (compare_baseline or compare_all):
+        raise typer.BadParameter(
+            "--compare-settings cannot be combined with"
+            " --compare-baseline or --compare-all."
+        )
     try:
         df = load_and_validate_track_interactions(RAW_TRACK_DATA_PATH)
         metadata_df = load_and_validate_track_metadata(RAW_TRACK_METADATA_PATH, df)
-        metrics = evaluate_track_holdout(
-            df,
-            metadata_df,
-            top_k=top_k,
-            folds=folds,
-            include_listened=include_listened,
-            compare_baseline=compare_baseline,
-            compare_all=compare_all,
-            popularity_penalty=popularity_penalty,
-            diversity=diversity,
-            method=method,
-            content_weight=content_weight,
-        )
+        compare_metrics: dict[str, dict[str, float]] | None = None
+        single_metrics: dict[str, float] | dict[str, dict[str, float]] | None = None
+        if compare_settings is not None:
+            parameter_sets = _parse_parameter_settings(compare_settings)
+            compare_metrics = compare_track_parameter_settings(
+                df,
+                metadata_df,
+                top_k=top_k,
+                parameter_sets=parameter_sets,
+                folds=folds,
+            )
+        else:
+            single_metrics = evaluate_track_holdout(
+                df,
+                metadata_df,
+                top_k=top_k,
+                folds=folds,
+                include_listened=include_listened,
+                compare_baseline=compare_baseline,
+                compare_all=compare_all,
+                popularity_penalty=popularity_penalty,
+                diversity=diversity,
+                method=method,
+                content_weight=content_weight,
+            )
     except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
     typer.echo(f"Track evaluation over {folds} fold(s):")
-    if compare_all:
-        metrics = cast(dict[str, dict[str, float]], metrics)
-        _print_track_metric_row("Similarity", metrics["similarity"], top_k)
-        _print_track_metric_row("Popularity", metrics["popularity"], top_k)
-        _print_track_metric_row("Hybrid", metrics["hybrid"], top_k)
+    if compare_metrics is not None:
+        for label, label_metrics in compare_metrics.items():
+            _print_track_metric_row(label, label_metrics, top_k)
+        winners = select_winning_strategies(compare_metrics)
+        typer.echo("Winners by metric:")
+        for metric, label in winners.items():
+            typer.echo(f"  {metric}: {label}")
+        best_label, wins = strategy_leaderboard(compare_metrics)[0]
+        typer.echo(f"Overall: {best_label} won {wins} of {len(winners)} metrics.")
+    elif compare_all:
+        arm_metrics = cast(dict[str, dict[str, float]], single_metrics)
+        for arm in ("similarity", "popularity", "hybrid"):
+            _print_track_metric_row(arm.title(), arm_metrics[arm], top_k)
     elif compare_baseline:
-        metrics = cast(dict[str, dict[str, float]], metrics)
-        _print_track_metric_row("Similarity", metrics["similarity"], top_k)
-        _print_track_metric_row("Popularity", metrics["popularity"], top_k)
+        arm_metrics = cast(dict[str, dict[str, float]], single_metrics)
+        for arm in ("similarity", "popularity"):
+            _print_track_metric_row(arm.title(), arm_metrics[arm], top_k)
     else:
         _print_track_metric_row(
-            "Similarity", cast(dict[str, float], metrics), top_k, header=False
+            "Similarity", cast(dict[str, float], single_metrics), top_k, header=False
         )
     if report_name:
+        report_data = cast(
+            dict[str, float] | dict[str, dict[str, float]],
+            compare_metrics if compare_metrics is not None else single_metrics,
+        )
         written = write_track_report(
-            metrics,
+            report_data,
             str(REPORTS_DIR),
             top_k=top_k,
             folds=folds,

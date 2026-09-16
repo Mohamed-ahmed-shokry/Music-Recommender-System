@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -325,6 +325,41 @@ def evaluate_track_holdout(
             for metric in popularity_folds[0]
         },
     }
+
+
+def compare_track_parameter_settings(
+    df: pd.DataFrame,
+    metadata_df: pd.DataFrame,
+    top_k: int,
+    parameter_sets: dict[str, dict[str, Any]],
+    folds: int = 1,
+) -> dict[str, dict[str, float]]:
+    """A/B test reranking parameter settings on track recommendations.
+
+    Each label maps to keyword arguments forwarded to
+    ``evaluate_track_holdout``.  Every setting is evaluated on the same
+    holdout scheme, returning averaged summary metrics per label so a
+    control can be tuned against an experiment.
+    """
+    validate_ranking_parameters(top_k)
+    if not parameter_sets:
+        raise ValueError("parameter_sets must not be empty.")
+    if type(folds) is not int or folds < 1:
+        raise ValueError("folds must be a positive integer.")
+
+    results: dict[str, dict[str, float]] = {}
+    for label, parameter_set in parameter_sets.items():
+        metrics = evaluate_track_holdout(
+            df=df,
+            metadata_df=metadata_df,
+            top_k=top_k,
+            folds=folds,
+            compare_baseline=False,
+            compare_all=False,
+            **parameter_set,
+        )
+        results[label] = cast(dict[str, float], metrics)
+    return results
 
 
 def write_track_report(
