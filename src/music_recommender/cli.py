@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, cast
 
-import numpy as np
 import typer
 
 from music_recommender import __version__
@@ -1354,6 +1353,8 @@ def track_recommendations(
     if method not in ("similarity", "hybrid"):
         raise typer.BadParameter("method must be one of: similarity, hybrid.")
     try:
+        import numpy as np
+
         df = load_and_validate_track_interactions(RAW_TRACK_DATA_PATH)
         metadata_df = load_and_validate_track_metadata(RAW_TRACK_METADATA_PATH, df)
 
