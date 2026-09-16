@@ -50,6 +50,7 @@ from music_recommender.preprocessing import prepare_training_data
 from music_recommender.recommend import format_recommendations
 from music_recommender.service import RecommenderService
 from music_recommender.track_evaluate import (
+    ablate_track_parameter_settings,
     compare_track_parameter_settings,
     evaluate_track_holdout,
     write_track_report,
@@ -1548,6 +1549,15 @@ def evaluate_tracks(
             "'control:;penalty:popularity_penalty=0.2,diversity=0.5'."
         ),
     ),
+    ablations: str | None = typer.Option(
+        None,
+        "--ablations",
+        help=(
+            "Ablate each active knob of the champion ranking config "
+            "'key=value,...' (e.g. 'popularity_penalty=0.2,diversity=0.5') and "
+            "report per-metric impact plus knob importance."
+        ),
+    ),
     popularity_penalty: float = typer.Option(
         0.0,
         "--popularity-penalty",
@@ -1574,12 +1584,17 @@ def evaluate_tracks(
         max=1.0,
         help="Balance hybrid tracks between artist taste and audio features.",
     ),
-    report_name: str = typer.Option(
+    report_name: str | None = typer.Option(
         None,
         "--report-name",
         help=(
             "Name for the evaluation JSON report (stored under the reports directory)."
         ),
+    ),
+    report_dir: str = typer.Option(
+        str(REPORTS_DIR),
+        "--report-dir",
+        help="Directory for the persistent evaluation or ablation report.",
     ),
 ) -> None:
     """Evaluate track similarity with repeated per-user holdout splits."""
@@ -1588,12 +1603,39 @@ def evaluate_tracks(
             "--compare-settings cannot be combined with"
             " --compare-baseline or --compare-all."
         )
+    if ablations is not None and (
+        compare_settings is not None
+        or compare_baseline
+        or compare_all
+    ):
+        raise typer.BadParameter(
+            "--ablations cannot be combined with --compare-settings,"
+            " --compare-baseline, or --compare-all."
+        )
     try:
         df = load_and_validate_track_interactions(RAW_TRACK_DATA_PATH)
         metadata_df = load_and_validate_track_metadata(RAW_TRACK_METADATA_PATH, df)
         compare_metrics: dict[str, dict[str, float]] | None = None
         single_metrics: dict[str, float] | dict[str, dict[str, float]] | None = None
-        if compare_settings is not None:
+        ablation_arm_metrics: dict[str, dict[str, float]] | None = None
+        ablation_report_path: Path | None = None
+        if ablations is not None:
+            champion = _parse_parameter_value_dict(ablations)
+            ablation_arm_metrics, _, _ = ablate_track_parameter_settings(
+                df,
+                metadata_df,
+                champion=champion,
+                top_k=top_k,
+                folds=folds,
+                method=method,
+                content_weight=content_weight,
+            )
+            ablation_report_path = write_ablation_report(
+                ablation_arm_metrics,
+                Path(report_dir),
+                report_name=report_name or "track_ablation_importance",
+            )
+        elif compare_settings is not None:
             parameter_sets = _parse_parameter_settings(compare_settings)
             compare_metrics = compare_track_parameter_settings(
                 df,
@@ -1620,8 +1662,22 @@ def evaluate_tracks(
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
-    typer.echo(f"Track evaluation over {folds} fold(s):")
-    if compare_metrics is not None:
+    if ablations is not None:
+        assert ablation_arm_metrics is not None
+        typer.echo(f"Ablation over {folds} fold(s):")
+        champion_metrics = ablation_arm_metrics["champion"]
+        _print_track_metric_row("Champion", champion_metrics, top_k)
+        for label, label_metrics in ablation_arm_metrics.items():
+            if label == "champion":
+                continue
+            _print_track_metric_row(label, label_metrics, top_k)
+        _, ranking = ablation_importances(ablation_arm_metrics)
+        typer.echo("Knob importance (absolute per-metric impact vs champion):")
+        for knob, impact in ranking:
+            typer.echo(f"  {knob}: {impact:.4f}")
+        typer.echo(f"Ablation report written to: {ablation_report_path}")
+    elif compare_metrics is not None:
+        typer.echo(f"Track evaluation over {folds} fold(s):")
         for label, label_metrics in compare_metrics.items():
             _print_track_metric_row(label, label_metrics, top_k)
         winners = select_winning_strategies(compare_metrics)
@@ -1631,25 +1687,28 @@ def evaluate_tracks(
         best_label, wins = strategy_leaderboard(compare_metrics)[0]
         typer.echo(f"Overall: {best_label} won {wins} of {len(winners)} metrics.")
     elif compare_all:
+        typer.echo(f"Track evaluation over {folds} fold(s):")
         arm_metrics = cast(dict[str, dict[str, float]], single_metrics)
         for arm in ("similarity", "popularity", "hybrid"):
             _print_track_metric_row(arm.title(), arm_metrics[arm], top_k)
     elif compare_baseline:
+        typer.echo(f"Track evaluation over {folds} fold(s):")
         arm_metrics = cast(dict[str, dict[str, float]], single_metrics)
         for arm in ("similarity", "popularity"):
             _print_track_metric_row(arm.title(), arm_metrics[arm], top_k)
     else:
+        typer.echo(f"Track evaluation over {folds} fold(s):")
         _print_track_metric_row(
             "Similarity", cast(dict[str, float], single_metrics), top_k, header=False
         )
-    if report_name:
+    if report_name and ablations is None:
         report_data = cast(
             dict[str, float] | dict[str, dict[str, float]],
             compare_metrics if compare_metrics is not None else single_metrics,
         )
         written = write_track_report(
             report_data,
-            str(REPORTS_DIR),
+            Path(report_dir),
             top_k=top_k,
             folds=folds,
             report_name=report_name,
