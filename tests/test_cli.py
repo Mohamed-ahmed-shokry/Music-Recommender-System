@@ -1719,6 +1719,46 @@ def test_evaluate_tracks_compare_all_prints_three_arms() -> None:
     assert "Hybrid:" in result.output
 
 
+def test_evaluate_tracks_compare_settings_prints_labeled_rows() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate-tracks",
+            "--top-k",
+            "5",
+            "--folds",
+            "1",
+            "--compare-settings",
+            "control:;penalty:popularity_penalty=0.2",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "control:" in result.output
+    assert "penalty:" in result.output
+    assert "Winners by metric:" in result.output
+    assert "Overall:" in result.output
+
+
+def test_evaluate_tracks_compare_settings_rejects_baseline() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate-tracks",
+            "--top-k",
+            "5",
+            "--folds",
+            "1",
+            "--compare-settings",
+            "control:;penalty:popularity_penalty=0.2",
+            "--compare-baseline",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--compare-settings cannot be combined with" in result.output
+
+
 def test_evaluate_tracks_supports_ranking_knobs() -> None:
     result = runner.invoke(
         cli.app,
