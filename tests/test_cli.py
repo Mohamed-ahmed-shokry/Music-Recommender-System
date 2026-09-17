@@ -1822,6 +1822,128 @@ def test_evaluate_tracks_writes_report(tmp_path, monkeypatch) -> None:
     assert (tmp_path / "clf_track.json").exists()
 
 
+def test_evaluate_tracks_ablations_prints_arms_and_importance(tmp_path) -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate-tracks",
+            "--top-k",
+            "5",
+            "--folds",
+            "1",
+            "--ablations",
+            "popularity_penalty=0.2,diversity=0.5",
+            "--report-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Ablation over 1 fold(s):" in result.output
+    assert "Champion:" in result.output
+    assert "no_popularity_penalty:" in result.output
+    assert "no_diversity:" in result.output
+    assert "no_ranking:" in result.output
+    assert "Knob importance (absolute per-metric impact vs champion):" in result.output
+    expected_path = tmp_path / "track_ablation_importance.json"
+    assert f"Ablation report written to: {expected_path}" in result.output
+    assert expected_path.exists()
+
+
+def test_evaluate_tracks_ablations_custom_report_name(tmp_path) -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate-tracks",
+            "--top-k",
+            "5",
+            "--folds",
+            "1",
+            "--ablations",
+            "popularity_penalty=0.2",
+            "--report-dir",
+            str(tmp_path),
+            "--report-name",
+            "custom_track_ablation",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert (tmp_path / "custom_track_ablation.json").exists()
+
+
+@pytest.mark.parametrize(
+    "conflicting_flag",
+    [
+        ["--compare-baseline"],
+        ["--compare-all"],
+        ["--compare-settings", "control:;penalty:popularity_penalty=0.2"],
+    ],
+)
+def test_evaluate_tracks_ablations_rejects_conflicting_flags(
+    conflicting_flag: list[str],
+) -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate-tracks",
+            "--ablations",
+            "popularity_penalty=0.2",
+            *conflicting_flag,
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--ablations cannot be combined with" in result.output
+
+
+def test_evaluate_tracks_ablations_reports_neutral_champion_error() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate-tracks",
+            "--ablations",
+            "popularity_penalty=0.0",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "already neutral; nothing to ablate" in result.output
+
+
+def test_evaluate_tracks_ablations_aggregates_with_ablation_summary(tmp_path) -> None:
+    eval_result = runner.invoke(
+        cli.app,
+        [
+            "evaluate-tracks",
+            "--top-k",
+            "5",
+            "--folds",
+            "1",
+            "--ablations",
+            "popularity_penalty=0.2",
+            "--report-dir",
+            str(tmp_path),
+        ],
+    )
+    assert eval_result.exit_code == 0
+
+    summary_file = tmp_path / "summary.json"
+    summary_result = runner.invoke(
+        cli.app,
+        [
+            "ablation-summary",
+            "--report-dir",
+            str(tmp_path),
+            "--summary-path",
+            str(summary_file),
+        ],
+    )
+    assert summary_result.exit_code == 0
+    assert "Aggregated 1 ablation report(s)" in summary_result.output
+    assert summary_file.exists()
+
+
 def test_prepare_track_data_reports_counts() -> None:
     result = runner.invoke(cli.app, ["prepare-track-data"])
 
