@@ -120,7 +120,7 @@ It is updated incrementally as phases land.
 - Release 0.8.0 — shipped and published (tag `v0.8.0`, release run #4
   succeeded, both GHCR images live).
 
-## Current milestone (0.15.0) — shipped
+## Completed (0.15.0 era)
 
 - Phase 45 — Replace bare `assert` in production code with runtime guards
   that raise `ValueError` (tracks.py `artist_taste_per_track` check).
@@ -145,12 +145,21 @@ It is updated incrementally as phases land.
 - Phase 51 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to
   0.15.0.
 
-## Next steps (after 0.15.0)
+## Current milestone (0.16.0) — shipped
 
-1. Track-side ablation suite (parity with artist-side ablation reports).
-2. `--learn-to-rank` for track evaluation (remaining CLI parity with
+- Phase 53 — Track-side ablation suite: `ablate_track_parameter_settings`
+  helper in `track_evaluate.py` plus `evaluate-tracks --ablations` and
+  `--report-dir` in `cli.py`, reporting champion row, ablation arm deltas,
+  knob importance rankings, and persisting standardized JSON ablation reports
+  that integrate directly with `ablation-summary` and the dashboard.
+- Phase 54 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to
+  0.16.0.
+
+## Next steps (after 0.16.0)
+
+1. `--learn-to-rank` for track evaluation (remaining CLI parity with
    `evaluate-artists`).
-3. Cross-surface evaluation parity report (artist vs. track metrics on the
+2. Cross-surface evaluation parity report (artist vs. track metrics on the
    same data window, single CLI command).
 
 ## Quality gates (every change)
