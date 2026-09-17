@@ -535,6 +535,24 @@ uv run python -m music_recommender.cli evaluate-tracks --top-k 10 --folds 2 \
   --compare-settings "control:;penalty:popularity_penalty=0.3;diverse:popularity_penalty=0.3,diversity=0.5"
 ```
 
+Ablate each active knob of a champion track ranking configuration to measure
+per-metric impact and rank knob importance across holdouts, mirroring the
+artist-side `--ablations` harness. The report is printed to stdout and saved
+to `reports/track_ablation_importance.json` (override with `--report-dir` or `--report-name`):
+
+```bash
+uv run python -m music_recommender.cli evaluate-tracks --top-k 10 --folds 2 \
+  --ablations "popularity_penalty=0.3,diversity=0.5"
+```
+
+Track ablation reports adhere to the same schema as artist ablation reports and
+can be aggregated alongside artist reports using `ablation-summary` and viewed
+in the Streamlit dashboard:
+
+```bash
+uv run python -m music_recommender.cli ablation-summary --report-dir reports/
+```
+
 Tune the evaluated recommender with the same ranking knobs, and persist the
 run for later comparison:
 
@@ -543,7 +561,8 @@ uv run python -m music_recommender.cli evaluate-tracks --top-k 10 --folds 2 --po
 ```
 
 Track evaluation reports land in `reports/` as JSON (`track_evaluation.json`
-by default), recording the run configuration and per-arm metrics.
+by default), recording the run configuration and per-arm metrics. Specify
+`--report-dir` to customize the output directory.
 
 ## API Reference
 
@@ -1260,8 +1279,11 @@ See [PLAN.md](PLAN.md) for the full phased plan.
 - Track-side A/B parity: `evaluate-tracks --compare-settings` mirroring the
   artist-side harness, with labeled metric rows and a winners leaderboard.
   ✓ (0.15.0)
-- Next: track-side ablation suite, `--learn-to-rank` for track evaluation,
-  and a cross-surface evaluation parity report.
+- Track-side ablation suite: ablate champion ranking knobs on track holdouts
+  via `evaluate-tracks --ablations`, report per-metric deltas, and persist
+  standardized ablation reports for dashboard/summary aggregation. ✓ (0.16.0)
+- Next: `--learn-to-rank` for track evaluation, and a cross-surface evaluation
+  parity report.
 
 ## License
 
