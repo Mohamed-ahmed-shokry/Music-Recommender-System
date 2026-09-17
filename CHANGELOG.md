@@ -7,6 +7,28 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-09-17
+
+### Added
+
+- Track-side ablation suite: `ablate_track_parameter_settings` helper in
+  `track_evaluate.py` plus `evaluate-tracks --ablations` and `--report-dir` in
+  `cli.py`. Systematically ablates active ranking parameters
+  (`popularity_penalty`, `diversity`, `include_listened`) across holdouts,
+  printing champion metrics, ablation arm rows, and knob importance rankings.
+- Standardized track ablation reports: persisted to `reports/` as JSON
+  (`track_ablation_importance.json` by default or customized with `--report-name`
+  and `--report-dir`), matching the schema used by artist ablation reports.
+- Full end-to-end integration: track ablation reports are automatically
+  aggregated by `ablation-summary` alongside artist reports and rendered in the
+  Streamlit dashboard's ablation summary tab.
+
+### Tests
+
+- 653 tests, 96.8% statement coverage; added comprehensive unit and CLI tests for
+  track ablations, flag mutual exclusion, neutral champion rejection, report
+  persistence round-trip, and aggregation via `ablation-summary`.
+
 ## [0.15.0] - 2026-09-16
 
 ### Added
