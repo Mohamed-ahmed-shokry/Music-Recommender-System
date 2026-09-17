@@ -1591,8 +1591,8 @@ def evaluate_tracks(
             "Name for the evaluation JSON report (stored under the reports directory)."
         ),
     ),
-    report_dir: str = typer.Option(
-        str(REPORTS_DIR),
+    report_dir: str | None = typer.Option(
+        None,
         "--report-dir",
         help="Directory for the persistent evaluation or ablation report.",
     ),
@@ -1612,6 +1612,7 @@ def evaluate_tracks(
             "--ablations cannot be combined with --compare-settings,"
             " --compare-baseline, or --compare-all."
         )
+    resolved_report_dir = Path(report_dir) if report_dir is not None else REPORTS_DIR
     try:
         df = load_and_validate_track_interactions(RAW_TRACK_DATA_PATH)
         metadata_df = load_and_validate_track_metadata(RAW_TRACK_METADATA_PATH, df)
@@ -1632,7 +1633,7 @@ def evaluate_tracks(
             )
             ablation_report_path = write_ablation_report(
                 ablation_arm_metrics,
-                Path(report_dir),
+                resolved_report_dir,
                 report_name=report_name or "track_ablation_importance",
             )
         elif compare_settings is not None:
@@ -1708,7 +1709,7 @@ def evaluate_tracks(
         )
         written = write_track_report(
             report_data,
-            Path(report_dir),
+            resolved_report_dir,
             top_k=top_k,
             folds=folds,
             report_name=report_name,
