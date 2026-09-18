@@ -560,6 +560,27 @@ run for later comparison:
 uv run python -m music_recommender.cli evaluate-tracks --top-k 10 --folds 2 --popularity-penalty 0.3 --diversity 0.5 --report-name track_tuned
 ```
 
+Re-rank candidate track recommendations with a lightweight pointwise Ridge model
+trained per fold on held-in interactions (`--learn-to-rank`), reporting the `LTR` arm
+alongside `Similarity`:
+
+```bash
+uv run python -m music_recommender.cli evaluate-tracks --top-k 10 --folds 2 --learn-to-rank
+```
+
+Compare artist-level and track-level recommendations side by side on equivalent
+holdout splits using cross-surface parity evaluation:
+
+```bash
+uv run python -m music_recommender.cli evaluate-surfaces --top-k 10 --folds 2
+uv run python -m music_recommender.cli evaluate-surfaces --top-k 10 --folds 2 --compare-all
+```
+
+`evaluate-surfaces` evaluates both the artist ALS pipeline and the track audio-feature
+similarity pipeline, prints side-by-side metric comparison tables with per-metric deltas,
+and saves a persistent standardized report to `reports/surface_comparison.json`
+(override with `--report-dir` or `--report-name`).
+
 Track evaluation reports land in `reports/` as JSON (`track_evaluation.json`
 by default), recording the run configuration and per-arm metrics. Specify
 `--report-dir` to customize the output directory.
@@ -1282,8 +1303,12 @@ See [PLAN.md](PLAN.md) for the full phased plan.
 - Track-side ablation suite: ablate champion ranking knobs on track holdouts
   via `evaluate-tracks --ablations`, report per-metric deltas, and persist
   standardized ablation reports for dashboard/summary aggregation. ✓ (0.16.0)
-- Next: `--learn-to-rank` for track evaluation, and a cross-surface evaluation
-  parity report.
+- Track evaluation learning-to-rank parity: train a pointwise ridge ranker per
+  fold and re-rank candidate tracks via `evaluate-tracks --learn-to-rank`. ✓ (0.17.0)
+- Cross-surface evaluation parity reporting: evaluate artist and track
+  recommendation surfaces on equivalent holdouts side by side via `evaluate-surfaces`. ✓ (0.17.0)
+- Next: multi-objective candidate re-ranking and online bandit exploration.
+
 
 ## License
 

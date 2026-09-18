@@ -145,7 +145,7 @@ It is updated incrementally as phases land.
 - Phase 51 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to
   0.15.0.
 
-## Current milestone (0.16.0) — shipped
+## Completed (0.16.0 era)
 
 - Phase 53 — Track-side ablation suite: `ablate_track_parameter_settings`
   helper in `track_evaluate.py` plus `evaluate-tracks --ablations` and
@@ -155,12 +155,27 @@ It is updated incrementally as phases land.
 - Phase 54 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to
   0.16.0.
 
-## Next steps (after 0.16.0)
+## Current milestone (0.17.0) — shipped
 
-1. `--learn-to-rank` for track evaluation (remaining CLI parity with
-   `evaluate-artists`).
-2. Cross-surface evaluation parity report (artist vs. track metrics on the
-   same data window, single CLI command).
+- Phase 55 — Track LTR re-ranker: `train_track_ltr_ranker` and `rank_tracks_with_ltr`
+  in `ltr.py`, training a pointwise Ridge model using content similarity, log plays,
+  normalized popularity rank, and user interaction count. (commit `8eb4098`)
+- Phase 56 — Track holdout evaluation LTR arm: `evaluate_track_holdout` accepts
+  `learn_to_rank: bool = False`, fitting the ranker per fold on held-in interactions
+  and evaluating the re-ranked candidates under the `ltr` arm. (commit `8fbb5e0`)
+- Phase 57 — CLI support for track LTR: `evaluate-tracks --learn-to-rank` option
+  in `cli.py`, supporting single, baseline, and all-arm comparisons with mutual
+  exclusion enforcement. (commit `92c724f`)
+- Phase 58 — Cross-surface evaluation parity reporting: `surfaces.py` helper module
+  and `evaluate-surfaces` CLI command comparing artist ALS and track audio-feature
+  similarity side by side on equivalent holdouts with per-metric deltas and persistent
+  JSON reports. (commit `c3cc8ac`)
+- Phase 59 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to 0.17.0.
+
+## Next steps (after 0.17.0)
+
+1. Multi-objective candidate re-ranking (balancing accuracy, diversity, and novelty Pareto frontiers).
+2. Online contextual bandit simulation for cold-start exploration.
 
 ## Quality gates (every change)
 

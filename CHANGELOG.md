@@ -7,6 +7,29 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-18
+
+### Added
+
+- Track-side Learning-to-Rank (LTR): `train_track_ltr_ranker` and `rank_tracks_with_ltr`
+  in `ltr.py`, fitting a pointwise Ridge regressor over content similarity,
+  log1p total plays, normalized popularity rank, and user interaction count.
+- Track holdout evaluation LTR arm: `evaluate_track_holdout` accepts `learn_to_rank: bool = False`,
+  training the ranker on held-in interactions and reporting the re-ranked candidates under the `ltr` arm.
+- CLI `--learn-to-rank`: `evaluate-tracks --learn-to-rank` option in `cli.py`, reporting
+  `Similarity` and `LTR` arms (or alongside `Popularity` and `Hybrid` when combined with
+  `--compare-baseline` or `--compare-all`), with `--ablations` mutual exclusion.
+- Cross-surface evaluation parity reporting: `surfaces.py` module (`compare_surface_metrics`,
+  `write_surface_comparison_report`, `load_surface_comparison_report`) and new CLI command
+  `evaluate-surfaces`, evaluating artist and track recommendation systems side by side on
+  equivalent holdout splits, computing per-metric deltas, and persisting standardized JSON reports.
+
+### Tests
+
+- 680 tests, 96.8% statement coverage; added comprehensive unit and CLI tests for
+  track LTR ranker training/inference, track holdout LTR evaluation, `evaluate-tracks --learn-to-rank`,
+  cross-surface comparison calculations, report serialization roundtrips, and `evaluate-surfaces` CLI.
+
 ## [0.16.0] - 2026-09-17
 
 ### Added
