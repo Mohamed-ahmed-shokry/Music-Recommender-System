@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import typer
 
@@ -49,6 +49,10 @@ from music_recommender.model import train_and_save_model
 from music_recommender.preprocessing import prepare_training_data
 from music_recommender.recommend import format_recommendations
 from music_recommender.service import RecommenderService
+from music_recommender.surfaces import (
+    compare_surface_metrics,
+    write_surface_comparison_report,
+)
 from music_recommender.track_evaluate import (
     ablate_track_parameter_settings,
     compare_track_parameter_settings,
@@ -1755,5 +1759,90 @@ def _print_track_metric_row(
     typer.echo(f"  Explanation coverage: {metrics['explanation_coverage']:.4f}")
 
 
+@app.command()
+def evaluate_surfaces(
+    top_k: int = DEFAULT_TOP_K,
+    folds: int = 1,
+    compare_all: bool = False,
+    report_name: str | None = typer.Option(
+        None,
+        "--report-name",
+        help="Name for the surface comparison JSON report.",
+    ),
+    report_dir: str | None = typer.Option(
+        None,
+        "--report-dir",
+        help="Directory for the persistent surface comparison report.",
+    ),
+) -> None:
+    """Evaluate and compare artist and track recommendation surfaces side by side."""
+    resolved_report_dir = Path(report_dir) if report_dir is not None else REPORTS_DIR
+    try:
+        df = load_and_validate_interactions(RAW_DATA_PATH)
+        metadata_df = (
+            load_and_validate_artist_metadata(RAW_METADATA_PATH, df)
+            if compare_all
+            else None
+        )
+        track_df = load_and_validate_track_interactions(RAW_TRACK_DATA_PATH)
+        track_metadata_df = load_and_validate_track_metadata(
+            RAW_TRACK_METADATA_PATH, track_df
+        )
+
+        artist_metrics = evaluate_repeated_holdout(
+            df=df,
+            top_k=top_k,
+            folds=folds,
+            compare_baseline=False,
+            compare_all=compare_all,
+            metadata_df=metadata_df,
+            use_gpu=DEFAULT_USE_GPU,
+        )
+        track_metrics = evaluate_track_holdout(
+            df=track_df,
+            metadata_df=track_metadata_df,
+            top_k=top_k,
+            folds=folds,
+            compare_baseline=False,
+            compare_all=compare_all,
+        )
+        comparison = compare_surface_metrics(
+            artist_metrics=cast(dict[str, Any], artist_metrics),
+            track_metrics=cast(dict[str, Any], track_metrics),
+            top_k=top_k,
+            folds=folds,
+        )
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"Cross-surface evaluation over {folds} fold(s) (top_k={top_k}):")
+    typer.echo(
+        f"{'Metric':<25} {'Artist (ALS)':>14} {'Track (Sim)':>14} {'Delta':>10}"
+    )
+    typer.echo("-" * 65)
+    for metric, stats in comparison["comparison"].items():
+        typer.echo(
+            f"{metric:<25} {stats['artist']:>14.4f} "
+            f"{stats['track']:>14.4f} {stats['delta']:>+10.4f}"
+        )
+    if compare_all:
+        typer.echo("\nDetailed surface arm breakdowns:")
+        typer.echo("Artist surface arms:")
+        for arm, arm_metrics in comparison["artist"].items():
+            _print_metric_row(arm.upper(), arm_metrics, top_k)
+        typer.echo("Track surface arms:")
+        for arm, arm_metrics in comparison["track"].items():
+            _print_track_metric_row(arm.title(), arm_metrics, top_k)
+
+    written = write_surface_comparison_report(
+        comparison,
+        resolved_report_dir,
+        report_name=report_name,
+    )
+    typer.echo(f"Surface comparison report written to: {written}")
+
+
 if __name__ == "__main__":
     app()  # pragma: no cover - CLI entry point invoked by `python -m`
+
