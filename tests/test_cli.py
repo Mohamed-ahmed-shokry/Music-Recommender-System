@@ -1719,6 +1719,62 @@ def test_evaluate_tracks_compare_all_prints_three_arms() -> None:
     assert "Hybrid:" in result.output
 
 
+def test_evaluate_tracks_learn_to_rank_prints_two_arms() -> None:
+    result = runner.invoke(
+        cli.app,
+        ["evaluate-tracks", "--top-k", "5", "--folds", "1", "--learn-to-rank"],
+    )
+
+    assert result.exit_code == 0
+    assert "Track evaluation over 1 fold(s):" in result.output
+    assert "Similarity:" in result.output
+    assert "LTR:" in result.output
+    assert "NDCG@5:" in result.output
+    assert "Intra-list diversity:" in result.output
+
+
+def test_evaluate_tracks_compare_baseline_learn_to_rank() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate-tracks",
+            "--top-k",
+            "5",
+            "--folds",
+            "1",
+            "--compare-baseline",
+            "--learn-to-rank",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Similarity:" in result.output
+    assert "Popularity:" in result.output
+    assert "LTR:" in result.output
+
+
+def test_evaluate_tracks_compare_all_learn_to_rank() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate-tracks",
+            "--top-k",
+            "5",
+            "--folds",
+            "1",
+            "--compare-all",
+            "--learn-to-rank",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Similarity:" in result.output
+    assert "Popularity:" in result.output
+    assert "Hybrid:" in result.output
+    assert "LTR:" in result.output
+
+
+
 def test_evaluate_tracks_compare_settings_prints_labeled_rows() -> None:
     result = runner.invoke(
         cli.app,
@@ -1878,6 +1934,7 @@ def test_evaluate_tracks_ablations_custom_report_name(tmp_path) -> None:
         ["--compare-baseline"],
         ["--compare-all"],
         ["--compare-settings", "control:;penalty:popularity_penalty=0.2"],
+        ["--learn-to-rank"],
     ],
 )
 def test_evaluate_tracks_ablations_rejects_conflicting_flags(

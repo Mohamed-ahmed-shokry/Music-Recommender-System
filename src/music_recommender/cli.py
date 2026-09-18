@@ -1584,6 +1584,14 @@ def evaluate_tracks(
         max=1.0,
         help="Balance hybrid tracks between artist taste and audio features.",
     ),
+    learn_to_rank: bool = typer.Option(
+        False,
+        "--learn-to-rank/--no-learn-to-rank",
+        help=(
+            "Fit a lightweight ranking model on the training fold and re-rank "
+            "the track candidates, reporting the additional 'ltr' arm."
+        ),
+    ),
     report_name: str | None = typer.Option(
         None,
         "--report-name",
@@ -1607,10 +1615,11 @@ def evaluate_tracks(
         compare_settings is not None
         or compare_baseline
         or compare_all
+        or learn_to_rank
     ):
         raise typer.BadParameter(
             "--ablations cannot be combined with --compare-settings,"
-            " --compare-baseline, or --compare-all."
+            " --compare-baseline, --compare-all, or --learn-to-rank."
         )
     resolved_report_dir = Path(report_dir) if report_dir is not None else REPORTS_DIR
     try:
@@ -1658,6 +1667,7 @@ def evaluate_tracks(
                 diversity=diversity,
                 method=method,
                 content_weight=content_weight,
+                learn_to_rank=learn_to_rank,
             )
     except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
@@ -1692,11 +1702,20 @@ def evaluate_tracks(
         arm_metrics = cast(dict[str, dict[str, float]], single_metrics)
         for arm in ("similarity", "popularity", "hybrid"):
             _print_track_metric_row(arm.title(), arm_metrics[arm], top_k)
+        if learn_to_rank:
+            _print_track_metric_row("LTR", arm_metrics["ltr"], top_k)
     elif compare_baseline:
         typer.echo(f"Track evaluation over {folds} fold(s):")
         arm_metrics = cast(dict[str, dict[str, float]], single_metrics)
         for arm in ("similarity", "popularity"):
             _print_track_metric_row(arm.title(), arm_metrics[arm], top_k)
+        if learn_to_rank:
+            _print_track_metric_row("LTR", arm_metrics["ltr"], top_k)
+    elif learn_to_rank:
+        typer.echo(f"Track evaluation over {folds} fold(s):")
+        arm_metrics = cast(dict[str, dict[str, float]], single_metrics)
+        _print_track_metric_row("Similarity", arm_metrics["similarity"], top_k)
+        _print_track_metric_row("LTR", arm_metrics["ltr"], top_k)
     else:
         typer.echo(f"Track evaluation over {folds} fold(s):")
         _print_track_metric_row(
