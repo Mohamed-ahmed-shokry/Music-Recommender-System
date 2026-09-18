@@ -435,3 +435,59 @@ def test_ablate_track_parameter_settings_report_roundtrip(tmp_path) -> None:
     assert "ranking" in report
     assert set(report["arms"]) == set(arm_metrics)
 
+
+def test_evaluate_track_holdout_learn_to_rank() -> None:
+    metrics = evaluate_track_holdout(
+        track_df(),
+        track_meta_df(),
+        top_k=2,
+        folds=1,
+        learn_to_rank=True,
+    )
+    assert isinstance(metrics, dict)
+    assert set(metrics) == {"similarity", "ltr"}
+    for arm in ("similarity", "ltr"):
+        assert isinstance(metrics[arm], dict)
+        assert "ndcg_at_k" in metrics[arm]
+        assert "map_at_k" in metrics[arm]
+        assert "precision_at_k" in metrics[arm]
+        assert "recall_at_k" in metrics[arm]
+        assert "intra_list_diversity" in metrics[arm]
+
+
+def test_evaluate_track_holdout_compare_baseline_and_learn_to_rank() -> None:
+    metrics = evaluate_track_holdout(
+        track_df(),
+        track_meta_df(),
+        top_k=2,
+        folds=1,
+        compare_baseline=True,
+        learn_to_rank=True,
+    )
+    assert isinstance(metrics, dict)
+    assert set(metrics) == {"similarity", "popularity", "ltr"}
+
+
+def test_evaluate_track_holdout_compare_all_and_learn_to_rank() -> None:
+    metrics = evaluate_track_holdout(
+        track_df(),
+        track_meta_df(),
+        top_k=2,
+        folds=1,
+        compare_all=True,
+        learn_to_rank=True,
+    )
+    assert isinstance(metrics, dict)
+    assert set(metrics) == {"similarity", "popularity", "hybrid", "ltr"}
+
+
+def test_evaluate_track_holdout_rejects_invalid_learn_to_rank() -> None:
+    with pytest.raises(ValueError, match="learn_to_rank must be a boolean"):
+        evaluate_track_holdout(
+            track_df(),
+            track_meta_df(),
+            top_k=2,
+            learn_to_rank="yes",  # type: ignore[arg-type]
+        )
+
+

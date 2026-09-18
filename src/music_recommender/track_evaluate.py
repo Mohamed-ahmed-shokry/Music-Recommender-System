@@ -29,6 +29,7 @@ from music_recommender.evaluate import (
     serendipity_at_k,
     unexpectedness_at_k,
 )
+from music_recommender.ltr import rank_tracks_with_ltr, train_track_ltr_ranker
 from music_recommender.ranking import validate_ranking_parameters
 from music_recommender.tracks import (
     TrackServingResources,
@@ -147,6 +148,7 @@ def evaluate_track_holdout(
     diversity: float = 0.0,
     method: str = "similarity",
     content_weight: float = DEFAULT_CONTENT_WEIGHT,
+    learn_to_rank: bool = False,
 ) -> dict[str, float] | dict[str, dict[str, float]]:
     """Evaluate track recommendations with repeated per-user holdout splits.
 
@@ -157,6 +159,10 @@ def evaluate_track_holdout(
     same holdouts, making the popularity-bias tradeoff explicit. When
     ``compare_all`` is set, all three arms (similarity, popularity, hybrid)
     are evaluated in a single pass and returned as a labelled dict.
+
+    When ``learn_to_rank`` is set, a lightweight pointwise ranker is trained on
+    each training fold and used to re-rank the similarity candidates. The
+    re-ranked arm is reported under the ``ltr`` key alongside ``similarity``.
     """
     validate_ranking_parameters(top_k, diversity, popularity_penalty)
     if method not in ("similarity", "hybrid"):
@@ -170,12 +176,15 @@ def evaluate_track_holdout(
         raise ValueError("compare_baseline must be a boolean.")
     if type(compare_all) is not bool:
         raise ValueError("compare_all must be a boolean.")
+    if type(learn_to_rank) is not bool:
+        raise ValueError("learn_to_rank must be a boolean.")
     if compare_all and compare_baseline:
         raise ValueError("compare_all and compare_baseline are mutually exclusive.")
 
     similarity_folds: list[dict[str, float]] = []
     popularity_folds: list[dict[str, float]] = []
     hybrid_folds: list[dict[str, float]] = []
+    ltr_folds: list[dict[str, float]] = []
     for fold in range(folds):
         train_df, test_df = train_test_split_tracks_by_user(df, random_state=42 + fold)
         if test_df.empty:
@@ -195,6 +204,13 @@ def evaluate_track_holdout(
                 user_id_to_index,
                 artist_id_to_index,
             ) = train_track_artist_taste(train_df)
+        ltr_ranker = None
+        if learn_to_rank:
+            ltr_ranker = train_track_ltr_ranker(
+                train_df=train_df,
+                resources=resources,
+                random_state=42 + fold,
+            )
         track_artists = {
             track_id: str(entry["artist_id"])
             for track_id, entry in resources.track_lookup.items()
@@ -202,6 +218,7 @@ def evaluate_track_holdout(
         similarity_lists: list[list[str]] = []
         popularity_lists: list[list[str]] = []
         hybrid_lists: list[list[str]] = []
+        ltr_lists: list[list[str]] = []
         relevant_lists: list[list[str]] = []
         explained_recommendations: list[list[dict[str, Any]]] = []
         track_name_lookup = {
@@ -248,6 +265,15 @@ def evaluate_track_holdout(
             )
             explained_recommendations.append(similarity_recommendations)
             relevant_lists.append(relevant)
+            if learn_to_rank and ltr_ranker is not None:
+                ltr_recommendations = rank_tracks_with_ltr(
+                    ltr_ranker,
+                    recommendations=similarity_recommendations,
+                    user_id=str(user_id),
+                    resources=resources,
+                    top_k=top_k,
+                )
+                ltr_lists.append([rec["track_id"] for rec in ltr_recommendations])
             if compare_all or compare_baseline:
                 popularity_lists.append(
                     [
@@ -304,31 +330,36 @@ def evaluate_track_holdout(
                     hybrid_lists, relevant_lists, top_k, catalog, resources
                 )
             )
+        if learn_to_rank:
+            ltr_folds.append(
+                _summarize_track_lists(
+                    ltr_lists, relevant_lists, top_k, catalog, resources
+                )
+            )
     similarity_metrics = {
         metric: float(np.mean([fold[metric] for fold in similarity_folds]))
         for metric in similarity_folds[0]
     }
-    if compare_all:
-        return {
-            "similarity": similarity_metrics,
-            "popularity": {
-                metric: float(np.mean([fold[metric] for fold in popularity_folds]))
-                for metric in popularity_folds[0]
-            },
-            "hybrid": {
-                metric: float(np.mean([fold[metric] for fold in hybrid_folds]))
-                for metric in hybrid_folds[0]
-            },
-        }
-    if not compare_baseline:
+    if not compare_baseline and not compare_all and not learn_to_rank:
         return similarity_metrics
-    return {
-        "similarity": similarity_metrics,
-        "popularity": {
+
+    comparison: dict[str, dict[str, float]] = {"similarity": similarity_metrics}
+    if compare_all or compare_baseline:
+        comparison["popularity"] = {
             metric: float(np.mean([fold[metric] for fold in popularity_folds]))
             for metric in popularity_folds[0]
-        },
-    }
+        }
+    if compare_all:
+        comparison["hybrid"] = {
+            metric: float(np.mean([fold[metric] for fold in hybrid_folds]))
+            for metric in hybrid_folds[0]
+        }
+    if learn_to_rank:
+        comparison["ltr"] = {
+            metric: float(np.mean([fold[metric] for fold in ltr_folds]))
+            for metric in ltr_folds[0]
+        }
+    return comparison
 
 
 def compare_track_parameter_settings(
