@@ -804,3 +804,25 @@ def test_load_artifact_rejects_invalid_dataset_fingerprint(tmp_path: Path) -> No
 
     with pytest.raises(ValueError, match="fingerprint is not a dictionary"):
         load_artifact(artifact_path)
+
+
+def test_recommender_artifact_persists_track_ltr_model(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    artifact.track_ltr_model = {"model_type": "track_ridge_ltr", "alpha": 1.0}
+    artifact_path = tmp_path / "track-ltr-artifact.joblib"
+    save_artifact(artifact, artifact_path)
+
+    loaded = load_artifact(artifact_path)
+    assert loaded.track_ltr_model == {"model_type": "track_ridge_ltr", "alpha": 1.0}
+
+
+def test_load_artifact_without_track_ltr_model_defaults_none(tmp_path: Path) -> None:
+    artifact = create_test_artifact(tmp_path)
+    if hasattr(artifact, "track_ltr_model"):
+        delattr(artifact, "track_ltr_model")
+    artifact_path = tmp_path / "legacy-artifact.joblib"
+    save_artifact(artifact, artifact_path)
+
+    loaded = load_artifact(artifact_path)
+    assert getattr(loaded, "track_ltr_model", None) is None
+

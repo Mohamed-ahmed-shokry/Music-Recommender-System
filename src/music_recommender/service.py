@@ -28,7 +28,7 @@ from music_recommender.content import (
 from music_recommender.content import (
     listened_artist_ids as content_listened_artist_ids,
 )
-from music_recommender.ltr import rank_with_ltr
+from music_recommender.ltr import rank_tracks_with_ltr, rank_with_ltr
 from music_recommender.ranking import (
     apply_popularity_penalty,
     rerank_with_diversity,
@@ -72,6 +72,14 @@ class RecommenderService:
             "ranking_config": self.artifact.ranking_config,
             "ltr": {
                 "available": self.artifact.ltr_model is not None,
+                "track_available": (
+                    getattr(self.artifact, "track_ltr_model", None) is not None
+                ),
+            },
+            "track_ltr": {
+                "available": (
+                    getattr(self.artifact, "track_ltr_model", None) is not None
+                ),
             },
             "content": {
                 "num_features": len(self.artifact.content_artifacts.feature_names),
@@ -89,6 +97,9 @@ class RecommenderService:
             "num_interactions": self.artifact.metadata["num_interactions"],
             "content_features": len(self.artifact.content_artifacts.feature_names),
             "ltr_available": self.artifact.ltr_model is not None,
+            "track_ltr_available": (
+                getattr(self.artifact, "track_ltr_model", None) is not None
+            ),
         }
 
     def recommend_user(
@@ -530,6 +541,7 @@ class RecommenderService:
         explain: bool = False,
         method: str = "similarity",
         content_weight: float | None = None,
+        ltr: bool = False,
     ) -> dict[str, Any]:
         """Recommend tracks for a user with audio-feature similarity.
 
@@ -541,6 +553,8 @@ class RecommenderService:
         """
         if method not in ("similarity", "hybrid"):
             raise ValueError("method must be one of: similarity, hybrid.")
+        if type(ltr) is not bool:
+            raise ValueError("ltr must be a boolean.")
         content_weight = self._content_weight(content_weight)
         include_listened, popularity_penalty, diversity = self._ranking_overrides(
             include_listened, popularity_penalty, diversity
@@ -602,15 +616,55 @@ class RecommenderService:
             artist_taste_per_track=artist_taste_per_track,
             content_weight=content_weight,
         )
+        if ltr and getattr(self.artifact, "track_ltr_model", None) is not None:
+            recommendations = rank_tracks_with_ltr(
+                self.artifact.track_ltr_model,
+                recommendations=recommendations,
+                user_id=user_id,
+                resources=resources,
+                top_k=top_k,
+            )
+        if ltr:
+            strategy = "track_hybrid_ltr" if method == "hybrid" else "track_ltr"
+        else:
+            strategy = "track_hybrid" if method == "hybrid" else "track_similarity"
         return {
             "user_id": user_id,
             "method": method,
-            "strategy": "track_hybrid" if method == "hybrid" else "track_similarity",
+            "strategy": strategy,
             "recommendations": [
                 self._enrich_track_recommendation(resources, rec)
                 for rec in recommendations
             ],
         }
+
+    def recommend_tracks_ltr(
+        self,
+        user_id: str,
+        top_k: int,
+        include_listened: bool | None = None,
+        popularity_penalty: float | None = None,
+        diversity: float | None = None,
+        explain: bool = False,
+        method: str = "similarity",
+        content_weight: float | None = None,
+    ) -> dict[str, Any]:
+        """Recommend tracks re-ranked by the track learning-to-rank model.
+
+        Requires an artifact bundled with a track LTR ranker. If no track ranker
+        is bundled, the base track recommendations are returned unchanged.
+        """
+        return self.recommend_tracks(
+            user_id=user_id,
+            top_k=top_k,
+            include_listened=include_listened,
+            popularity_penalty=popularity_penalty,
+            diversity=diversity,
+            explain=explain,
+            method=method,
+            content_weight=content_weight,
+            ltr=True,
+        )
 
     def popular_tracks(self, top_k: int) -> dict[str, Any]:
         """Return globally popular tracks from the track data."""

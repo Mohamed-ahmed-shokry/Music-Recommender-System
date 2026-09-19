@@ -893,3 +893,55 @@ def test_recommend_tracks_rejects_invalid_method_and_weight(tmp_path: Path) -> N
         service.recommend_tracks(
             user_id="user_1", top_k=3, method="hybrid", content_weight=1.5
         )
+
+
+def test_service_metadata_and_health_reports_track_ltr(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    assert service.metadata()["track_ltr"]["available"] is False
+    assert service.health()["track_ltr_available"] is False
+
+    service.artifact.track_ltr_model = "mock_track_ranker"
+    assert service.metadata()["track_ltr"]["available"] is True
+    assert service.health()["track_ltr_available"] is True
+
+
+def test_recommend_tracks_rejects_non_bool_ltr(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    with pytest.raises(ValueError, match="ltr must be a boolean"):
+        service.recommend_tracks(user_id="user_1", top_k=3, ltr="yes")  # type: ignore[arg-type]
+
+
+def test_recommend_tracks_ltr_with_bundled_ranker(tmp_path: Path) -> None:
+    from music_recommender.ltr import train_track_ltr_ranker
+
+    service = create_service(tmp_path)
+    resources = service._track_resources()
+    ranker = train_track_ltr_ranker(
+        train_df=resources.interactions,
+        resources=resources,
+    )
+    service.artifact.track_ltr_model = ranker
+
+    result = service.recommend_tracks(user_id="user_1", top_k=3, ltr=True)
+    assert result["strategy"] == "track_ltr"
+    assert len(result["recommendations"]) == 3
+
+    hybrid_result = service.recommend_tracks(
+        user_id="user_1", top_k=3, method="hybrid", ltr=True
+    )
+    assert hybrid_result["strategy"] == "track_hybrid_ltr"
+    assert len(hybrid_result["recommendations"]) == 3
+
+    helper_result = service.recommend_tracks_ltr(user_id="user_1", top_k=3)
+    assert helper_result["strategy"] == "track_ltr"
+    assert len(helper_result["recommendations"]) == 3
+
+
+def test_recommend_tracks_ltr_without_ranker_falls_back(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    service.artifact.track_ltr_model = None
+
+    result = service.recommend_tracks_ltr(user_id="user_1", top_k=3)
+    assert result["strategy"] == "track_ltr"
+    assert len(result["recommendations"]) == 3
+

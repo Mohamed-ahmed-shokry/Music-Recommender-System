@@ -317,6 +317,18 @@ def train_and_save_model(
         )
     except (ValueError, RuntimeError) as exc:
         logger.warning("taste_model_skip reason=%s", exc)
+    track_ltr_model = None
+    if getattr(track_bundle, "interactions", None) is not None:
+        try:
+            from music_recommender.ltr import train_track_ltr_ranker
+
+            track_ltr_model = train_track_ltr_ranker(
+                train_df=track_bundle.interactions,
+                resources=track_bundle,
+            )
+            logger.info("track_ltr_model_trained")
+        except (ValueError, RuntimeError) as exc:
+            logger.warning("track_ltr_model_skip reason=%s", exc)
     artifact = build_recommender_artifact(
         model=model,
         mappings=mappings,
@@ -336,6 +348,7 @@ def train_and_save_model(
             model=model,
             artist_stats=build_artist_stats(filtered_df),
         ),
+        track_ltr_model=track_ltr_model,
         taste_model=taste_model,
         taste_user_id_to_index=taste_uidx,
         taste_artist_id_to_index=taste_aidx,

@@ -50,6 +50,7 @@ class RecommenderArtifact:
     ranking_config: dict[str, Any]
     ltr_model: Any = None
     track_bundle: TrackServingResources | None = None
+    track_ltr_model: Any = None
     taste_model: Any = None
     taste_user_id_to_index: dict[str, int] | None = None
     taste_artist_id_to_index: dict[str, int] | None = None
@@ -132,6 +133,7 @@ def build_recommender_artifact(
     ranking_config: dict[str, Any],
     ltr_model: Any = None,
     track_bundle: TrackServingResources | None = None,
+    track_ltr_model: Any = None,
     taste_model: Any = None,
     taste_user_id_to_index: dict[str, int] | None = None,
     taste_artist_id_to_index: dict[str, int] | None = None,
@@ -164,6 +166,7 @@ def build_recommender_artifact(
         ranking_config=ranking_config,
         ltr_model=ltr_model,
         track_bundle=track_bundle,
+        track_ltr_model=track_ltr_model,
         taste_model=taste_model,
         taste_user_id_to_index=taste_user_id_to_index,
         taste_artist_id_to_index=taste_artist_id_to_index,
@@ -207,12 +210,13 @@ def load_artifact(path: str | Path = ARTIFACT_BUNDLE_PATH) -> RecommenderArtifac
     except Exception as error:
         raise ValueError("Artifact structure is invalid. Retrain the model.") from error
     logger.info(
-        "loaded_artifact version=%s users=%s artists=%s tracks=%s ltr=%s",
+        "loaded_artifact version=%s users=%s artists=%s tracks=%s ltr=%s track_ltr=%s",
         artifact.version,
         artifact.metadata.get("num_users", "?"),
         artifact.metadata.get("num_artists", "?"),
         "yes" if artifact.track_bundle is not None else "no",
         "yes" if artifact.ltr_model is not None else "no",
+        "yes" if artifact.track_ltr_model is not None else "no",
     )
     return artifact
 
@@ -235,6 +239,9 @@ def _validate_loaded_artifact(artifact: Any) -> RecommenderArtifact:
     artifact.track_bundle = getattr(artifact, "track_bundle", None)
     if artifact.track_bundle is not None:
         _validate_track_bundle(artifact.track_bundle)
+
+    artifact.ltr_model = getattr(artifact, "ltr_model", None)
+    artifact.track_ltr_model = getattr(artifact, "track_ltr_model", None)
 
     artifact.taste_model = getattr(artifact, "taste_model", None)
     artifact.taste_user_id_to_index = getattr(artifact, "taste_user_id_to_index", None)
