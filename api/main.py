@@ -91,6 +91,7 @@ class SessionRecommendationRequest(BaseModel):
     include_listened: bool = False
     diversity: float = Field(default=0.0, ge=0.0, le=1.0)
     popularity_penalty: float = Field(default=0.0, ge=0.0, le=1.0)
+    novelty_weight: float = Field(default=0.0, ge=0.0, le=1.0)
     content_weight: float = Field(
         default=DEFAULT_CONTENT_WEIGHT,
         ge=0.0,
@@ -237,6 +238,7 @@ def recommend_user(
     include_listened: bool = False,
     diversity: UnitInterval = 0.0,
     popularity_penalty: UnitInterval = 0.0,
+    novelty_weight: UnitInterval = 0.0,
     content_weight: UnitInterval = DEFAULT_CONTENT_WEIGHT,
     explain: bool = False,
 ) -> dict[str, object]:
@@ -248,6 +250,7 @@ def recommend_user(
             include_listened=include_listened,
             diversity=diversity,
             popularity_penalty=popularity_penalty,
+            novelty_weight=novelty_weight,
             content_weight=content_weight,
             explain=explain,
         )
@@ -284,6 +287,7 @@ def recommend_session(request: SessionRecommendationRequest) -> dict[str, object
             include_listened=request.include_listened,
             diversity=request.diversity,
             popularity_penalty=request.popularity_penalty,
+            novelty_weight=request.novelty_weight,
             content_weight=request.content_weight,
             explain=request.explain,
         )
@@ -336,6 +340,7 @@ def recommend_user_ltr(
     include_listened: bool = False,
     diversity: UnitInterval = 0.0,
     popularity_penalty: UnitInterval = 0.0,
+    novelty_weight: UnitInterval = 0.0,
 ) -> dict[str, object]:
     """Return LTR re-ranked artist recommendations for a user."""
     try:
@@ -345,6 +350,7 @@ def recommend_user_ltr(
             include_listened=include_listened,
             diversity=diversity,
             popularity_penalty=popularity_penalty,
+            novelty_weight=novelty_weight,
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -357,6 +363,7 @@ def recommend_tracks(
     include_listened: bool = False,
     diversity: UnitInterval = 0.0,
     popularity_penalty: UnitInterval = 0.0,
+    novelty_weight: UnitInterval = 0.0,
     explain: bool = False,
     method: Literal["similarity", "hybrid"] = "similarity",
     content_weight: UnitInterval | None = None,
@@ -374,6 +381,7 @@ def recommend_tracks(
             include_listened=include_listened,
             diversity=diversity,
             popularity_penalty=popularity_penalty,
+            novelty_weight=novelty_weight,
             explain=explain,
             method=method,
             content_weight=content_weight,
@@ -390,6 +398,7 @@ def recommend_tracks_ltr(
     include_listened: bool = False,
     diversity: UnitInterval = 0.0,
     popularity_penalty: UnitInterval = 0.0,
+    novelty_weight: UnitInterval = 0.0,
     explain: bool = False,
     method: Literal["similarity", "hybrid"] = "similarity",
     content_weight: UnitInterval | None = None,
@@ -402,6 +411,7 @@ def recommend_tracks_ltr(
             include_listened=include_listened,
             diversity=diversity,
             popularity_penalty=popularity_penalty,
+            novelty_weight=novelty_weight,
             explain=explain,
             method=method,
             content_weight=content_weight,

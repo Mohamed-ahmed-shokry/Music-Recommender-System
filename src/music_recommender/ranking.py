@@ -11,12 +11,14 @@ def validate_ranking_parameters(
     top_k: int,
     diversity: float = 0.0,
     popularity_penalty: float = 0.0,
+    novelty_weight: float = 0.0,
 ) -> None:
     """Validate common recommendation ranking parameters."""
     if type(top_k) is not int or top_k < 1:
         raise ValueError("top_k must be a positive integer.")
     _validate_unit_interval(diversity, name="diversity")
     _validate_unit_interval(popularity_penalty, name="popularity_penalty")
+    _validate_unit_interval(novelty_weight, name="novelty_weight")
 
 
 def _validate_unit_interval(value: float, *, name: str) -> None:

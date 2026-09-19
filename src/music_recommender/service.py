@@ -109,13 +109,19 @@ class RecommenderService:
         include_listened: bool | None = None,
         popularity_penalty: float | None = None,
         diversity: float | None = None,
+        novelty_weight: float | None = None,
         content_weight: float | None = None,
         explain: bool = False,
     ) -> dict[str, Any]:
         """Recommend artists for a user, with a popularity fallback if unknown."""
         content_weight = self._content_weight(content_weight)
-        include_listened, popularity_penalty, diversity = self._ranking_overrides(
-            include_listened, popularity_penalty, diversity
+        (
+            include_listened,
+            popularity_penalty,
+            diversity,
+            novelty_weight,
+        ) = self._ranking_overrides(
+            include_listened, popularity_penalty, diversity, novelty_weight
         )
         if user_id in self.artifact.mappings["user_id_to_index"]:
             collaborative_scores = self._collaborative_scores_for_user(user_id)
@@ -141,6 +147,7 @@ class RecommenderService:
                 explain=explain,
                 popularity_penalty=popularity_penalty,
                 diversity=diversity,
+                novelty_weight=novelty_weight,
                 score_components={
                     "collaborative_score": collaborative_scores,
                     "content_score": content_scores,
@@ -169,10 +176,16 @@ class RecommenderService:
         include_listened: bool | None = None,
         popularity_penalty: float | None = None,
         diversity: float | None = None,
+        novelty_weight: float | None = None,
     ) -> dict[str, Any]:
         """Return the v2-style ALS-only recommendation response."""
-        include_listened, popularity_penalty, diversity = self._ranking_overrides(
-            include_listened, popularity_penalty, diversity
+        (
+            include_listened,
+            popularity_penalty,
+            diversity,
+            novelty_weight,
+        ) = self._ranking_overrides(
+            include_listened, popularity_penalty, diversity, novelty_weight
         )
         recommendations = recommend_artists_for_user(
             model=self.artifact.model,
@@ -184,6 +197,7 @@ class RecommenderService:
             artist_stats=self.artifact.artist_stats,
             popularity_penalty=popularity_penalty,
             diversity=diversity,
+            novelty_weight=novelty_weight,
         )
         return {
             "user_id": user_id,
@@ -198,14 +212,20 @@ class RecommenderService:
         include_listened: bool | None = None,
         popularity_penalty: float | None = None,
         diversity: float | None = None,
+        novelty_weight: float | None = None,
     ) -> dict[str, Any]:
         """Recommend artists re-ranked by the learning-to-rank model.
 
         Requires an artifact trained with an LTR re-ranker. If no ranker is
         bundled, the ALS recommendations are returned unchanged.
         """
-        include_listened, popularity_penalty, diversity = self._ranking_overrides(
-            include_listened, popularity_penalty, diversity
+        (
+            include_listened,
+            popularity_penalty,
+            diversity,
+            novelty_weight,
+        ) = self._ranking_overrides(
+            include_listened, popularity_penalty, diversity, novelty_weight
         )
         recommendations = recommend_artists_for_user(
             model=self.artifact.model,
@@ -217,6 +237,7 @@ class RecommenderService:
             artist_stats=self.artifact.artist_stats,
             popularity_penalty=popularity_penalty,
             diversity=diversity,
+            novelty_weight=novelty_weight,
         )
         ranker = self.artifact.ltr_model
         if ranker is not None:
@@ -286,13 +307,19 @@ class RecommenderService:
         include_listened: bool | None = None,
         popularity_penalty: float | None = None,
         diversity: float | None = None,
+        novelty_weight: float | None = None,
         content_weight: float | None = None,
         explain: bool = False,
     ) -> dict[str, Any]:
         """Recommend artists for a short-term listening session."""
         content_weight = self._content_weight(content_weight)
-        include_listened, popularity_penalty, diversity = self._ranking_overrides(
-            include_listened, popularity_penalty, diversity
+        (
+            include_listened,
+            popularity_penalty,
+            diversity,
+            novelty_weight,
+        ) = self._ranking_overrides(
+            include_listened, popularity_penalty, diversity, novelty_weight
         )
         session_scores, selected_artist_ids, preference_tokens = profile_content_scores(
             content_artifacts=self.artifact.content_artifacts,
@@ -347,6 +374,7 @@ class RecommenderService:
             explain=explain,
             popularity_penalty=popularity_penalty,
             diversity=diversity,
+            novelty_weight=novelty_weight,
             score_components=score_components,
         )
         response = {
@@ -538,6 +566,7 @@ class RecommenderService:
         include_listened: bool | None = None,
         popularity_penalty: float | None = None,
         diversity: float | None = None,
+        novelty_weight: float | None = None,
         explain: bool = False,
         method: str = "similarity",
         content_weight: float | None = None,
@@ -556,10 +585,20 @@ class RecommenderService:
         if type(ltr) is not bool:
             raise ValueError("ltr must be a boolean.")
         content_weight = self._content_weight(content_weight)
-        include_listened, popularity_penalty, diversity = self._ranking_overrides(
-            include_listened, popularity_penalty, diversity
+        (
+            include_listened,
+            popularity_penalty,
+            diversity,
+            novelty_weight,
+        ) = self._ranking_overrides(
+            include_listened, popularity_penalty, diversity, novelty_weight
         )
-        validate_ranking_parameters(top_k, diversity, popularity_penalty)
+        validate_ranking_parameters(
+            top_k,
+            diversity=diversity,
+            popularity_penalty=popularity_penalty,
+            novelty_weight=novelty_weight,
+        )
         if type(explain) is not bool:
             raise ValueError("explain must be a boolean.")
         resources = self._track_resources()
@@ -610,6 +649,7 @@ class RecommenderService:
             feature_matrix=resources.feature_matrix,
             popularity_penalty=popularity_penalty,
             diversity=diversity,
+            novelty_weight=novelty_weight,
             explain=explain,
             track_name_lookup=track_name_lookup,
             track_artist_lookup=track_artist_lookup,
@@ -645,6 +685,7 @@ class RecommenderService:
         include_listened: bool | None = None,
         popularity_penalty: float | None = None,
         diversity: float | None = None,
+        novelty_weight: float | None = None,
         explain: bool = False,
         method: str = "similarity",
         content_weight: float | None = None,
@@ -660,6 +701,7 @@ class RecommenderService:
             include_listened=include_listened,
             popularity_penalty=popularity_penalty,
             diversity=diversity,
+            novelty_weight=novelty_weight,
             explain=explain,
             method=method,
             content_weight=content_weight,
@@ -784,6 +826,7 @@ class RecommenderService:
             "include_listened": bool(ranking_config["include_listened"]),
             "popularity_penalty": float(ranking_config["popularity_penalty"]),
             "diversity": float(ranking_config["diversity"]),
+            "novelty_weight": float(ranking_config.get("novelty_weight", 0.0)),
         }
 
     def _ranking_overrides(
@@ -791,7 +834,8 @@ class RecommenderService:
         include_listened: bool | None,
         popularity_penalty: float | None,
         diversity: float | None,
-    ) -> tuple[bool, float, float]:
+        novelty_weight: float | None = None,
+    ) -> tuple[bool, float, float, float]:
         """Resolve reranking knobs, falling back to the champion settings."""
         champion = self._ranking_config()
         return (
@@ -802,6 +846,9 @@ class RecommenderService:
             if popularity_penalty is None
             else popularity_penalty,
             champion["diversity"] if diversity is None else diversity,
+            champion["novelty_weight"]
+            if novelty_weight is None
+            else novelty_weight,
         )
 
     def _collaborative_scores_for_user(self, user_id: str) -> np.ndarray:
@@ -848,9 +895,15 @@ class RecommenderService:
         explain: bool = False,
         popularity_penalty: float = 0.0,
         diversity: float = 0.0,
+        novelty_weight: float = 0.0,
         score_components: dict[str, np.ndarray] | None = None,
     ) -> list[dict[str, Any]]:
-        validate_ranking_parameters(top_k, diversity, popularity_penalty)
+        validate_ranking_parameters(
+            top_k,
+            diversity=diversity,
+            popularity_penalty=popularity_penalty,
+            novelty_weight=novelty_weight,
+        )
         index_to_artist_id = self.artifact.content_artifacts.content_index_to_artist_id
         adjusted_scores = apply_popularity_penalty(
             scores=scores,
@@ -867,16 +920,31 @@ class RecommenderService:
         ]
         diversity_factors = (
             self.artifact.content_artifacts.content_matrix.toarray()
-            if diversity > 0 and len(candidate_indices) > 1
+            if (diversity > 0 or novelty_weight > 0) and len(candidate_indices) > 1
             else np.empty((0, 0))
         )
-        final_indices = rerank_with_diversity(
-            candidate_indices=candidate_indices,
-            scores=adjusted_scores,
-            artist_factors=diversity_factors,
-            top_k=top_k,
-            diversity=diversity,
-        )
+        if novelty_weight > 0.0:
+            from music_recommender.multi_objective import rerank_multi_objective
+
+            final_indices = rerank_multi_objective(
+                candidate_indices=candidate_indices,
+                scores=adjusted_scores,
+                feature_matrix=diversity_factors,
+                item_stats=self.artifact.artist_stats,
+                index_to_id=index_to_artist_id,
+                top_k=top_k,
+                relevance_weight=max(0.0, 1.0 - diversity - novelty_weight),
+                diversity_weight=diversity,
+                novelty_weight=novelty_weight,
+            )
+        else:
+            final_indices = rerank_with_diversity(
+                candidate_indices=candidate_indices,
+                scores=adjusted_scores,
+                artist_factors=diversity_factors,
+                top_k=top_k,
+                diversity=diversity,
+            )
 
         recommendations: list[dict[str, Any]] = []
         for artist_index in final_indices:

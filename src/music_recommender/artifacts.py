@@ -672,14 +672,28 @@ def _validate_or_default_ranking_config(ranking_config: Any) -> dict[str, Any]:
     if ranking_config is None:
         return dict(DEFAULT_RANKING_CONFIG)
     required_fields = {"include_listened", "popularity_penalty", "diversity"}
+    allowed_fields = {
+        "include_listened",
+        "popularity_penalty",
+        "diversity",
+        "novelty_weight",
+    }
     if (
         not isinstance(ranking_config, dict)
-        or set(ranking_config) != required_fields
+        or not required_fields.issubset(set(ranking_config))
+        or not set(ranking_config).issubset(allowed_fields)
         or type(ranking_config["include_listened"]) is not bool
         or not is_finite_number(ranking_config["popularity_penalty"])
         or not 0 <= ranking_config["popularity_penalty"] <= 1
         or not is_finite_number(ranking_config["diversity"])
         or not 0 <= ranking_config["diversity"] <= 1
+        or (
+            "novelty_weight" in ranking_config
+            and (
+                not is_finite_number(ranking_config["novelty_weight"])
+                or not 0 <= ranking_config["novelty_weight"] <= 1
+            )
+        )
     ):
         raise ValueError(
             "Artifact ranking configuration is invalid. Retrain the model."

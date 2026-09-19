@@ -370,6 +370,13 @@ def recommend_user(
     ),
     popularity_penalty: float = 0.0,
     diversity: float = 0.0,
+    novelty_weight: float = typer.Option(
+        0.0,
+        "--novelty-weight",
+        min=0.0,
+        max=1.0,
+        help="Weight for novelty/unpopular discovery in multi-objective ranking.",
+    ),
     content_weight: float = DEFAULT_CONTENT_WEIGHT,
     explain: bool = False,
     ltr: bool = typer.Option(
@@ -388,6 +395,7 @@ def recommend_user(
                 include_listened=include_listened,
                 popularity_penalty=popularity_penalty,
                 diversity=diversity,
+                novelty_weight=novelty_weight,
             )
         else:
             response = service.recommend_user(
@@ -396,6 +404,7 @@ def recommend_user(
                 include_listened=include_listened,
                 popularity_penalty=popularity_penalty,
                 diversity=diversity,
+                novelty_weight=novelty_weight,
                 content_weight=content_weight,
                 explain=explain,
             )
@@ -1336,6 +1345,13 @@ def track_recommendations(
         max=1.0,
         help="Diversify recommendations by audio features (0.0 to 1.0).",
     ),
+    novelty_weight: float = typer.Option(
+        0.0,
+        "--novelty-weight",
+        min=0.0,
+        max=1.0,
+        help="Weight for novelty in multi-objective ranking (0.0 to 1.0).",
+    ),
     explain: bool = typer.Option(
         False,
         "--explain/--no-explain",
@@ -1454,6 +1470,7 @@ def track_recommendations(
             feature_matrix=np.asarray(feature_df.values, dtype=float),
             popularity_penalty=popularity_penalty,
             diversity=diversity,
+            novelty_weight=novelty_weight,
             explain=explain,
             track_name_lookup=track_name_lookup,
             track_artist_lookup=track_artist_name_lookup,

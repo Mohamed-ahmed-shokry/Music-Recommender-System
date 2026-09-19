@@ -81,6 +81,29 @@ def test_recommendations_contain_expected_fields() -> None:
     assert {"artist_id", "artist_name", "score"} <= recommendations[0].keys()
 
 
+def test_recommend_artists_for_user_with_novelty_weight() -> None:
+    model, matrix, mappings = recommender_artifacts()
+    artist_stats = {
+        "artist_1": {"popularity_rank": 1},
+        "artist_2": {"popularity_rank": 2},
+        "artist_3": {"popularity_rank": 3},
+    }
+    recommendations = recommend_artists_for_user(
+        model=model,
+        user_id="user_1",
+        user_item_matrix=matrix,
+        mappings=mappings,
+        artist_stats=artist_stats,
+        top_k=2,
+        novelty_weight=0.5,
+        diversity=0.2,
+    )
+
+    assert isinstance(recommendations, list)
+    assert len(recommendations) <= 2
+    assert {"artist_id", "artist_name", "score"} <= recommendations[0].keys()
+
+
 def test_unknown_user_raises_value_error() -> None:
     model, matrix, mappings = recommender_artifacts()
 

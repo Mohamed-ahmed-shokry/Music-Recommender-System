@@ -136,6 +136,7 @@ def test_ranking_overrides_fall_back_to_champion_settings(tmp_path: Path) -> Non
             "include_listened": True,
             "popularity_penalty": 0.3,
             "diversity": 0.5,
+            "novelty_weight": 0.2,
         },
     )
 
@@ -143,9 +144,15 @@ def test_ranking_overrides_fall_back_to_champion_settings(tmp_path: Path) -> Non
         "include_listened": True,
         "popularity_penalty": 0.3,
         "diversity": 0.5,
+        "novelty_weight": 0.2,
     }
-    assert service._ranking_overrides(None, None, None) == (True, 0.3, 0.5)
-    assert service._ranking_overrides(False, None, 0.1) == (False, 0.3, 0.1)
+    assert service._ranking_overrides(None, None, None) == (True, 0.3, 0.5, 0.2)
+    assert service._ranking_overrides(False, None, 0.1, 0.4) == (
+        False,
+        0.3,
+        0.1,
+        0.4,
+    )
 
 
 def test_recommend_user_als_applies_champion_settings(tmp_path: Path) -> None:
@@ -944,4 +951,30 @@ def test_recommend_tracks_ltr_without_ranker_falls_back(tmp_path: Path) -> None:
     result = service.recommend_tracks_ltr(user_id="user_1", top_k=3)
     assert result["strategy"] == "track_ltr"
     assert len(result["recommendations"]) == 3
+
+
+def test_recommend_user_with_novelty_weight(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    result = service.recommend_user(
+        user_id="user_1",
+        top_k=3,
+        include_listened=True,
+        novelty_weight=0.5,
+        diversity=0.2,
+    )
+    assert result["strategy"] == "hybrid_personalized"
+    assert len(result["recommendations"]) == 3
+
+
+def test_recommend_tracks_with_novelty_weight(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    result = service.recommend_tracks(
+        user_id="user_1",
+        top_k=3,
+        novelty_weight=0.4,
+        diversity=0.3,
+    )
+    assert result["strategy"] == "track_similarity"
+    assert len(result["recommendations"]) == 3
+
 

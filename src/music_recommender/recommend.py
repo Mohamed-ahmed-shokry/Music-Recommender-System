@@ -45,9 +45,15 @@ def recommend_artists_for_user(
     artist_stats: dict[str, dict[str, Any]] | None = None,
     popularity_penalty: float = 0.0,
     diversity: float = 0.0,
+    novelty_weight: float = 0.0,
 ) -> list[Recommendation]:
     """Recommend artists for a user by original user ID."""
-    validate_ranking_parameters(top_k, diversity, popularity_penalty)
+    validate_ranking_parameters(
+        top_k,
+        diversity=diversity,
+        popularity_penalty=popularity_penalty,
+        novelty_weight=novelty_weight,
+    )
     user_id_to_index = mappings["user_id_to_index"]
     index_to_artist_id = mappings["index_to_artist_id"]
     artist_id_to_name = mappings["artist_id_to_name"]
@@ -76,13 +82,28 @@ def recommend_artists_for_user(
         for artist_index in ranked_artist_indices
         if include_listened or int(artist_index) not in listened_artist_indices
     ]
-    final_artist_indices = rerank_with_diversity(
-        candidate_indices=candidate_indices,
-        scores=adjusted_scores,
-        artist_factors=artist_latent,
-        top_k=top_k,
-        diversity=diversity,
-    )
+    if novelty_weight > 0.0:
+        from music_recommender.multi_objective import rerank_multi_objective
+
+        final_artist_indices = rerank_multi_objective(
+            candidate_indices=candidate_indices,
+            scores=adjusted_scores,
+            feature_matrix=artist_latent,
+            item_stats=artist_stats,
+            index_to_id=index_to_artist_id,
+            top_k=top_k,
+            relevance_weight=max(0.0, 1.0 - diversity - novelty_weight),
+            diversity_weight=diversity,
+            novelty_weight=novelty_weight,
+        )
+    else:
+        final_artist_indices = rerank_with_diversity(
+            candidate_indices=candidate_indices,
+            scores=adjusted_scores,
+            artist_factors=artist_latent,
+            top_k=top_k,
+            diversity=diversity,
+        )
 
     recommendations: list[Recommendation] = []
     for artist_index in final_artist_indices:

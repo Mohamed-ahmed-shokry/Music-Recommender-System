@@ -412,6 +412,7 @@ def recommend_tracks_for_user(
     track_artist_lookup: dict[str, str] | None = None,
     artist_taste_per_track: np.ndarray | None = None,
     content_weight: float = 1.0,
+    novelty_weight: float = 0.0,
 ) -> list[dict[str, Any]]:
     """Recommend tracks for a user based on audio-feature similarity.
 
@@ -423,7 +424,12 @@ def recommend_tracks_for_user(
     is provided for a hybrid run, recommendations also list the artist whose
     affinity drove the collaborative half.
     """
-    validate_ranking_parameters(top_k, diversity, popularity_penalty)
+    validate_ranking_parameters(
+        top_k,
+        diversity=diversity,
+        popularity_penalty=popularity_penalty,
+        novelty_weight=novelty_weight,
+    )
     if type(explain) is not bool:
         raise ValueError("explain must be a boolean.")
     if artist_taste_per_track is not None:
@@ -495,13 +501,28 @@ def recommend_tracks_for_user(
         diversity_factors = feature_matrix
     else:
         diversity_factors = np.empty((0, 0))
-    final_indices = rerank_with_diversity(
-        candidate_indices=candidate_indices,
-        scores=adjusted_scores,
-        artist_factors=diversity_factors,
-        top_k=top_k,
-        diversity=diversity,
-    )
+    if novelty_weight > 0.0:
+        from music_recommender.multi_objective import rerank_multi_objective
+
+        final_indices = rerank_multi_objective(
+            candidate_indices=candidate_indices,
+            scores=adjusted_scores,
+            feature_matrix=diversity_factors,
+            item_stats=track_stats,
+            index_to_id=index_to_track_id,
+            top_k=top_k,
+            relevance_weight=max(0.0, 1.0 - diversity - novelty_weight),
+            diversity_weight=diversity,
+            novelty_weight=novelty_weight,
+        )
+    else:
+        final_indices = rerank_with_diversity(
+            candidate_indices=candidate_indices,
+            scores=adjusted_scores,
+            artist_factors=diversity_factors,
+            top_k=top_k,
+            diversity=diversity,
+        )
 
     recommendations: list[dict[str, Any]] = []
     for idx in final_indices:

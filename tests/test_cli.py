@@ -2103,6 +2103,44 @@ def test_track_recommendations_command_with_ltr() -> None:
     assert "1. " in result.output
 
 
+def test_track_recommendations_command_with_novelty_weight() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "track-recommendations",
+            "--user-id",
+            "user_1",
+            "--top-k",
+            "3",
+            "--novelty-weight",
+            "0.5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Track recommendations for user_1 (method: similarity):" in result.output
+    assert "1. " in result.output
+
+
+def test_recommend_user_command_with_novelty_weight() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "recommend-user",
+            "--user-id",
+            "user_1",
+            "--top-k",
+            "3",
+            "--novelty-weight",
+            "0.4",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Recommendations for user_1:" in result.output
+    assert "1. " in result.output
+
+
 def test_track_recommendations_command_rejects_invalid_method() -> None:
     result = runner.invoke(
         cli.app,

@@ -186,6 +186,14 @@ def _render_personalized_tab(
         top_k = st.slider("Number of recommendations", 1, max_top_k, min(10, max_top_k))
         content_weight = st.slider("Content weight", 0.0, 1.0, 0.25, 0.05)
         diversity = st.slider("Diversity", 0.0, 1.0, 0.0, 0.05)
+        novelty_weight = st.slider(
+            "Novelty weight",
+            0.0,
+            1.0,
+            0.0,
+            0.05,
+            help="Balance discovery of novel / less popular artists.",
+        )
         popularity_penalty = st.slider(
             "Popularity penalty",
             0.0,
@@ -219,6 +227,7 @@ def _render_personalized_tab(
                     include_listened=include_listened,
                     diversity=diversity,
                     popularity_penalty=popularity_penalty,
+                    novelty_weight=novelty_weight,
                 )
             )
         else:
@@ -229,6 +238,7 @@ def _render_personalized_tab(
                     include_listened=include_listened,
                     diversity=diversity,
                     popularity_penalty=popularity_penalty,
+                    novelty_weight=novelty_weight,
                     content_weight=content_weight,
                     explain=explain,
                 )
@@ -493,6 +503,15 @@ def _render_tracks_tab(
             key="tracks_diversity",
             help="Diversify recommendations by audio features.",
         )
+        novelty_weight = st.slider(
+            "Novelty weight",
+            0.0,
+            1.0,
+            0.0,
+            0.05,
+            key="tracks_novelty_weight",
+            help="Balance discovery of novel / less popular tracks.",
+        )
         explain = st.checkbox(
             "Show recommendation reasons",
             value=True,
@@ -540,6 +559,7 @@ def _render_tracks_tab(
                 include_listened=include_listened,
                 popularity_penalty=popularity_penalty,
                 diversity=diversity,
+                novelty_weight=novelty_weight,
                 explain=explain,
                 method=method,
                 content_weight=content_weight,

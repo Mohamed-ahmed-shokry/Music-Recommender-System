@@ -82,6 +82,7 @@ class FakeService:
         popularity_penalty: float,
         content_weight: float,
         explain: bool,
+        novelty_weight: float = 0.0,
     ) -> dict[str, object]:
         return {
             "user_id": user_id,
@@ -101,6 +102,7 @@ class FakeService:
             "include_listened": include_listened,
             "diversity": diversity,
             "popularity_penalty": popularity_penalty,
+            "novelty_weight": novelty_weight,
         }
 
     def recommend_profile(
@@ -134,6 +136,7 @@ class FakeService:
         include_listened: bool,
         diversity: float,
         popularity_penalty: float,
+        novelty_weight: float = 0.0,
     ) -> dict[str, object]:
         return {
             "user_id": user_id,
@@ -148,6 +151,7 @@ class FakeService:
             "include_listened": include_listened,
             "diversity": diversity,
             "popularity_penalty": popularity_penalty,
+            "novelty_weight": novelty_weight,
         }
 
     def recommend_session(
@@ -163,6 +167,7 @@ class FakeService:
         popularity_penalty: float,
         content_weight: float,
         explain: bool,
+        novelty_weight: float = 0.0,
     ) -> dict[str, object]:
         return {
             "user_id": user_id,
@@ -175,6 +180,7 @@ class FakeService:
             "include_listened": include_listened,
             "diversity": diversity,
             "popularity_penalty": popularity_penalty,
+            "novelty_weight": novelty_weight,
             "recommendations": [
                 {
                     "artist_id": "artist_6",
@@ -233,6 +239,7 @@ class FakeService:
         include_listened: bool,
         popularity_penalty: float = 0.0,
         diversity: float = 0.0,
+        novelty_weight: float = 0.0,
         explain: bool = False,
         method: str = "similarity",
         content_weight: float | None = None,
@@ -260,6 +267,7 @@ class FakeService:
             "include_listened": include_listened,
             "popularity_penalty": popularity_penalty,
             "diversity": diversity,
+            "novelty_weight": novelty_weight,
         }
 
     def recommend_tracks_ltr(
@@ -269,6 +277,7 @@ class FakeService:
         include_listened: bool,
         popularity_penalty: float = 0.0,
         diversity: float = 0.0,
+        novelty_weight: float = 0.0,
         explain: bool = False,
         method: str = "similarity",
         content_weight: float | None = None,
@@ -279,6 +288,7 @@ class FakeService:
             include_listened=include_listened,
             popularity_penalty=popularity_penalty,
             diversity=diversity,
+            novelty_weight=novelty_weight,
             explain=explain,
             method=method,
             content_weight=content_weight,
@@ -636,6 +646,7 @@ def test_recommend_user_ltr_route_turns_value_errors_into_422() -> None:
             include_listened: bool,
             diversity: float,
             popularity_penalty: float,
+            novelty_weight: float = 0.0,
         ) -> dict[str, object]:
             raise ValueError("The LTR model is not available for this user.")
 
@@ -1211,3 +1222,24 @@ def test_ablation_summary_route_returns_422_on_invalid_summary(
 
     assert response.status_code == 422
     assert "Failed to parse ablation summary" in response.json()["detail"]
+
+
+def test_recommend_user_novelty_weight() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+        response = client.get("/recommend/user/user_1?novelty_weight=0.35")
+
+    assert response.status_code == 200
+    assert response.json()["novelty_weight"] == 0.35
+
+
+def test_recommend_tracks_novelty_weight() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+        response = client.get("/tracks/recommend/user_1?novelty_weight=0.45")
+
+    assert response.status_code == 200
+    assert response.json()["novelty_weight"] == 0.45
+
