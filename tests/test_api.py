@@ -236,12 +236,17 @@ class FakeService:
         explain: bool = False,
         method: str = "similarity",
         content_weight: float | None = None,
+        ltr: bool = False,
     ) -> dict[str, object]:
         if user_id == "ghost":
             raise ValueError(f"Unknown user_id: {user_id}")
+        if ltr:
+            strategy = "track_hybrid_ltr" if method == "hybrid" else "track_ltr"
+        else:
+            strategy = "track_hybrid" if method == "hybrid" else "track_similarity"
         return {
             "user_id": user_id,
-            "strategy": "track_hybrid" if method == "hybrid" else "track_similarity",
+            "strategy": strategy,
             "method": method,
             "recommendations": [
                 {
@@ -256,6 +261,29 @@ class FakeService:
             "popularity_penalty": popularity_penalty,
             "diversity": diversity,
         }
+
+    def recommend_tracks_ltr(
+        self,
+        user_id: str,
+        top_k: int,
+        include_listened: bool,
+        popularity_penalty: float = 0.0,
+        diversity: float = 0.0,
+        explain: bool = False,
+        method: str = "similarity",
+        content_weight: float | None = None,
+    ) -> dict[str, object]:
+        return self.recommend_tracks(
+            user_id=user_id,
+            top_k=top_k,
+            include_listened=include_listened,
+            popularity_penalty=popularity_penalty,
+            diversity=diversity,
+            explain=explain,
+            method=method,
+            content_weight=content_weight,
+            ltr=True,
+        )
 
     def similar_tracks(
         self,
@@ -1001,6 +1029,36 @@ def test_track_recommend_route_supports_hybrid_method() -> None:
     assert body["strategy"] == "track_hybrid"
 
 
+def test_track_recommend_route_supports_ltr() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get(
+            "/tracks/recommend/user_1",
+            params={"top_k": 1, "ltr": True},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["strategy"] == "track_ltr"
+    assert len(body["recommendations"]) == 1
+
+
+def test_track_recommend_ltr_route() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/tracks/recommend/user_1/ltr", params={"top_k": 1})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["strategy"] == "track_ltr"
+    assert len(body["recommendations"]) == 1
+
+
+
 def test_track_recommend_route_rejects_invalid_method() -> None:
     with TestClient(api_main.app) as client:
         api_main.service = FakeService()
@@ -1086,6 +1144,7 @@ def test_popular_tracks_route_returns_hits() -> None:
         ("get", "/catalog/artists", {}),
         ("get", "/recommend/user/user_1", {}),
         ("get", "/tracks/recommend/user_1", {}),
+        ("get", "/tracks/recommend/user_1/ltr", {}),
         ("get", "/tracks/catalog", {}),
         ("post", "/recommend/profile", {"json": {}}),
         ("post", "/recommend/session", {"json": {}}),

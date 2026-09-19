@@ -513,6 +513,19 @@ def _render_tracks_tab(
             key="tracks_content_weight",
             help="1.0 favors audio features, 0.0 favors artist taste.",
         )
+        track_ltr_available = (
+            getattr(service.artifact, "track_ltr_model", None) is not None
+        )
+        use_ltr = st.checkbox(
+            "Use Learning-to-Rank re-ranking",
+            value=False,
+            disabled=not track_ltr_available,
+            key="tracks_use_ltr",
+            help=(
+                "Re-rank candidates with the bundled track LTR model "
+                "(requires artifact trained with track LTR)."
+            ),
+        )
         submitted = st.form_submit_button(
             "Recommend tracks",
             type="primary",
@@ -530,6 +543,7 @@ def _render_tracks_tab(
                 explain=explain,
                 method=method,
                 content_weight=content_weight,
+                ltr=use_ltr,
             )
         )
 

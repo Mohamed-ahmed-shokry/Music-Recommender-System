@@ -1353,6 +1353,11 @@ def track_recommendations(
         max=1.0,
         help="Balance hybrid tracks between artist taste and audio features.",
     ),
+    ltr: bool = typer.Option(
+        False,
+        "--ltr/--no-ltr",
+        help="Re-rank track candidates with the learning-to-rank model.",
+    ),
 ) -> None:
     """Recommend tracks for a user using track similarity (or hybrid)."""
     if method not in ("similarity", "hybrid"):
@@ -1456,11 +1461,40 @@ def track_recommendations(
             content_weight=content_weight,
         )
 
+        if ltr:
+            from music_recommender.artifacts import load_artifact
+            from music_recommender.ltr import (
+                rank_tracks_with_ltr,
+                train_track_ltr_ranker,
+            )
+            from music_recommender.tracks import build_track_serving_resources
+
+            track_resources = build_track_serving_resources(df, metadata_df)
+            ranker = None
+            try:
+                artifact = load_artifact()
+                ranker = getattr(artifact, "track_ltr_model", None)
+            except Exception:
+                pass
+            if ranker is None:
+                ranker = train_track_ltr_ranker(
+                    train_df=df,
+                    resources=track_resources,
+                )
+            recommendations = rank_tracks_with_ltr(
+                ranker,
+                recommendations=recommendations,
+                user_id=user_id,
+                resources=track_resources,
+                top_k=top_k,
+            )
+
     except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
-    typer.echo(f"Track recommendations for {user_id} (method: {method}):")
+    ltr_suffix = ", LTR" if ltr else ""
+    typer.echo(f"Track recommendations for {user_id} (method: {method}{ltr_suffix}):")
     if not recommendations:
         typer.echo("  No recommendations available.")
     else:

@@ -2083,6 +2083,26 @@ def test_track_recommendations_command_hybrid_method() -> None:
     assert "Track recommendations for user_1 (method: hybrid):" in result.output
 
 
+def test_track_recommendations_command_with_ltr() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "track-recommendations",
+            "--user-id",
+            "user_1",
+            "--top-k",
+            "3",
+            "--ltr",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert (
+        "Track recommendations for user_1 (method: similarity, LTR):" in result.output
+    )
+    assert "1. " in result.output
+
+
 def test_track_recommendations_command_rejects_invalid_method() -> None:
     result = runner.invoke(
         cli.app,

@@ -68,6 +68,7 @@ class FakeDashboardService:
             artist_stats=artist_stats,
             metadata={"training_device": "cpu"},
             ltr_model=None,
+            track_ltr_model=None,
         )
 
     def health(self) -> dict[str, object]:
@@ -123,9 +124,9 @@ class FakeDashboardService:
         response["similar_artists"] = response.pop("recommendations")
         return response
 
-    def recommend_tracks(self, **_: Any) -> dict[str, object]:
+    def recommend_tracks(self, **kwargs: Any) -> dict[str, object]:
         return {
-            "strategy": "track_similarity",
+            "strategy": "track_ltr" if kwargs.get("ltr") else "track_similarity",
             "recommendations": [
                 {
                     "track_id": "track_1",
@@ -563,6 +564,25 @@ def test_dashboard_tracks_tab_recommends_tracks() -> None:
 
     assert not app.exception
     assert any(caption.value == "Strategy: Track Similarity" for caption in app.caption)
+
+
+def test_dashboard_tracks_tab_supports_ltr() -> None:
+    service = FakeDashboardService()
+    service.artifact.track_ltr_model = "mock_track_ltr"
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    ltr_box = next((cb for cb in app.checkbox if cb.key == "tracks_use_ltr"), None)
+    assert ltr_box is not None
+    assert not ltr_box.disabled
+    ltr_box.check().run()
+    app.button[4].click().run()
+
+    assert not app.exception
+    assert any(caption.value == "Strategy: Track Ltr" for caption in app.caption)
 
 
 def test_dashboard_tracks_tab_finds_similar_tracks() -> None:

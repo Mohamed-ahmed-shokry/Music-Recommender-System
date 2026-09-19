@@ -360,6 +360,7 @@ def recommend_tracks(
     explain: bool = False,
     method: Literal["similarity", "hybrid"] = "similarity",
     content_weight: UnitInterval | None = None,
+    ltr: bool = False,
 ) -> dict[str, object]:
     """Return track recommendations for a user with audio-feature similarity.
 
@@ -368,6 +369,34 @@ def recommend_tracks(
     """
     try:
         return get_service().recommend_tracks(
+            user_id=user_id,
+            top_k=top_k,
+            include_listened=include_listened,
+            diversity=diversity,
+            popularity_penalty=popularity_penalty,
+            explain=explain,
+            method=method,
+            content_weight=content_weight,
+            ltr=ltr,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/tracks/recommend/{user_id}/ltr")
+def recommend_tracks_ltr(
+    user_id: RequestText,
+    top_k: PositiveTopK = 10,
+    include_listened: bool = False,
+    diversity: UnitInterval = 0.0,
+    popularity_penalty: UnitInterval = 0.0,
+    explain: bool = False,
+    method: Literal["similarity", "hybrid"] = "similarity",
+    content_weight: UnitInterval | None = None,
+) -> dict[str, object]:
+    """Return LTR re-ranked track recommendations for a user."""
+    try:
+        return get_service().recommend_tracks_ltr(
             user_id=user_id,
             top_k=top_k,
             include_listened=include_listened,
