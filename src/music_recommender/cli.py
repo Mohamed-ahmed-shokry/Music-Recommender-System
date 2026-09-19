@@ -36,12 +36,14 @@ from music_recommender.evaluate import (
     aggregate_ablation_reports,
     build_ablation_settings,
     compare_parameter_settings,
+    evaluate_pareto_frontier,
     evaluate_repeated_holdout,
     ranking_params_for_training,
     select_winning_strategies,
     strategy_leaderboard,
     write_ablation_report,
     write_ablation_summary_report,
+    write_pareto_report,
 )
 from music_recommender.logging_setup import configure_logging
 from music_recommender.metadata import load_and_validate_artist_metadata
@@ -658,6 +660,11 @@ def evaluate(
             "report per-metric impact plus knob importance."
         ),
     ),
+    pareto_frontier: bool = typer.Option(
+        False,
+        "--pareto-frontier/--no-pareto-frontier",
+        help="Sweep multi-objective trade-offs and compute the Pareto frontier.",
+    ),
     report_dir: str = typer.Option(
         str(REPORTS_DIR),
         "--report-dir",
@@ -684,11 +691,22 @@ def evaluate(
         or compare_all
         or promote_winner
         or learn_to_rank
+        or pareto_frontier
     ):
         raise typer.BadParameter(
             "--ablations cannot be combined with --compare-settings,"
-            " --compare-baseline, --compare-all, --promote-winner, or"
-            " --learn-to-rank."
+            " --compare-baseline, --compare-all, --promote-winner,"
+            " --learn-to-rank, or --pareto-frontier."
+        )
+    if pareto_frontier and (
+        compare_settings is not None
+        or compare_baseline
+        or compare_all
+        or promote_winner
+    ):
+        raise typer.BadParameter(
+            "--pareto-frontier cannot be combined with --compare-settings,"
+            " --compare-baseline, --compare-all, or --promote-winner."
         )
     try:
         with tracking_run(
@@ -708,6 +726,7 @@ def evaluate(
                     "use_gpu": use_gpu,
                     "learn_to_rank": learn_to_rank,
                     "ablations": str(ablations),
+                    "pareto_frontier": pareto_frontier,
                     "data_path": str(RAW_DATA_PATH),
                     "metadata_path": str(RAW_METADATA_PATH) if compare_all else None,
                 }
@@ -718,7 +737,20 @@ def evaluate(
                 if compare_all
                 else None
             )
-            if ablations is not None:
+            if pareto_frontier:
+                pareto_report = evaluate_pareto_frontier(
+                    df,
+                    top_k=top_k,
+                    folds=folds,
+                    use_gpu=use_gpu,
+                )
+                tracked_run.log_dict(pareto_report, "evaluation/pareto_frontier.json")
+                tracked_run.set_tags({"analysis": "pareto_frontier"})
+                pareto_report_path = write_pareto_report(
+                    pareto_report,
+                    Path(report_dir),
+                )
+            elif ablations is not None:
                 champion = _parse_parameter_value_dict(ablations)
                 ablation_settings = build_ablation_settings(champion)
                 arm_metrics = compare_parameter_settings(
@@ -778,7 +810,43 @@ def evaluate(
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
-    if ablations is not None:
+    if pareto_frontier:
+        typer.echo(
+            f"Multi-Objective Pareto Frontier Evaluation ({folds} fold(s), "
+            f"top_k={top_k}):"
+        )
+        typer.echo(
+            f"{'Label':<20} {'Weights (Rel/Div/Nov)':<24} "
+            f"{'NDCG@K':<10} {'Diversity':<10} {'Novelty':<10} {'Pareto?'}"
+        )
+        typer.echo("-" * 84)
+        for config in pareto_report["configurations"]:
+            w = config["weights"]
+            weights_str = (
+                f"{w['relevance']:.2f} / {w['diversity']:.2f} / {w['novelty']:.2f}"
+            )
+            is_opt = "*" if config.get("is_pareto_optimal") else ""
+            m = config["metrics"]
+            typer.echo(
+                f"{config['label']:<20} {weights_str:<24} "
+                f"{m.get('ndcg_at_k', 0.0):<10.4f} "
+                f"{m.get('intra_list_diversity', 0.0):<10.4f} "
+                f"{m.get('novelty_at_k', 0.0):<10.4f} {is_opt}"
+            )
+        typer.echo("-" * 84)
+        typer.echo(
+            "* Marked configurations belong to the non-dominated Pareto frontier."
+        )
+        best = pareto_report.get("best_balanced_configuration")
+        if best:
+            bw = best["weights"]
+            typer.echo(
+                f"Best balanced configuration: {best['label']} "
+                f"(relevance={bw['relevance']:.2f}, diversity={bw['diversity']:.2f}, "
+                f"novelty={bw['novelty']:.2f})"
+            )
+        typer.echo(f"Pareto report written to: {pareto_report_path}")
+    elif ablations is not None:
         _print_ablation_report(arm_metrics, top_k, folds)
         typer.echo(f"Ablation report written to: {ablation_report_path}")
     elif compare_settings is not None:

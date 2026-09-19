@@ -146,6 +146,7 @@ def evaluate_track_holdout(
     compare_all: bool = False,
     popularity_penalty: float = 0.0,
     diversity: float = 0.0,
+    novelty_weight: float = 0.0,
     method: str = "similarity",
     content_weight: float = DEFAULT_CONTENT_WEIGHT,
     learn_to_rank: bool = False,
@@ -164,7 +165,12 @@ def evaluate_track_holdout(
     each training fold and used to re-rank the similarity candidates. The
     re-ranked arm is reported under the ``ltr`` key alongside ``similarity``.
     """
-    validate_ranking_parameters(top_k, diversity, popularity_penalty)
+    validate_ranking_parameters(
+        top_k,
+        diversity=diversity,
+        popularity_penalty=popularity_penalty,
+        novelty_weight=novelty_weight,
+    )
     if method not in ("similarity", "hybrid"):
         raise ValueError("method must be one of: similarity, hybrid.")
     validate_content_weight(content_weight)
@@ -259,6 +265,7 @@ def evaluate_track_holdout(
                 track_artist_lookup=track_artist_lookup,
                 artist_taste_per_track=artist_taste_per_track,
                 content_weight=content_weight,
+                novelty_weight=novelty_weight,
             )
             similarity_lists.append(
                 [rec["track_id"] for rec in similarity_recommendations]
@@ -304,6 +311,7 @@ def evaluate_track_holdout(
                     track_artist_lookup=track_artist_lookup,
                     artist_taste_per_track=artist_taste_per_track,
                     content_weight=content_weight,
+                    novelty_weight=novelty_weight,
                 )
                 hybrid_lists.append([rec["track_id"] for rec in hybrid_recommendations])
         similarity_folds.append(

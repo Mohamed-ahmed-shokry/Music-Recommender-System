@@ -4,6 +4,7 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -2139,6 +2140,78 @@ def test_recommend_user_command_with_novelty_weight() -> None:
     assert result.exit_code == 0
     assert "Recommendations for user_1:" in result.output
     assert "1. " in result.output
+
+
+def test_evaluate_command_pareto_frontier(monkeypatch, tmp_path: Path) -> None:
+    fake_report = {
+        "generated_at": "2026-09-19T00:00:00Z",
+        "top_k": 3,
+        "folds": 1,
+        "objectives": ["ndcg_at_k", "intra_list_diversity", "novelty_at_k"],
+        "configurations": [
+            {
+                "label": "relevance_pure",
+                "weights": {"relevance": 1.0, "diversity": 0.0, "novelty": 0.0},
+                "metrics": {
+                    "ndcg_at_k": 0.4,
+                    "intra_list_diversity": 0.1,
+                    "novelty_at_k": 0.05,
+                },
+                "is_pareto_optimal": True,
+            },
+            {
+                "label": "balanced",
+                "weights": {"relevance": 0.4, "diversity": 0.3, "novelty": 0.3},
+                "metrics": {
+                    "ndcg_at_k": 0.35,
+                    "intra_list_diversity": 0.5,
+                    "novelty_at_k": 0.4,
+                },
+                "is_pareto_optimal": True,
+            },
+        ],
+        "pareto_frontier": [
+            {"label": "relevance_pure"},
+            {"label": "balanced"},
+        ],
+        "best_balanced_configuration": {
+            "label": "balanced",
+            "weights": {"relevance": 0.4, "diversity": 0.3, "novelty": 0.3},
+        },
+    }
+
+    monkeypatch.setattr(
+        cli,
+        "load_and_validate_interactions",
+        lambda _: pd.DataFrame({"artist_id": ["artist_1"]}),
+    )
+    monkeypatch.setattr(
+        cli,
+        "evaluate_pareto_frontier",
+        lambda *args, **kwargs: fake_report,
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["evaluate", "--pareto-frontier", "--report-dir", str(tmp_path)],
+    )
+
+    assert result.exit_code == 0
+    assert "Multi-Objective Pareto Frontier Evaluation" in result.output
+    assert "relevance_pure" in result.output
+    assert "balanced" in result.output
+    assert "Best balanced configuration: balanced" in result.output
+    assert (tmp_path / "pareto_frontier.json").exists()
+
+
+def test_evaluate_command_pareto_frontier_rejects_conflicts() -> None:
+    result = runner.invoke(
+        cli.app,
+        ["evaluate", "--pareto-frontier", "--compare-baseline"],
+    )
+
+    assert result.exit_code != 0
+    assert "--pareto-frontier cannot be combined with" in result.output
 
 
 def test_track_recommendations_command_rejects_invalid_method() -> None:

@@ -16,11 +16,13 @@ from music_recommender.evaluate import (
     catalog_coverage,
     compare_parameter_settings,
     evaluate_model,
+    evaluate_pareto_frontier,
     evaluate_repeated_holdout,
     explanation_coverage,
     intra_list_diversity,
     load_ablation_report,
     load_ablation_summary_report,
+    load_pareto_report,
     map_at_k,
     ndcg_at_k,
     novelty_at_k,
@@ -32,6 +34,7 @@ from music_recommender.evaluate import (
     strategy_leaderboard,
     train_test_split_by_user,
     unexpectedness_at_k,
+    write_pareto_report,
 )
 
 
@@ -1065,3 +1068,92 @@ def test_load_ablation_summary_report_raises_on_unrecognized_shape(tmp_path) -> 
 
     with pytest.raises(ValueError, match="not a valid ablation summary"):
         load_ablation_summary_report(summary_path)
+
+
+def test_evaluate_pareto_frontier_identifies_frontier_and_best_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_evaluate_holdout(*args, **kwargs) -> dict[str, float]:
+        rec_kwargs = kwargs.get("recommend_kwargs", {})
+        div = float(rec_kwargs.get("diversity", 0.0))
+        nov = float(rec_kwargs.get("novelty_weight", 0.0))
+        if div == 0.0 and nov == 0.0:
+            return {"ndcg_at_k": 0.9, "intra_list_diversity": 0.1, "novelty_at_k": 0.1}
+        if div == 0.8 and nov == 0.1:
+            return {"ndcg_at_k": 0.3, "intra_list_diversity": 0.85, "novelty_at_k": 0.2}
+        if div == 0.1 and nov == 0.8:
+            return {"ndcg_at_k": 0.3, "intra_list_diversity": 0.2, "novelty_at_k": 0.85}
+        return {"ndcg_at_k": 0.2, "intra_list_diversity": 0.5, "novelty_at_k": 0.1}
+
+    monkeypatch.setattr(
+        evaluate_module,
+        "evaluate_repeated_holdout",
+        fake_evaluate_holdout,
+    )
+
+    df = pd.DataFrame(
+        {"user_id": ["u1", "u1"], "artist_id": ["a1", "a2"], "play_count": [1, 2]}
+    )
+    grid = [
+        {"label": "rel_focus", "diversity": 0.0, "novelty_weight": 0.0},
+        {"label": "div_focus", "diversity": 0.8, "novelty_weight": 0.1},
+        {"label": "nov_focus", "diversity": 0.1, "novelty_weight": 0.8},
+        {"label": "dominated", "diversity": 0.1, "novelty_weight": 0.1},
+    ]
+
+    report = evaluate_pareto_frontier(df=df, top_k=5, weight_grid=grid)
+
+    assert "configurations" in report
+    assert len(report["configurations"]) == 4
+    frontier = report["pareto_frontier"]
+    frontier_labels = {c["label"] for c in frontier}
+    assert "rel_focus" in frontier_labels
+    assert "div_focus" in frontier_labels
+    assert "nov_focus" in frontier_labels
+    assert "dominated" not in frontier_labels
+    assert report["best_balanced_configuration"] is not None
+
+
+def test_evaluate_pareto_frontier_validates_inputs() -> None:
+    df = pd.DataFrame(
+        {"user_id": ["u1", "u1"], "artist_id": ["a1", "a2"], "play_count": [1, 2]}
+    )
+    with pytest.raises(ValueError, match="top_k must be a positive integer"):
+        evaluate_pareto_frontier(df=df, top_k=0)
+
+    with pytest.raises(ValueError, match="weight_grid must not be empty"):
+        evaluate_pareto_frontier(df=df, top_k=5, weight_grid=[])
+
+    with pytest.raises(ValueError, match="folds must be a positive integer"):
+        evaluate_pareto_frontier(df=df, top_k=5, folds=0)
+
+
+def test_write_and_load_pareto_report(tmp_path: Path) -> None:
+    report = {
+        "generated_at": "2026-09-19T00:00:00Z",
+        "top_k": 10,
+        "configurations": [],
+        "pareto_frontier": [{"label": "opt1"}],
+    }
+
+    report_path = write_pareto_report(report, tmp_path)
+    assert report_path.exists()
+
+    loaded = load_pareto_report(report_path)
+    assert loaded["top_k"] == 10
+    assert len(loaded["pareto_frontier"]) == 1
+
+
+def test_load_pareto_report_errors(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="Pareto report not found"):
+        load_pareto_report(tmp_path / "missing.json")
+
+    bad_json = tmp_path / "bad.json"
+    bad_json.write_text("invalid json", encoding="utf-8")
+    with pytest.raises(ValueError, match="Failed to parse Pareto report"):
+        load_pareto_report(bad_json)
+
+    invalid_shape = tmp_path / "invalid.json"
+    invalid_shape.write_text(json.dumps({"some_key": 1}), encoding="utf-8")
+    with pytest.raises(ValueError, match="not a valid Pareto report"):
+        load_pareto_report(invalid_shape)

@@ -454,6 +454,181 @@ def compare_parameter_settings(
     }
 
 
+DEFAULT_PARETO_OBJECTIVES: tuple[str, ...] = (
+    "ndcg_at_k",
+    "intra_list_diversity",
+    "novelty_at_k",
+)
+
+DEFAULT_PARETO_GRID: tuple[dict[str, Any], ...] = (
+    {
+        "label": "relevance_pure",
+        "diversity": 0.0,
+        "novelty_weight": 0.0,
+    },
+    {
+        "label": "relevance_focused",
+        "diversity": 0.15,
+        "novelty_weight": 0.1,
+    },
+    {
+        "label": "balanced",
+        "diversity": 0.3,
+        "novelty_weight": 0.3,
+    },
+    {
+        "label": "diversity_focused",
+        "diversity": 0.6,
+        "novelty_weight": 0.1,
+    },
+    {
+        "label": "novelty_focused",
+        "diversity": 0.1,
+        "novelty_weight": 0.6,
+    },
+    {
+        "label": "exploratory",
+        "diversity": 0.45,
+        "novelty_weight": 0.45,
+    },
+)
+
+
+def evaluate_pareto_frontier(
+    df: pd.DataFrame,
+    top_k: int = 10,
+    weight_grid: Sequence[dict[str, Any]] | None = None,
+    objectives: Sequence[str] | None = None,
+    folds: int = 1,
+    use_gpu: bool = DEFAULT_USE_GPU,
+) -> dict[str, Any]:
+    """Sweep multi-objective ranking configurations and identify the Pareto frontier.
+
+    Parameters:
+        df: Interaction DataFrame to evaluate on.
+        top_k: Number of recommendations per user.
+        weight_grid: List of parameter setting dicts to evaluate.
+        objectives: Metric names defining optimization criteria.
+        folds: Number of evaluation holdout folds.
+        use_gpu: Whether to use GPU acceleration for ALS.
+
+    Returns:
+        Report dictionary containing evaluated configurations with Pareto
+        annotations, the non-dominated Pareto frontier, and the best balanced
+        trade-off configuration.
+    """
+    from music_recommender.multi_objective import compute_pareto_frontier
+
+    validate_ranking_parameters(top_k)
+    if weight_grid is not None and len(weight_grid) == 0:
+        raise ValueError("weight_grid must not be empty.")
+    grid = list(weight_grid if weight_grid is not None else DEFAULT_PARETO_GRID)
+    if type(folds) is not int or folds < 1:
+        raise ValueError("folds must be a positive integer.")
+    if type(use_gpu) is not bool:
+        raise ValueError("use_gpu must be a boolean.")
+
+    target_objectives = list(objectives or DEFAULT_PARETO_OBJECTIVES)
+    records: list[dict[str, Any]] = []
+
+    for item in grid:
+        label = str(item.get("label", f"grid_{len(records) + 1}"))
+        diversity = float(item.get("diversity", 0.0))
+        novelty_weight = float(item.get("novelty_weight", 0.0))
+        popularity_penalty = float(item.get("popularity_penalty", 0.0))
+        include_listened = bool(item.get("include_listened", False))
+
+        recommend_kwargs = {
+            "diversity": diversity,
+            "novelty_weight": novelty_weight,
+            "popularity_penalty": popularity_penalty,
+            "include_listened": include_listened,
+        }
+
+        metrics = cast(
+            dict[str, float],
+            evaluate_repeated_holdout(
+                df=df,
+                top_k=top_k,
+                folds=folds,
+                use_gpu=use_gpu,
+                compare_baseline=False,
+                recommend_kwargs=recommend_kwargs,
+            ),
+        )
+
+        record: dict[str, Any] = {
+            "label": label,
+            "weights": {
+                "relevance": float(max(0.0, 1.0 - diversity - novelty_weight)),
+                "diversity": diversity,
+                "novelty": novelty_weight,
+                "popularity_penalty": popularity_penalty,
+            },
+            "metrics": metrics,
+        }
+        for obj in target_objectives:
+            record[obj] = float(metrics.get(obj, 0.0))
+        records.append(record)
+
+    compute_pareto_frontier(records, target_objectives, maximize=True)
+
+    best_config: dict[str, Any] | None = None
+    best_score = -1.0
+    for record in records:
+        score = float(sum(record.get(obj, 0.0) for obj in target_objectives))
+        record["balanced_score"] = score
+        if score > best_score:
+            best_score = score
+            best_config = record
+
+    pareto_frontier = [r for r in records if r.get("is_pareto_optimal")]
+
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "top_k": top_k,
+        "folds": folds,
+        "objectives": target_objectives,
+        "configurations": records,
+        "pareto_frontier": pareto_frontier,
+        "best_balanced_configuration": best_config,
+    }
+
+
+def write_pareto_report(
+    report: Mapping[str, Any],
+    report_dir: Path,
+    *,
+    report_name: str | None = None,
+) -> Path:
+    """Persist a multi-objective Pareto frontier report as a JSON file."""
+    report_path = report_dir / f"{report_name or 'pareto_frontier'}.json"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_dict = dict(report)
+    report_path.write_text(
+        json.dumps(report_dict, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return report_path
+
+
+def load_pareto_report(report_path: Path) -> dict[str, Any]:
+    """Load and validate a persisted multi-objective Pareto frontier report."""
+    if not report_path.exists():
+        raise FileNotFoundError(f"Pareto report not found: {report_path}")
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            f"Failed to parse Pareto report '{report_path}': {error}"
+        ) from error
+    if not isinstance(report, dict) or "pareto_frontier" not in report:
+        raise ValueError(
+            f"'{report_path}' is not a valid Pareto report (missing 'pareto_frontier')."
+        )
+    return report
+
+
 _QUALITY_METRICS: tuple[str, ...] = (
     "precision_at_k",
     "recall_at_k",
@@ -468,7 +643,7 @@ _QUALITY_METRICS: tuple[str, ...] = (
 )
 
 _RANKING_PARAM_KEYS: frozenset[str] = frozenset(
-    {"popularity_penalty", "diversity", "include_listened"}
+    {"popularity_penalty", "diversity", "include_listened", "novelty_weight"}
 )
 
 
@@ -535,6 +710,7 @@ _RANKING_NEUTRAL_VALUES: dict[str, float | bool] = {
     "popularity_penalty": 0.0,
     "diversity": 0.0,
     "include_listened": False,
+    "novelty_weight": 0.0,
 }
 
 
@@ -570,7 +746,9 @@ def build_ablation_settings(
             **champion,
             knob: _RANKING_NEUTRAL_VALUES[knob],
         }
-    settings[ABLATION_ALL_NEUTRAL_LABEL] = {**champion, **_RANKING_NEUTRAL_VALUES}
+    settings[ABLATION_ALL_NEUTRAL_LABEL] = {
+        key: _RANKING_NEUTRAL_VALUES[key] for key in champion
+    }
     return settings
 
 

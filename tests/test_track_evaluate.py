@@ -491,3 +491,28 @@ def test_evaluate_track_holdout_rejects_invalid_learn_to_rank() -> None:
         )
 
 
+def test_evaluate_track_holdout_with_novelty_weight() -> None:
+    metrics = evaluate_track_holdout(
+        track_df(),
+        track_meta_df(),
+        top_k=2,
+        folds=1,
+        novelty_weight=0.3,
+        compare_all=True,
+    )
+    assert isinstance(metrics, dict)
+    assert "similarity" in metrics
+    assert "hybrid" in metrics
+    assert "novelty_at_k" in metrics["similarity"]
+
+
+def test_evaluate_track_holdout_rejects_invalid_novelty_weight() -> None:
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        evaluate_track_holdout(
+            track_df(),
+            track_meta_df(),
+            top_k=2,
+            novelty_weight=1.5,
+        )
+
+
