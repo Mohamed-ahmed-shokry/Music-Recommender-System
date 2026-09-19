@@ -90,7 +90,8 @@ with the same columns.
 | Continuous integration | Locked install, formatting, lint, tests, package build, and container smoke test |
 | Interactive product | Streamlit studio for personalized, profile, session, similarity, and catalog exploration |
 | Cold start | Unknown users receive popular fallback or profile/session-based recommendations |
-| Ranking controls | Optional listened-item inclusion, popularity penalty, diversity reranking |
+| Ranking controls | Optional listened-item inclusion, popularity penalty, diversity reranking, and novelty weight |
+| Multi-objective ranking | Scalarized re-ranking and non-dominated Pareto frontier sweeps over accuracy, diversity, and novelty |
 | Evaluation | ALS, popularity, content, and hybrid metrics with novelty and explanations |
 | Learning to rank | Ridge re-ranker over collaborative/popularity/user features, served via CLI, API, and dashboard |
 | Quality gates | A/B compare-settings with `--promote-winner` and `--min-quality-threshold` CI gate |
@@ -322,10 +323,10 @@ Recommend with hybrid score explanations:
 uv run python -m music_recommender.cli recommend-user --user-id user_1 --top-k 10 --content-weight 0.25 --explain
 ```
 
-Recommend with reranking controls:
+Recommend with reranking controls (diversity, popularity penalty, and novelty):
 
 ```bash
-uv run python -m music_recommender.cli recommend-user --user-id user_1 --top-k 10 --content-weight 0.25 --diversity 0.2 --popularity-penalty 0.1
+uv run python -m music_recommender.cli recommend-user --user-id user_1 --top-k 10 --content-weight 0.25 --diversity 0.2 --popularity-penalty 0.1 --novelty-weight 0.15
 ```
 
 Include artists the user already listened to:
@@ -499,8 +500,9 @@ diversity, matching the artist-side knobs, show why each track was
 recommended, or blend collaborative artist taste into the ranking:
 
 ```bash
-uv run python -m music_recommender.cli track-recommendations --user-id user_1 --top-k 10 --popularity-penalty 0.3 --diversity 0.5 --explain
+uv run python -m music_recommender.cli track-recommendations --user-id user_1 --top-k 10 --popularity-penalty 0.3 --diversity 0.5 --novelty-weight 0.2 --explain
 uv run python -m music_recommender.cli track-recommendations --user-id user_1 --top-k 10 --method hybrid --content-weight 0.5
+uv run python -m music_recommender.cli track-recommendations --user-id user_1 --top-k 10 --ltr
 ```
 
 Users with a profile but no track history get popularity fallbacks so track
@@ -581,6 +583,18 @@ similarity pipeline, prints side-by-side metric comparison tables with per-metri
 and saves a persistent standardized report to `reports/surface_comparison.json`
 (override with `--report-dir` or `--report-name`).
 
+Sweep multi-objective ranking configurations across holdouts and identify the
+non-dominated Pareto frontier balancing relevance, diversity, and novelty:
+
+```bash
+uv run python -m music_recommender.cli evaluate --pareto-frontier
+uv run python -m music_recommender.cli evaluate --pareto-frontier --report-dir reports/
+```
+
+`--pareto-frontier` evaluates configurations across holdouts, displays formatted
+comparison tables with Pareto-optimal annotations, prints the best balanced
+configuration, and persists the results to `reports/pareto_frontier.json`.
+
 Track evaluation reports land in `reports/` as JSON (`track_evaluation.json`
 by default), recording the run configuration and per-arm metrics. Specify
 `--report-dir` to customize the output directory.
@@ -607,9 +621,10 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/evaluation/ablation-summary` | Persisted aggregated knob-importance summary |
 | `GET` | `/catalog/artists?query=pop&limit=25` | Search and page through artists and metadata |
 | `GET` | `/popular-artists?top_k=10` | Popular artist recommendations |
-| `GET` | `/recommend/user/{user_id}?top_k=10&content_weight=0.25&explain=true` | Hybrid personalized or fallback recommendations |
-| `GET` | `/recommend/user/{user_id}/ltr?top_k=10&diversity=0.2&popularity_penalty=0.1` | LTR re-ranked personalized recommendations |
-| `GET` | `/tracks/recommend/{user_id}?top_k=10&popularity_penalty=0.1&diversity=0.2&explain=true&method=hybrid&content_weight=0.5` | Track recommendations with audio-feature similarity, optional hybrid artist-taste blend, ranking knobs, and explanations |
+| `GET` | `/recommend/user/{user_id}?top_k=10&content_weight=0.25&explain=true&novelty_weight=0.1` | Hybrid personalized or fallback recommendations |
+| `GET` | `/recommend/user/{user_id}/ltr?top_k=10&diversity=0.2&popularity_penalty=0.1&novelty_weight=0.1` | LTR re-ranked personalized recommendations |
+| `GET` | `/tracks/recommend/{user_id}?top_k=10&popularity_penalty=0.1&diversity=0.2&novelty_weight=0.1&explain=true&method=hybrid&content_weight=0.5` | Track recommendations with audio-feature similarity, optional hybrid artist-taste blend, ranking knobs, and explanations |
+| `GET` | `/tracks/recommend/{user_id}/ltr?top_k=10&popularity_penalty=0.1&diversity=0.2&novelty_weight=0.1` | LTR re-ranked track recommendations |
 | `GET` | `/tracks/similar/{track_id}?top_k=10` | Tracks similar to a selected track by audio features |
 | `GET` | `/tracks/popular?top_k=10` | Popular track recommendations |
 | `GET` | `/tracks/catalog?query=hit&artist=Drake&limit=25` | Search and page through the track catalog |
@@ -1307,7 +1322,16 @@ See [PLAN.md](PLAN.md) for the full phased plan.
   fold and re-rank candidate tracks via `evaluate-tracks --learn-to-rank`. ✓ (0.17.0)
 - Cross-surface evaluation parity reporting: evaluate artist and track
   recommendation surfaces on equivalent holdouts side by side via `evaluate-surfaces`. ✓ (0.17.0)
-- Next: multi-objective candidate re-ranking and online bandit exploration.
+- Track LTR model serving parity: bundle track LTR ranker into artifact bundle,
+  serve via `RecommenderService.recommend_tracks_ltr`, and expose via
+  `GET /recommend/tracks/{user_id}/ltr`, `track-recommendations --ltr`, and Streamlit UI toggle. ✓ (0.18.0)
+- Multi-objective re-ranking and Pareto frontier engine: scalarized re-ranking
+  balancing relevance, diversity, and novelty, with non-dominated Pareto frontier extraction (`multi_objective.py`). ✓ (0.18.0)
+- Global novelty weight control: configurable `novelty_weight` exposed across artist
+  and track recommendation services, FastAPI endpoints, CLI flags, and dashboard sliders. ✓ (0.18.0)
+- Multi-objective Pareto frontier evaluation: grid sweep, Pareto frontier identification,
+  and `evaluate --pareto-frontier` CLI command with persistent reports. ✓ (0.18.0)
+- Next: online contextual bandit simulation for cold-start exploration and two-tower neural retrieval.
 
 
 ## License

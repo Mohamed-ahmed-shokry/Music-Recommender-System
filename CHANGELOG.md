@@ -7,6 +7,33 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-19
+
+### Added
+
+- Track-side Learning-to-Rank (LTR) Serving Parity:
+  - Artifact bundle persistence: `train_track_ltr_ranker` output is bundled into `ArtifactBundle` (`track_ltr_ranker` / `track_ltr_ranker.joblib`).
+  - Serving service integration: `RecommenderService.recommend_tracks_ltr` generates candidate recommendations and re-ranks them using the persisted track LTR model, falling back gracefully to similarity or popular tracks.
+  - API endpoint: `GET /recommend/tracks/{user_id}/ltr` (and alias `GET /tracks/recommend/{user_id}/ltr`) with full parameter validation and error handling.
+  - CLI flag: `track-recommendations --ltr` to request LTR re-ranked track recommendations directly from the command line.
+  - Streamlit dashboard: interactive toggle in the Track Recommendations tab enabling LTR re-ranking alongside existing ranking controls.
+- Multi-Objective Re-Ranking & Pareto Frontier Engine:
+  - `multi_objective.py` engine implementing scalarized multi-objective re-ranking (`re_rank_multi_objective`) balancing relevance, diversity, and novelty.
+  - Dominance analysis: `dominates` and `compute_pareto_frontier` algorithms identifying the non-dominated Pareto frontier and finding the best balanced configuration across multi-dimensional objectives.
+- Global Novelty Weight Control:
+  - `novelty_weight` parameter added across all recommendation methods in `RecommenderService` (`recommend_user`, `recommend_user_als`, `recommend_user_ltr`, `recommend_session`, `recommend_tracks`, `recommend_tracks_ltr`).
+  - FastAPI query parameter `novelty_weight: UnitInterval = 0.0` exposed across artist and track recommendation endpoints.
+  - CLI flags: `--novelty-weight` added to `recommend-user` and `track-recommendations`.
+  - Streamlit dashboard: interactive Novelty Weight sliders added to Personalized and Track recommendation interfaces.
+- Multi-Objective Pareto Frontier Evaluation:
+  - `evaluate_pareto_frontier`, `write_pareto_report`, and `load_pareto_report` in `evaluate.py` performing multi-dimensional grid sweeps over relevance, diversity, and novelty, extracting the Pareto frontier and identifying the best balanced trade-off.
+  - CLI command: `evaluate --pareto-frontier` rendering detailed configuration evaluation tables, annotating Pareto-optimal configs, and persisting standardized JSON reports to `reports/pareto_frontier.json`.
+  - Track holdout evaluation parity: `evaluate_track_holdout` accepts `novelty_weight`, propagating it to similarity and hybrid candidate recommendation arms.
+
+### Tests
+
+- 723 tests, 96.8% statement coverage; added comprehensive unit, service, API, and CLI test suites for track LTR serving, scalarized multi-objective re-ranking, Pareto frontier extraction, novelty weighting, and Pareto evaluation sweeps.
+
 ## [0.17.0] - 2026-09-18
 
 ### Added

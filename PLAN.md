@@ -155,7 +155,7 @@ It is updated incrementally as phases land.
 - Phase 54 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to
   0.16.0.
 
-## Current milestone (0.17.0) — shipped
+## Completed (0.17.0 era)
 
 - Phase 55 — Track LTR re-ranker: `train_track_ltr_ranker` and `rank_tracks_with_ltr`
   in `ltr.py`, training a pointwise Ridge model using content similarity, log plays,
@@ -172,10 +172,25 @@ It is updated incrementally as phases land.
   JSON reports. (commit `c3cc8ac`)
 - Phase 59 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to 0.17.0.
 
-## Next steps (after 0.17.0)
+## Current milestone (0.18.0) — shipped
 
-1. Multi-objective candidate re-ranking (balancing accuracy, diversity, and novelty Pareto frontiers).
-2. Online contextual bandit simulation for cold-start exploration.
+- Phase 60 — Track LTR model serving parity: include track LTR ranker in artifact
+  bundle and serve via `RecommenderService.recommend_tracks_ltr`. (commit `4afbd34`)
+- Phase 61 — Track LTR API, CLI, and Dashboard: `GET /recommend/tracks/{user_id}/ltr`,
+  `track-recommendations --ltr`, and Streamlit UI toggle. (commit `92fd72e`)
+- Phase 62 — Multi-objective candidate re-ranking & Pareto frontier engine:
+  `multi_objective.py` implementing scalarized re-ranking, dominance checks, and
+  Pareto frontier computation. (commit `0978d99`)
+- Phase 63 — Global novelty weight controls across all recommendation surfaces:
+  service, API, CLI (`--novelty-weight`), and dashboard sliders. (commit `1855c5c`)
+- Phase 64 — Multi-objective Pareto frontier evaluation and CLI: `evaluate_pareto_frontier`,
+  `evaluate --pareto-frontier` command, and track evaluation parity. (commit `ee6ecd0`)
+- Phase 65 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to 0.18.0.
+
+## Next steps (after 0.18.0)
+
+1. Online contextual bandit simulation for cold-start exploration.
+2. Two-tower neural candidate retrieval (PyTorch / ONNX runtime).
 
 ## Quality gates (every change)
 
