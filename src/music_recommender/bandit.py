@@ -161,9 +161,7 @@ def rank_cold_start_arm(
         return []
 
     scores = _arm_full_scores(arm, artist_stats)
-    ranked = sorted(
-        scores.items(), key=lambda item: (-item[1], item[0])
-    )[:top_k]
+    ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))[:top_k]
     recommendations: list[dict[str, str | float | int]] = []
     for artist_id, adjusted in ranked:
         stats = artist_stats[artist_id]
@@ -495,9 +493,9 @@ def rank_cold_start_bandit(
                 candidate_scores.get(artist_id, 0.0) + weight * position_score
             )
 
-    ranked = sorted(
-        candidate_scores.items(), key=lambda item: (-item[1], item[0])
-    )[:top_k]
+    ranked = sorted(candidate_scores.items(), key=lambda item: (-item[1], item[0]))[
+        :top_k
+    ]
     recommendations: list[dict[str, str | float | int]] = []
     for artist_id, blended_score in ranked:
         stats = artist_stats[artist_id]
@@ -547,8 +545,6 @@ def load_cold_start_policy(policy_path: Path | str) -> dict[str, float]:
     try:
         normalized = {str(arm): float(weight) for arm, weight in policy.items()}
     except (TypeError, ValueError) as error:
-        raise ValueError(
-            f"'{path}' contains non-numeric policy weights."
-        ) from error
+        raise ValueError(f"'{path}' contains non-numeric policy weights.") from error
     _validate_policy(normalized)
     return normalized

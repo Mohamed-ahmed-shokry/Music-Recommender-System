@@ -289,9 +289,7 @@ class TestDeriveColdStartPolicy:
         with pytest.raises(ValueError, match="'arms'"):
             derive_cold_start_policy({"summary": {}})
         with pytest.raises(ValueError, match="Unknown arm"):
-            derive_cold_start_policy(
-                {"arms": {"fake": {"mean_reward": 0.5}}}
-            )
+            derive_cold_start_policy({"arms": {"fake": {"mean_reward": 0.5}}})
         with pytest.raises(ValueError, match="finite"):
             derive_cold_start_policy(
                 {"arms": {"popular": {"mean_reward": float("nan")}}}
@@ -315,9 +313,7 @@ class TestRankColdStartBandit:
 
     def test_balanced_blend_respects_top_k(self) -> None:
         stats = _artist_stats()
-        blended = rank_cold_start_bandit(
-            {"popular": 0.5, "long_tail": 0.5}, stats, 4
-        )
+        blended = rank_cold_start_bandit({"popular": 0.5, "long_tail": 0.5}, stats, 4)
         assert len(blended) == 4
         assert len({r["artist_id"] for r in blended}) == 4
 
