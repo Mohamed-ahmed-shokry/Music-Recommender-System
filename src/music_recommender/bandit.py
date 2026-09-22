@@ -277,6 +277,159 @@ def load_bandit_state(state_path: Path | str) -> dict[str, Any]:
     return state
 
 
+def _feedback_record_context(
+    record: dict[str, Any], dim: int | None = None
+) -> np.ndarray:
+    """Extract and validate the context vector from a feedback record."""
+    context = record.get("context")
+    try:
+        context_array = np.asarray(context, dtype=float)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "Feedback record 'context' must be a numeric vector."
+        ) from error
+    if context_array.ndim != 1 or context_array.size == 0:
+        raise ValueError("Feedback record 'context' must be a non-empty vector.")
+    if dim is not None and context_array.size != dim:
+        raise ValueError(
+            f"Feedback context has {context_array.size} features; expected {dim}."
+        )
+    return context_array
+
+
+def _validate_feedback_record(record: dict[str, Any]) -> None:
+    if not isinstance(record, dict):
+        raise ValueError("Feedback records must be dictionaries.")
+    if "context" not in record:
+        raise ValueError("Feedback record is missing 'context'.")
+    if "arm" not in record:
+        raise ValueError("Feedback record is missing 'arm'.")
+    if "reward" not in record:
+        raise ValueError("Feedback record is missing 'reward'.")
+    _feedback_record_context(record)
+    _validate_arms([str(record["arm"])])
+    reward = record["reward"]
+    if not isinstance(reward, (int, float)) or not np.isfinite(reward):
+        raise ValueError("Feedback record 'reward' must be a finite number.")
+
+
+def append_bandit_feedback(
+    record: dict[str, Any],
+    path: Path | str,
+) -> Path:
+    """Append a served-request observation to the feedback journal.
+
+    The journal is a JSON list of ``{context, arm, reward}`` records, matching
+    the per-round observations recorded by the simulation, so live serving
+    feedback and offline report rounds can be folded into a state together.
+    """
+    _validate_feedback_record(record)
+    target = Path(path)
+    existing: list[dict[str, Any]] = []
+    if target.exists():
+        try:
+            existing = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise ValueError(
+                f"Failed to parse bandit feedback journal '{target}': {error}"
+            ) from error
+        if not isinstance(existing, list):
+            raise ValueError(
+                f"'{target}' is not a bandit feedback journal (JSON list)."
+            )
+
+    entry = {
+        "context": [float(value) for value in _feedback_record_context(record)],
+        "arm": str(record["arm"]),
+        "reward": float(record["reward"]),
+    }
+    if "occurred_at" in record:
+        entry["occurred_at"] = str(record["occurred_at"])
+    if "user_id" in record:
+        entry["user_id"] = str(record["user_id"])
+    target.parent.mkdir(parents=True, exist_ok=True)
+    existing.append(entry)
+    target.write_text(
+        json.dumps(existing, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return target
+
+
+def load_bandit_feedback(path: Path | str) -> list[dict[str, Any]]:
+    """Load and validate a bandit feedback journal."""
+    target = Path(path)
+    if not target.exists():
+        raise FileNotFoundError(f"Bandit feedback journal not found: {target}")
+    try:
+        records = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            f"Failed to parse bandit feedback journal '{target}': {error}"
+        ) from error
+    if not isinstance(records, list):
+        raise ValueError(f"'{target}' is not a bandit feedback journal (JSON list).")
+    for record in records:
+        _validate_feedback_record(record)
+    return records
+
+
+def fold_bandit_state(
+    state: dict[str, Any],
+    feedback: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    """Fold served-request observations into a bandit state, returning the update.
+
+    Each feedback record is applied to the prior state by replaying the
+    engine's additive ridge-regression update (``A += x x^T``, ``b += r x``,
+    tally increments), exactly as a live run would have learned it. The
+    returned state reflects the accumulated experience and is ready to act as
+    the next simulation's prior.
+    """
+    bandit = LinUCBContextualBandit.from_state(state)
+    for record in feedback:
+        _validate_feedback_record(record)
+        _validate_arms([str(record["arm"])])
+        if str(record["arm"]) not in set(bandit.arms):
+            raise ValueError(
+                f"Feedback names arm '{record['arm']}' which is not in the state."
+            )
+        context = _feedback_record_context(record, dim=bandit.context_dim)
+        bandit.update(
+            str(record["arm"]),
+            [float(value) for value in context],
+            float(record["reward"]),
+        )
+    return snapshot_bandit_state(bandit)
+
+
+def feedback_from_report(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract per-round served observations from a bandit report.
+
+    Requires the report to carry the per-round ``context`` vector, which the
+    simulation records so reports can be replayed as offline feedback.
+    """
+    rounds = report.get("rounds")
+    if not isinstance(rounds, list):
+        raise ValueError("Bandit report must contain a 'rounds' list.")
+    extracted: list[dict[str, Any]] = []
+    for item in rounds:
+        if not isinstance(item, dict) or "context" not in item:
+            raise ValueError(
+                "Bandit report rounds are missing 'context'; re-run the "
+                "simulation with a version that records per-round contexts."
+            )
+        record = {
+            "context": list(item["context"]),
+            "arm": str(item["arm"]),
+            "reward": float(item["reward"]),
+        }
+        if "user_id" in item:
+            record["user_id"] = str(item["user_id"])
+        extracted.append(record)
+    return extracted
+
+
 def rank_cold_start_arm(
     arm: str,
     artist_stats: dict[str, dict[str, Any]],

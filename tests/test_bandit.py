@@ -15,8 +15,12 @@ from music_recommender import cli
 from music_recommender.bandit import (
     DEFAULT_COLD_START_ARMS,
     LinUCBContextualBandit,
+    append_bandit_feedback,
     build_cold_start_context,
     derive_cold_start_policy,
+    feedback_from_report,
+    fold_bandit_state,
+    load_bandit_feedback,
     load_bandit_report,
     load_bandit_state,
     load_cold_start_policy,
@@ -587,3 +591,159 @@ class TestCLIBanditPolicy:
         )
         assert result.exit_code == 1
         assert "Error:" in result.output
+
+
+class TestFeedbackJournal:
+    def test_append_and_load(self, tmp_path: Path) -> None:
+        journal = tmp_path / "feedback.json"
+        entry = {"context": [1.0, 0.5], "arm": "popular", "reward": 0.5}
+
+        first = append_bandit_feedback(entry, journal)
+        assert first == journal
+        append_bandit_feedback(
+            {"context": [0.2, 0.8], "arm": "long_tail", "reward": 1.0},
+            journal,
+        )
+
+        records = load_bandit_feedback(journal)
+        assert len(records) == 2
+        assert records[0]["arm"] == "popular"
+        assert records[1]["arm"] == "long_tail"
+        assert records[1]["reward"] == 1.0
+
+    def test_append_preserves_optional_fields(self, tmp_path: Path) -> None:
+        journal = tmp_path / "feedback.json"
+        append_bandit_feedback(
+            {
+                "context": [1.0],
+                "arm": "balanced",
+                "reward": 0.0,
+                "user_id": "u1",
+                "occurred_at": "2024-01-01T00:00:00+00:00",
+            },
+            journal,
+        )
+        records = load_bandit_feedback(journal)
+        assert records[0]["user_id"] == "u1"
+        assert records[0]["occurred_at"] == "2024-01-01T00:00:00+00:00"
+
+    def test_append_validates_record(self, tmp_path: Path) -> None:
+        journal = tmp_path / "feedback.json"
+        with pytest.raises(ValueError, match="arm"):
+            append_bandit_feedback({"context": [1.0], "reward": 0.5}, journal)
+        with pytest.raises(ValueError, match="finite"):
+            append_bandit_feedback(
+                {"context": [1.0], "arm": "popular", "reward": float("nan")},
+                journal,
+            )
+        with pytest.raises(ValueError, match="Unknown arm"):
+            append_bandit_feedback(
+                {"context": [1.0], "arm": "fake", "reward": 0.5}, journal
+            )
+
+    def test_append_rejects_corrupt_journal(self, tmp_path: Path) -> None:
+        journal = tmp_path / "feedback.json"
+        journal.write_text("{nope", encoding="utf-8")
+        with pytest.raises(ValueError, match="Failed to parse"):
+            append_bandit_feedback(
+                {"context": [1.0], "arm": "popular", "reward": 0.5}, journal
+            )
+
+    def test_load_rejects_invalid(self, tmp_path: Path) -> None:
+        journal = tmp_path / "feedback.json"
+        journal.write_text(json.dumps({"not": "a list"}), encoding="utf-8")
+        with pytest.raises(ValueError, match="JSON list"):
+            load_bandit_feedback(journal)
+
+        with pytest.raises(FileNotFoundError, match="not found"):
+            load_bandit_feedback(tmp_path / "missing.json")
+
+
+class TestFoldBanditState:
+    def test_fold_matches_direct_updates(self) -> None:
+        bandit = LinUCBContextualBandit(("popular", "long_tail"), 2, alpha=0.5)
+        feedback = [
+            {"context": [1.0, 0.5], "arm": "popular", "reward": 0.8},
+            {"context": [0.1, 0.9], "arm": "long_tail", "reward": 0.2},
+            {"context": [1.0, 0.5], "arm": "popular", "reward": 1.0},
+        ]
+        for record in feedback:
+            bandit.update(record["arm"], record["context"], record["reward"])
+
+        fresh = snapshot_bandit_state(
+            LinUCBContextualBandit(("popular", "long_tail"), 2, alpha=0.5)
+        )
+        folded = fold_bandit_state(fresh, feedback)
+
+        assert folded["config"]["alpha"] == 0.5
+        for arm in ("popular", "long_tail"):
+            assert folded["arms"][arm]["selections"] == bandit.selections[arm]
+            assert folded["arms"][arm]["rewards"] == pytest.approx(
+                bandit.rewards[arm], abs=1e-9
+            )
+            assert np.allclose(folded["arms"][arm]["a"], bandit._a[arm])
+            assert np.allclose(folded["arms"][arm]["b"], bandit._b[arm])
+
+    def test_fold_accumulates_over_prior_state(self) -> None:
+        bandit = _trained_bandit()
+        prior = snapshot_bandit_state(bandit)
+        feedback = [
+            {"context": [1.0, 0.5], "arm": "popular", "reward": 0.5},
+            {"context": [0.4, 0.6], "arm": "long_tail", "reward": 1.0},
+        ]
+        updated = fold_bandit_state(prior, feedback)
+        assert updated["arms"]["popular"]["selections"] == (
+            prior["arms"]["popular"]["selections"] + 1
+        )
+        assert updated["arms"]["long_tail"]["selections"] == (
+            prior["arms"]["long_tail"]["selections"] + 1
+        )
+        assert updated["arms"]["long_tail"]["rewards"] == pytest.approx(
+            prior["arms"]["long_tail"]["rewards"] + 1.0, abs=1e-9
+        )
+
+    def test_fold_empty_feedback_is_identity(self) -> None:
+        bandit = _trained_bandit()
+        prior = snapshot_bandit_state(bandit)
+        updated = fold_bandit_state(prior, [])
+        assert updated["arms"] == prior["arms"]
+
+    def test_fold_validation(self) -> None:
+        bandit = LinUCBContextualBandit(("popular",), 2, alpha=0.5)
+        prior = snapshot_bandit_state(bandit)
+        with pytest.raises(ValueError, match="not in the state"):
+            fold_bandit_state(
+                prior,
+                [{"context": [1.0, 0.5], "arm": "long_tail", "reward": 0.5}],
+            )
+        with pytest.raises(ValueError, match="expected 2"):
+            fold_bandit_state(
+                prior, [{"context": [1.0], "arm": "popular", "reward": 0.5}]
+            )
+
+
+class TestFeedbackFromReport:
+    def test_extracts_rounds_with_context(self) -> None:
+        report = {
+            "rounds": [
+                {
+                    "arm": "popular",
+                    "reward": 0.5,
+                    "context": [1.0, 2.0],
+                    "user_id": "u1",
+                },
+                {"arm": "long_tail", "reward": 1.0, "context": [0.5, 0.5]},
+            ]
+        }
+        feedback = feedback_from_report(report)
+        assert len(feedback) == 2
+        assert feedback[0]["arm"] == "popular"
+        assert feedback[0]["user_id"] == "u1"
+        assert feedback[1]["reward"] == 1.0
+
+    def test_requires_context_in_rounds(self) -> None:
+        report = {"rounds": [{"arm": "popular", "reward": 0.5}]}
+        with pytest.raises(ValueError, match="missing 'context'"):
+            feedback_from_report(report)
+        with pytest.raises(ValueError, match="'rounds' list"):
+            feedback_from_report({"summary": {}})
