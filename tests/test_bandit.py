@@ -58,9 +58,7 @@ def _artist_stats() -> dict[str, dict[str, object]]:
 
 class TestLinUCBContextualBandit:
     def test_select_and_update_arms(self) -> None:
-        bandit = LinUCBContextualBandit(
-            ("popular", "balanced", "long_tail"), 2
-        )
+        bandit = LinUCBContextualBandit(("popular", "balanced", "long_tail"), 2)
         context = [1.0, 0.5]
         for _ in range(30):
             arm = bandit.select_arm(context)
@@ -114,9 +112,7 @@ class TestLinUCBContextualBandit:
 class TestRankColdStartArm:
     def test_popular_arm_matches_popular_artists(self) -> None:
         stats = _artist_stats()
-        assert rank_cold_start_arm("popular", stats, 5) == popular_artists(
-            stats, 5
-        )
+        assert rank_cold_start_arm("popular", stats, 5) == popular_artists(stats, 5)
 
     def test_arm_ordering_and_top_k(self) -> None:
         stats = _artist_stats()
@@ -164,7 +160,7 @@ class TestBuildColdStartContext:
 
 def _run_simulation(**overrides: object) -> dict[str, object]:
     df = _interactions_df()
-    params: dict[str, object] = dict(top_k=5, rounds=30, seed=1)
+    params: dict[str, object] = {"top_k": 5, "rounds": 30, "seed": 1}
     params.update(overrides)
     return simulate_cold_start_exploration(df, **params)  # type: ignore[arg-type]
 
@@ -210,9 +206,7 @@ class TestSimulateColdStartExploration:
 
     def test_all_arms_selected_given_temperature(self) -> None:
         report = _run_simulation(seed=1)
-        assert all(
-            arm_stats["selections"] > 0 for arm_stats in report["arms"].values()
-        )
+        assert all(arm_stats["selections"] > 0 for arm_stats in report["arms"].values())
 
     def test_validation_errors(self) -> None:
         df = _interactions_df()
@@ -221,17 +215,13 @@ class TestSimulateColdStartExploration:
         with pytest.raises(ValueError, match="Unknown arm"):
             simulate_cold_start_exploration(df, top_k=5, rounds=1, arms=("fake",))
         with pytest.raises(ValueError, match="holdout_ratio"):
-            simulate_cold_start_exploration(
-                df, top_k=5, rounds=1, holdout_ratio=1.2
-            )
+            simulate_cold_start_exploration(df, top_k=5, rounds=1, holdout_ratio=1.2)
 
 
 class TestBanditReportIO:
     def test_report_roundtrip(self, tmp_path: Path) -> None:
         report = _run_simulation(seed=1)
-        written = write_bandit_report(
-            report, tmp_path, report_name="cold_start"
-        )
+        written = write_bandit_report(report, tmp_path, report_name="cold_start")
         assert written.exists()
         assert written.name == "cold_start.json"
 
