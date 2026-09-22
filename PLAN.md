@@ -187,7 +187,7 @@ It is updated incrementally as phases land.
   `evaluate --pareto-frontier` command, and track evaluation parity. (commit `ee6ecd0`)
 - Phase 65 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to 0.18.0.
 
-## Current milestone (0.21.0) — in progress
+## Previous milestone (0.21.0) — shipped
 
 Online bandit updates from live serving feedback: the LinUCB engine's learned
 state (ridge-statistics A/b, selection counts, cumulative rewards) becomes a
@@ -203,6 +203,7 @@ from its report) starts from accumulated experience instead of scratch.
     full validation so a restored engine is byte-identical in behavior.
   - `write_bandit_state` / `load_bandit_state`: persistent JSON state files
     mirroring the report/policy I/O pattern; default `reports/bandit_state.json`.
+    (commit `17642e8`)
 - Phase 76 — Feedback journal and additive fold:
   - `append_bandit_feedback` / `load_bandit_feedback`: append/read served-
     request observations `{context, arm, reward}` at `reports/bandit_feedback.json`.
@@ -210,22 +211,23 @@ from its report) starts from accumulated experience instead of scratch.
     replaying the engine's additive ridge regression (`A += x xᵀ`,
     `b += r x`, tally increments), returning an updated prior.
   - `feedback_from_report`: extract round observations from a bandit report so
-    offline batches can be folded too.
+    offline batches can be folded too. (commit `96db512`)
 - Phase 77 — Simulation from a prior:
   - `simulate_cold_start_exploration` gains `initial_state`; round records now
     carry the `context` vector so reports are replayable as feedback. Report
-    arms statistics accumulate prior + new learning.
+    config records `prior` selections/rewards and arms statistics accumulate
+    prior + new learning. (commit `d54a919`)
 - Phase 78 — CLI wiring:
   - `simulate-bandit --from-state` (resume learning from a persisted state), and
     `--write-state` writes the trained state to `reports/bandit_state.json`.
   - New `bandit-update` command folding a report or journal into a prior state
-    (defaults to the persisted state), printing per-arm before/after stats.
+    (defaults to the persisted state), printing per-arm stats.
   - New `record-bandit-feedback` command appending a served-request observation
-    to the feedback journal.
+    to the feedback journal. (commits `8fe81c1`, `9e19f5b`)
 - Phase 79 — Tests: state snapshot/restore roundtrips and validation, additive
   fold correctness vs. direct engine updates, feedback journal append/load,
   report-context extraction, prior-seeded simulation determinism and cumulative
-  stats, CLI wiring and error paths.
+  stats, CLI wiring and error paths. (796 tests total)
 - Phase 80 — Docs and release: PLAN, README (feedback loop), CHANGELOG, version
   bump to 0.21.0.
 

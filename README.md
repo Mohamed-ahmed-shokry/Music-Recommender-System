@@ -627,6 +627,37 @@ auto-load used by the API and dashboard) serves unknown users with strategy
 arm rankings; without a policy file, the previous `popular_fallback` behavior is
 preserved. Pass `--cold-start-policy-path` to serve with an explicit policy file.
 
+### Online bandit feedback loop
+
+The LinUCB engine's learned state is a persisted, mergeable prior, so live
+feedback keeps accumulating across runs:
+
+```bash
+# persist the trained engine state alongside the report
+uv run python -m music_recommender.cli simulate-bandit --top-k 10 --rounds 100 \
+  --alpha 0.5 --write-state reports/bandit_state.json
+
+# resume a later simulation from accumulated experience
+uv run python -m music_recommender.cli simulate-bandit --top-k 10 --rounds 100 \
+  --alpha 0.5 --from-state reports/bandit_state.json
+
+# record the reward observed for a served request that used the bandit
+uv run python -m music_recommender.cli record-bandit-feedback \
+  --context 0.72,0.10,0.18 --arm popular --reward 0.5 --user-id new_user
+
+# fold live feedback (or an offline report) into the prior for the next run
+uv run python -m music_recommender.cli bandit-update \
+  --state-path reports/bandit_state.json --journal-path reports/bandit_feedback.json
+```
+
+`simulate-bandit --write-state` writes `reports/bandit_state.json` by default and
+`--from-state` resumes learning from it. `record-bandit-feedback` appends
+`{context, arm, reward}` observations to `reports/bandit_feedback.json`, and
+`bandit-update` folds a feedback journal (or a simulation report via
+`--report-path`) into a prior state by replaying the engine's additive ridge
+update — the state then serves as the next simulation's prior and the report
+derived from it feeds `bandit-policy`.
+
 Track evaluation reports land in `reports/` as JSON (`track_evaluation.json`
 by default), recording the run configuration and per-arm metrics. Specify
 `--report-dir` to customize the output directory.
@@ -1370,9 +1401,13 @@ See [PLAN.md](PLAN.md) for the full phased plan.
   from a bandit report; `RecommenderService` auto-loads
   `reports/cold_start_policy.json` and serves unknown users via `bandit_fallback`
   (policy-weighted arm blend) instead of pure `popular_fallback`. ✓ (0.20.0)
-- Next: two-tower neural candidate retrieval, then online bandit updates from
-  live serving feedback (reward observed per served request, persisted as the next
-  simulation's prior).
+- Online bandit feedback loop: the LinUCB engine's learned state is a persisted,
+  mergeable prior (`--write-state` / `--from-state`); `record-bandit-feedback`
+  journals per-request observations and `bandit-update` folds them (or an offline
+  report) into the prior that seeds the next simulation. ✓ (0.21.0)
+- Next: two-tower neural candidate retrieval, then per-request online serving
+  (`recommend-user` logging the served context and computing an engagement reward
+  for `record-bandit-feedback` directly from the blended response).
 
 
 ## License

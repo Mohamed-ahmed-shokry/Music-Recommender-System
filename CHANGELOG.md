@@ -7,6 +7,41 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-23
+
+### Added
+
+- Online bandit feedback loop: the LinUCB cold-start engine's learned state is a
+  persisted, mergeable prior so experience accumulates across runs:
+  - `snapshot_bandit_state` / `LinUCBContextualBandit.from_state`: export and
+    restore the engine's sufficient statistics (per-arm `a`, `b`, `selections`,
+    `rewards`) plus config, so a restored engine behaves identically.
+  - `write_bandit_state` / `load_bandit_state`: persistent JSON state files
+    (default `reports/bandit_state.json`).
+  - `append_bandit_feedback` / `load_bandit_feedback`: a JSON feedback journal
+    (default `reports/bandit_feedback.json`) accumulating `{context, arm, reward}`
+    observations per served request.
+  - `fold_bandit_state`: replays feedback batches through the engine's additive
+    ridge update (`A += x xᵀ`, `b += r x`, tally increments), returning an
+    updated prior; `feedback_from_report` extracts round observations from a
+    report so offline batches fold too.
+  - `simulate_cold_start_exploration(initial_state=...)`: resumes learning from
+    a persisted prior, validated against arms/context_features/alpha; round
+    records now carry the served `context` vector and the report config records
+    the prior's selections and total reward.
+  - CLI: `simulate-bandit --from-state` (resume from a prior) and `--write-state`
+    (persist the trained state); `bandit-update` (fold a report or journal into
+    a prior state) and `record-bandit-feedback` (journal a served-request
+    observation).
+
+### Tests
+
+- 796 tests, ~96.6% statement coverage; added unit tests for state
+  snapshot/restore roundtrips and validation, additive fold correctness vs.
+  direct engine updates, feedback journal append/load and error paths, report
+  round-context extraction, prior-seeded simulation determinism and cumulative
+  prior stats, and CLI wiring/error paths for the new and extended commands.
+
 ## [0.20.0] - 2026-09-22
 
 ### Added
