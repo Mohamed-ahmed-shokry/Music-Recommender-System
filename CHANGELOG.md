@@ -7,6 +7,33 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-22
+
+### Added
+
+- Cold-start exploration bandit simulation: `bandit.py` module simulating an online
+  contextual multi-armed bandit (LinUCB) that decides which cold-start strategy to serve
+  per user context, learning precision@k-style engagement rewards online:
+  - `LinUCBContextualBandit`: deterministic UCB arm selection with per-arm ridge
+    regression over context features.
+  - `rank_cold_start_arm`: `popular` (training-set popularity, the current production
+    fallback), `balanced` (mild mid-tail penalty), and `long_tail` (strong long-tail
+    exploration) arms.
+  - `simulate_cold_start_exploration`: warm/cold user splits, bootstrap-context
+    windows, per-round precision@k rewards, and regret against best-in-hindsight and
+    the always-popular control; deterministic for a given seed.
+  - `write_bandit_report` / `load_bandit_report`: standardized JSON report persistence.
+- CLI command: `simulate-bandit` mirroring `evaluate-surfaces`, with `--top-k`,
+  `--rounds`, `--seed`, `--arms`, `--holdout-ratio`, `--alpha`, `--report-name`,
+  and `--report-dir`, rendering per-arm selection/reward tables and writing reports
+  to `reports/bandit_simulation.json` by default.
+
+### Tests
+
+- 745 tests, 96.8% statement coverage; added comprehensive unit and CLI test suites for
+  bandit engine selection/updates, arm ranking, context building, simulation determinism,
+  report roundtrips/schema validation, and the `simulate-bandit` CLI including error paths.
+
 ## [0.18.0] - 2026-09-19
 
 ### Added

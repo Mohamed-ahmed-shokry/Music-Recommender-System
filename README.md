@@ -595,6 +595,23 @@ uv run python -m music_recommender.cli evaluate --pareto-frontier --report-dir r
 comparison tables with Pareto-optimal annotations, prints the best balanced
 configuration, and persists the results to `reports/pareto_frontier.json`.
 
+Simulate an online cold-start exploration bandit to decide which cold-start
+strategy should serve new users (LinUCB contextual multi-armed bandit):
+
+```bash
+uv run python -m music_recommender.cli simulate-bandit --top-k 10 --rounds 100
+uv run python -m music_recommender.cli simulate-bandit --top-k 10 --rounds 100 \
+  --arms popular,balanced,long_tail --holdout-ratio 0.25 --alpha 1.0
+```
+
+`simulate-bandit` splits users into warm/cold pools, learns catalog popularity from
+the warm pool, and per round serves top-k artists to a cold-start user using the
+bandit's chosen strategy, rewarded by precision@k against the user's held-out
+engagements. It prints per-arm selection and reward tables alongside cumulative
+reward, regret, and the always-popular control (the current production fallback),
+persisting results to `reports/bandit_simulation.json` (override with `--report-dir`
+or `--report-name`).
+
 Track evaluation reports land in `reports/` as JSON (`track_evaluation.json`
 by default), recording the run configuration and per-arm metrics. Specify
 `--report-dir` to customize the output directory.
@@ -1331,7 +1348,11 @@ See [PLAN.md](PLAN.md) for the full phased plan.
   and track recommendation services, FastAPI endpoints, CLI flags, and dashboard sliders. ✓ (0.18.0)
 - Multi-objective Pareto frontier evaluation: grid sweep, Pareto frontier identification,
   and `evaluate --pareto-frontier` CLI command with persistent reports. ✓ (0.18.0)
-- Next: online contextual bandit simulation for cold-start exploration and two-tower neural retrieval.
+- Cold-start exploration bandit simulation: LinUCB contextual multi-armed bandit
+  (`bandit.py`) deciding which cold-start strategy to serve per user context with
+  precision@k rewards, regret reporting, and the `simulate-bandit` CLI. ✓ (0.19.0)
+- Next: two-tower neural candidate retrieval, then live serving integration of the
+  cold-start bandit (rewriting the `popular_fallback` path from learned arm weights).
 
 
 ## License

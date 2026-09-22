@@ -187,16 +187,15 @@ It is updated incrementally as phases land.
   `evaluate --pareto-frontier` command, and track evaluation parity. (commit `ee6ecd0`)
 - Phase 65 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to 0.18.0.
 
-## Current milestone (0.19.0) — in progress
+## Current milestone (0.19.0) — shipped
 
 - Phase 66 — Cold-start exploration bandit simulation:
   - `bandit.py` with a LinUCB contextual bandit engine (`LinUCBContextualBandit`)
     that learns, per context, which cold-start arm (strategy) serves new users
-    best.
+    best. (commit `d4c1093`)
   - Cold-start arm registry (`DEFAULT_COLD_START_ARMS`):
     `popular` (existing `popular_artists` baseline), `balanced` and `long_tail`
-    (increasingly aggressive popularity-penalty strategies), and `explore`
-    (uniform random, pure exploration).
+    (increasingly aggressive popularity-penalty strategies).
   - `simulate_cold_start_exploration`: offline harness that holds out users,
     derives a bootstrap context from each cold user's earliest interactions,
     serves an arm per round, rewards precision@k against held-out plays, and
@@ -205,11 +204,11 @@ It is updated incrementally as phases land.
   - `write_bandit_report` / `load_bandit_report`: persistent JSON reports
     mirroring the `surfaces.py` pattern.
 - Phase 67 — CLI wiring: `simulate-bandit` command exposing `--top-k`,
-  `--rounds`, `--seed`, `--arms`, `--holdout-ratio`, `--bootstrap-ratio`,
-  `--alpha`, and `--report-name` / `--report-dir`.
+  `--rounds`, `--seed`, `--arms`, `--holdout-ratio`, `--alpha`, and
+  `--report-name` / `--report-dir`.
 - Phase 68 — Tests: engine update/select, arm ordering, reward computation,
   simulation determinism and regret, report roundtrip/schema validation, and
-  CLI output + error paths.
+  CLI output + error paths. (`d4c1093`, `08608d7`)
 - Phase 69 — Docs and release: PLAN, README (evaluation + CLI), CHANGELOG,
   version bump to 0.19.0.
 
