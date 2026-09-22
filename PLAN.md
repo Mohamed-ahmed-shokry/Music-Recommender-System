@@ -187,10 +187,37 @@ It is updated incrementally as phases land.
   `evaluate --pareto-frontier` command, and track evaluation parity. (commit `ee6ecd0`)
 - Phase 65 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to 0.18.0.
 
-## Next steps (after 0.18.0)
+## Current milestone (0.19.0) — in progress
 
-1. Online contextual bandit simulation for cold-start exploration.
-2. Two-tower neural candidate retrieval (PyTorch / ONNX runtime).
+- Phase 66 — Cold-start exploration bandit simulation:
+  - `bandit.py` with a LinUCB contextual bandit engine (`LinUCBContextualBandit`)
+    that learns, per context, which cold-start arm (strategy) serves new users
+    best.
+  - Cold-start arm registry (`DEFAULT_COLD_START_ARMS`):
+    `popular` (existing `popular_artists` baseline), `balanced` and `long_tail`
+    (increasingly aggressive popularity-penalty strategies), and `explore`
+    (uniform random, pure exploration).
+  - `simulate_cold_start_exploration`: offline harness that holds out users,
+    derives a bootstrap context from each cold user's earliest interactions,
+    serves an arm per round, rewards precision@k against held-out plays, and
+    tracks selection counts, cumulative reward, and regret vs. the in-hindsight
+    best arm — alongside the static `popular` control.
+  - `write_bandit_report` / `load_bandit_report`: persistent JSON reports
+    mirroring the `surfaces.py` pattern.
+- Phase 67 — CLI wiring: `simulate-bandit` command exposing `--top-k`,
+  `--rounds`, `--seed`, `--arms`, `--holdout-ratio`, `--bootstrap-ratio`,
+  `--alpha`, and `--report-name` / `--report-dir`.
+- Phase 68 — Tests: engine update/select, arm ordering, reward computation,
+  simulation determinism and regret, report roundtrip/schema validation, and
+  CLI output + error paths.
+- Phase 69 — Docs and release: PLAN, README (evaluation + CLI), CHANGELOG,
+  version bump to 0.19.0.
+
+## Next steps (after 0.19.0)
+
+1. Two-tower neural candidate retrieval (PyTorch / ONNX runtime).
+2. Live serving integration of the bandit (rewriting the `popular_fallback`
+   cold-start path based on learned arm weights).
 
 ## Quality gates (every change)
 
