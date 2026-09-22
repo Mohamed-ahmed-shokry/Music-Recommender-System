@@ -16,10 +16,14 @@ from music_recommender.bandit import (
     DEFAULT_COLD_START_ARMS,
     LinUCBContextualBandit,
     build_cold_start_context,
+    derive_cold_start_policy,
     load_bandit_report,
+    load_cold_start_policy,
     rank_cold_start_arm,
+    rank_cold_start_bandit,
     simulate_cold_start_exploration,
     write_bandit_report,
+    write_cold_start_policy,
 )
 from music_recommender.baselines import popular_artists
 
@@ -249,6 +253,128 @@ class TestBanditReportIO:
         wrong_schema.write_text(json.dumps({"foo": 1}), encoding="utf-8")
         with pytest.raises(ValueError, match="not a valid bandit simulation report"):
             load_bandit_report(wrong_schema)
+
+
+class TestDeriveColdStartPolicy:
+    def test_weights_track_mean_rewards(self) -> None:
+        report = {
+            "arms": {
+                "popular": {"mean_reward": 0.1},
+                "balanced": {"mean_reward": 0.5},
+                "long_tail": {"mean_reward": 0.9},
+            }
+        }
+        policy = derive_cold_start_policy(report)
+        assert set(policy) == set(DEFAULT_COLD_START_ARMS)
+        assert sum(policy.values()) == pytest.approx(1.0, abs=1e-6)
+        assert policy["long_tail"] > policy["balanced"] > policy["popular"]
+
+    def test_deterministic_and_temperature_sensitive(self) -> None:
+        report = {
+            "arms": {
+                "popular": {"mean_reward": 0.1},
+                "long_tail": {"mean_reward": 0.9},
+            }
+        }
+        first = derive_cold_start_policy(report)
+        second = derive_cold_start_policy(report)
+        assert first == second
+
+        sharper = derive_cold_start_policy(report, temperature=0.5)
+        assert sharper["long_tail"] > first["long_tail"]
+
+    def test_validation_errors(self) -> None:
+        with pytest.raises(ValueError, match="temperature"):
+            derive_cold_start_policy({"arms": {}}, temperature=0)
+        with pytest.raises(ValueError, match="'arms'"):
+            derive_cold_start_policy({"summary": {}})
+        with pytest.raises(ValueError, match="Unknown arm"):
+            derive_cold_start_policy(
+                {"arms": {"fake": {"mean_reward": 0.5}}}
+            )
+        with pytest.raises(ValueError, match="finite"):
+            derive_cold_start_policy(
+                {"arms": {"popular": {"mean_reward": float("nan")}}}
+            )
+
+
+class TestRankColdStartBandit:
+    def test_pure_popular_policy_matches_popular_artists(self) -> None:
+        stats = _artist_stats()
+        bandit_recs = rank_cold_start_bandit({"popular": 1.0}, stats, 5)
+        baseline_recs = popular_artists(stats, 5)
+        assert [r["artist_id"] for r in bandit_recs] == [
+            r["artist_id"] for r in baseline_recs
+        ]
+
+    def test_blend_includes_long_tail_artists(self) -> None:
+        stats = _artist_stats()
+        pure_popular = [r["artist_id"] for r in popular_artists(stats, 5)]
+        blended = rank_cold_start_bandit({"long_tail": 1.0}, stats, 5)
+        assert [r["artist_id"] for r in blended] != pure_popular
+
+    def test_balanced_blend_respects_top_k(self) -> None:
+        stats = _artist_stats()
+        blended = rank_cold_start_bandit(
+            {"popular": 0.5, "long_tail": 0.5}, stats, 4
+        )
+        assert len(blended) == 4
+        assert len({r["artist_id"] for r in blended}) == 4
+
+    def test_deterministic(self) -> None:
+        stats = _artist_stats()
+        policy = {"popular": 0.4, "balanced": 0.3, "long_tail": 0.3}
+        assert rank_cold_start_bandit(policy, stats, 6) == rank_cold_start_bandit(
+            policy, stats, 6
+        )
+
+    def test_empty_stats_and_validation(self) -> None:
+        assert rank_cold_start_bandit({"popular": 1.0}, {}, 5) == []
+        with pytest.raises(ValueError, match="top_k"):
+            rank_cold_start_bandit({"popular": 1.0}, _artist_stats(), 0)
+        with pytest.raises(ValueError, match="empty"):
+            rank_cold_start_bandit({}, _artist_stats(), 5)
+        with pytest.raises(ValueError, match="positive"):
+            rank_cold_start_bandit(
+                {"popular": 0.0, "long_tail": 0.0}, _artist_stats(), 5
+            )
+        with pytest.raises(ValueError, match="Unknown arm"):
+            rank_cold_start_bandit({"mystery": 1.0}, _artist_stats(), 5)
+
+
+class TestColdStartPolicyIO:
+    def test_policy_roundtrip(self, tmp_path: Path) -> None:
+        policy = {"popular": 0.1, "balanced": 0.3, "long_tail": 0.6}
+        written = write_cold_start_policy(policy, tmp_path, policy_name="learned")
+        assert written.exists()
+        assert written.name == "learned.json"
+
+        loaded = load_cold_start_policy(written)
+        assert loaded == policy
+
+    def test_default_policy_name(self, tmp_path: Path) -> None:
+        policy = {"popular": 1.0}
+        written = write_cold_start_policy(policy, tmp_path)
+        assert written.name == "cold_start_policy.json"
+
+    def test_load_validates_file(self, tmp_path: Path) -> None:
+        missing = tmp_path / "missing.json"
+        with pytest.raises(FileNotFoundError, match="not found"):
+            load_cold_start_policy(missing)
+
+        corrupt = tmp_path / "corrupt.json"
+        corrupt.write_text("{nope", encoding="utf-8")
+        with pytest.raises(ValueError, match="Failed to parse"):
+            load_cold_start_policy(corrupt)
+
+        invalid = tmp_path / "invalid.json"
+        invalid.write_text(json.dumps({"popular": -1.0}), encoding="utf-8")
+        with pytest.raises(ValueError, match="non-negative"):
+            load_cold_start_policy(invalid)
+
+    def test_write_validates_policy(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="Unknown arm"):
+            write_cold_start_policy({"fake": 1.0}, tmp_path)
 
 
 class TestCLISimulateBandit:

@@ -39,6 +39,34 @@ def _validate_arms(arms: Sequence[str]) -> None:
             )
 
 
+def _arm_full_scores(
+    arm: str, artist_stats: dict[str, dict[str, Any]]
+) -> dict[str, float]:
+    """Compute a per-artist raw score for an arm across the whole catalog.
+
+    ``popular`` uses training-set plays; ``balanced`` and ``long_tail`` apply an
+    increasingly aggressive popularity penalty so lower-ranked artists can rise.
+    """
+    if not artist_stats:
+        return {}
+
+    max_rank = max(len(artist_stats), 1)
+    penalty = {
+        "popular": 0.0,
+        "balanced": 0.4,
+        "long_tail": 0.85,
+    }[arm]
+
+    scores: dict[str, float] = {}
+    for stats in artist_stats.values():
+        artist_id = str(stats["artist_id"])
+        popularity_rank = int(stats["popularity_rank"])
+        total_plays = float(stats["total_plays"])
+        weight = 1.0 if max_rank == 1 else 1 - (popularity_rank - 1) / (max_rank - 1)
+        scores[artist_id] = total_plays - penalty * weight * total_plays
+    return scores
+
+
 class LinUCBContextualBandit:
     """Contextual multi-armed bandit using LinUCB (linear upper confidence bound).
 
@@ -132,20 +160,12 @@ def rank_cold_start_arm(
     if not artist_stats:
         return []
 
-    max_rank = max(len(artist_stats), 1)
-    scores: list[tuple[float, str, float]] = []
-    for stats in artist_stats.values():
-        artist_id = str(stats["artist_id"])
-        popularity_rank = int(stats["popularity_rank"])
-        total_plays = float(stats["total_plays"])
-        weight = 1.0 if max_rank == 1 else 1 - (popularity_rank - 1) / (max_rank - 1)
-        penalty = 0.4 if arm == "balanced" else 0.85
-        adjusted = total_plays - penalty * weight * total_plays
-        scores.append((adjusted, artist_id, total_plays))
-
-    ranked = sorted(scores, key=lambda item: (-item[0], item[1]))[:top_k]
+    scores = _arm_full_scores(arm, artist_stats)
+    ranked = sorted(
+        scores.items(), key=lambda item: (-item[1], item[0])
+    )[:top_k]
     recommendations: list[dict[str, str | float | int]] = []
-    for adjusted, artist_id, total_plays in ranked:
+    for artist_id, adjusted in ranked:
         stats = artist_stats[artist_id]
         recommendations.append(
             {
@@ -153,7 +173,7 @@ def rank_cold_start_arm(
                 "artist_name": str(stats["artist_name"]),
                 "score": adjusted,
                 "popularity_rank": int(stats["popularity_rank"]),
-                "total_plays": total_plays,
+                "total_plays": float(stats["total_plays"]),
             }
         )
     return recommendations
@@ -395,3 +415,140 @@ def load_bandit_report(report_path: Path | str) -> dict[str, Any]:
             "(missing 'config', 'arms', or 'summary')."
         )
     return report
+
+
+def derive_cold_start_policy(
+    report: dict[str, Any],
+    *,
+    temperature: float = 1.0,
+) -> dict[str, float]:
+    """Convert a bandit report into per-arm serving weights (softmax).
+
+    Weights are computed as the softmax over each arm's learned mean reward,
+    so higher-reward arms dominate the served blend while lower-reward arms
+    retain a small exploration share. Deterministic for a given report.
+    """
+    if not np.isfinite(temperature) or temperature <= 0:
+        raise ValueError("temperature must be a finite positive number.")
+    if "arms" not in report or not isinstance(report["arms"], dict):
+        raise ValueError(
+            "Report must contain an 'arms' dictionary with learned arm weights."
+        )
+
+    arm_rewards: dict[str, float] = {}
+    for arm, stats in report["arms"].items():
+        if not isinstance(stats, dict):
+            raise ValueError(f"Arm '{arm}' stats must be a dictionary.")
+        mean_reward = stats.get("mean_reward")
+        if not isinstance(mean_reward, (int, float)) or not np.isfinite(mean_reward):
+            raise ValueError(f"Arm '{arm}' is missing a finite 'mean_reward'.")
+        arm_rewards[arm] = float(mean_reward)
+
+    _validate_arms(list(arm_rewards))
+    rewards = np.asarray([arm_rewards[arm] for arm in arm_rewards], dtype=float)
+    shifted = rewards - rewards.max()
+    exponentials = np.exp(shifted / temperature)
+    weights = exponentials / exponentials.sum()
+    return {
+        arm: round(float(weight), 8)
+        for arm, weight in zip(arm_rewards, weights, strict=True)
+    }
+
+
+def _validate_policy(policy: dict[str, float]) -> None:
+    if not policy:
+        raise ValueError("Cold-start policy must not be empty.")
+    _validate_arms(list(policy))
+    if any(not np.isfinite(weight) for weight in policy.values()):
+        raise ValueError("Cold-start policy weights must all be finite.")
+    if any(weight < 0 for weight in policy.values()):
+        raise ValueError("Cold-start policy weights must be non-negative.")
+    if not any(weight > 0 for weight in policy.values()):
+        raise ValueError("Cold-start policy must contain at least one positive weight.")
+
+
+def rank_cold_start_bandit(
+    policy: dict[str, float],
+    artist_stats: dict[str, dict[str, Any]],
+    top_k: int,
+) -> list[dict[str, str | float | int]]:
+    """Serve top-k cold-start artists by a Borda-style weighted blend of arms.
+
+    Each arm ranks the catalog by its own score; an artist's blended score is
+    the policy-weighted position it picks up across arms. Purely popularity
+    policies (``{"popular": 1.0}``) reduce to the ``popular_artists`` ranking.
+    """
+    validate_ranking_parameters(top_k)
+    _validate_policy(policy)
+
+    if not artist_stats:
+        return []
+
+    candidate_scores: dict[str, float] = {}
+    for arm, weight in policy.items():
+        if weight <= 0:
+            continue
+        for position, rec in enumerate(rank_cold_start_arm(arm, artist_stats, top_k)):
+            artist_id = str(rec["artist_id"])
+            position_score = 1.0 - position / top_k
+            candidate_scores[artist_id] = (
+                candidate_scores.get(artist_id, 0.0) + weight * position_score
+            )
+
+    ranked = sorted(
+        candidate_scores.items(), key=lambda item: (-item[1], item[0])
+    )[:top_k]
+    recommendations: list[dict[str, str | float | int]] = []
+    for artist_id, blended_score in ranked:
+        stats = artist_stats[artist_id]
+        recommendations.append(
+            {
+                "artist_id": artist_id,
+                "artist_name": str(stats["artist_name"]),
+                "score": blended_score,
+                "popularity_rank": int(stats["popularity_rank"]),
+                "total_plays": float(stats["total_plays"]),
+            }
+        )
+    return recommendations
+
+
+def write_cold_start_policy(
+    policy: dict[str, float],
+    policy_dir: Path | str,
+    *,
+    policy_name: str | None = None,
+) -> Path:
+    """Persist a cold-start bandit policy as JSON."""
+    _validate_policy(policy)
+    target_dir = Path(policy_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    policy_path = target_dir / f"{policy_name or 'cold_start_policy'}.json"
+    policy_path.write_text(
+        json.dumps(policy, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return policy_path
+
+
+def load_cold_start_policy(policy_path: Path | str) -> dict[str, float]:
+    """Load and validate a persisted cold-start bandit policy."""
+    path = Path(policy_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Cold-start policy not found: {path}")
+    try:
+        policy = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            f"Failed to parse cold-start policy '{path}': {error}"
+        ) from error
+    if not isinstance(policy, dict):
+        raise ValueError(f"'{path}' is not a valid cold-start policy.")
+    try:
+        normalized = {str(arm): float(weight) for arm, weight in policy.items()}
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"'{path}' contains non-numeric policy weights."
+        ) from error
+    _validate_policy(normalized)
+    return normalized
