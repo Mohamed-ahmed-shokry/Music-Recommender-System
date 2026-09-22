@@ -187,12 +187,12 @@ It is updated incrementally as phases land.
   `evaluate --pareto-frontier` command, and track evaluation parity. (commit `ee6ecd0`)
 - Phase 65 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to 0.18.0.
 
-## Current milestone (0.20.0) — in progress
+## Current milestone (0.20.0) — shipped
 
-Live serving integration of the cold-start bandit: rewrite the `popular_fallback`
-path so an unknown user is served by the bandit's learned policy (arm weights from
-a `simulate-bandit` report) instead of pure popularity, while preserving the old
-behavior when no policy file exists.
+Live serving integration of the cold-start bandit: the `popular_fallback` path is
+rewritten so an unknown user is served by the bandit's learned policy (arm weights
+from a `simulate-bandit` report) instead of pure popularity, while the old behavior
+is preserved when no policy file exists.
 
 - Phase 70 — Bandit policy derivation and serving ranking:
   - `derive_cold_start_policy(report)`: read a bandit report and compute per-arm
@@ -201,15 +201,15 @@ behavior when no policy file exists.
     positional weighted blend of the arm rankings (Borda-style), deterministic,
     reducing to `popular_artists` when the policy is `{"popular": 1.0}`.
   - `write_cold_start_policy` / `load_cold_start_policy`: persist/validate the
-    policy JSON, mirroring the report helpers.
+    policy JSON, mirroring the report helpers. (commits `fd9018f`, `1234ca2`)
 - Phase 71 — Service integration: `RecommenderService` gains a `cold_start_policy`
   loaded by `from_artifacts` (from `COLD_START_POLICY_PATH` when present);
   `recommend_user` unknown-user branch serves `bandit_fallback` when a policy is
   set and keeps `popular_fallback` otherwise; `metadata()` reports the active
-  cold-start strategy.
+  cold-start strategy. (commit `0bfde00`)
 - Phase 72 — CLI: `bandit-policy` command (derive weights from a bandit report and
   write the policy JSON) and `recommend-user --cold-start-policy-path` to serve
-  with the learned policy.
+  with the learned policy. (commits `410f9a1`, `1619571`)
 - Phase 73 — Tests: policy derivation determinism/validation, blended ranking
   behavior, policy report roundtrip, service `bandit_fallback`/`popular_fallback`
   paths, `metadata` strategy, and CLI end-to-end + error paths.

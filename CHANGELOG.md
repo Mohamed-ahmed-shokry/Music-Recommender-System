@@ -7,6 +7,35 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-22
+
+### Added
+
+- Live cold-start bandit serving integration: bandit simulation results now drive
+  production cold-start rankings instead of a static popularity fallback:
+  - `derive_cold_start_policy` in `bandit.py`: converts a bandit report into per-arm
+    serving weights through a deterministic softmax over the learned mean rewards.
+  - `rank_cold_start_bandit`: serves top-k cold-start artists via a Borda-style
+    policy-weighted blend across arms, reducing exactly to `popular_artists` when
+    the policy is `{"popular": 1.0}`.
+  - `write_cold_start_policy` / `load_cold_start_policy`: persist and validate the
+    serving policy JSON (default `reports/cold_start_policy.json`).
+  - `RecommenderService.from_artifacts` auto-loads the policy file when present;
+    `recommend_user` serves unknown users with strategy `bandit_fallback`
+    (policy-weighted blend) when a policy is set and keeps `popular_fallback`
+    otherwise. `metadata()` reports the active cold-start strategy and weights.
+  - CLI: `bandit-policy` command derives and persists serving weights from a bandit
+    report; `recommend-user --cold-start-policy-path` serves with an explicit
+    policy file, while the default auto-loads the project policy.
+
+### Tests
+
+- 767 tests, ~96.8% statement coverage; added unit tests for policy derivation
+  (determinism, temperature, softmax ordering, validation), blended serving
+  ranking (pure-popular equivalence, top-k/validation, determinism), policy JSON
+  roundtrip/validation, service `bandit_fallback`/`popular_fallback` paths and
+  policy auto-load, and CLI `bandit-policy` plus `recommend-user` policy wiring.
+
 ## [0.19.0] - 2026-09-22
 
 ### Added

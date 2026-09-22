@@ -612,6 +612,21 @@ reward, regret, and the always-popular control (the current production fallback)
 persisting results to `reports/bandit_simulation.json` (override with `--report-dir`
 or `--report-name`).
 
+Turn a bandit simulation into a live serving policy and serve unknown users by it:
+
+```bash
+uv run python -m music_recommender.cli bandit-policy --report-path reports/bandit_simulation.json
+uv run python -m music_recommender.cli recommend-user --user-id new_user
+```
+
+`bandit-policy` derives per-arm serving weights (softmax over the bandit's learned
+mean rewards) and writes them to `reports/cold_start_policy.json`. When that file
+exists, `recommend-user` (and the default `RecommenderService.from_artifacts()`
+auto-load used by the API and dashboard) serves unknown users with strategy
+`bandit_fallback`, ranking cold-start artists by a policy-weighted blend of the
+arm rankings; without a policy file, the previous `popular_fallback` behavior is
+preserved. Pass `--cold-start-policy-path` to serve with an explicit policy file.
+
 Track evaluation reports land in `reports/` as JSON (`track_evaluation.json`
 by default), recording the run configuration and per-arm metrics. Specify
 `--report-dir` to customize the output directory.
@@ -1351,8 +1366,13 @@ See [PLAN.md](PLAN.md) for the full phased plan.
 - Cold-start exploration bandit simulation: LinUCB contextual multi-armed bandit
   (`bandit.py`) deciding which cold-start strategy to serve per user context with
   precision@k rewards, regret reporting, and the `simulate-bandit` CLI. ✓ (0.19.0)
-- Next: two-tower neural candidate retrieval, then live serving integration of the
-  cold-start bandit (rewriting the `popular_fallback` path from learned arm weights).
+- Live cold-start bandit serving: `bandit-policy` derives per-arm serving weights
+  from a bandit report; `RecommenderService` auto-loads
+  `reports/cold_start_policy.json` and serves unknown users via `bandit_fallback`
+  (policy-weighted arm blend) instead of pure `popular_fallback`. ✓ (0.20.0)
+- Next: two-tower neural candidate retrieval, then online bandit updates from
+  live serving feedback (reward observed per served request, persisted as the next
+  simulation's prior).
 
 
 ## License
