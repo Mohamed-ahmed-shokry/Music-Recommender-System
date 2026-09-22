@@ -10,6 +10,11 @@ from typing import Any, Literal, cast
 import typer
 
 from music_recommender import __version__
+from music_recommender.bandit import (
+    DEFAULT_COLD_START_ARMS,
+    simulate_cold_start_exploration,
+    write_bandit_report,
+)
 from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
     DATA_DIR,
@@ -1955,6 +1960,70 @@ def evaluate_surfaces(
         report_name=report_name,
     )
     typer.echo(f"Surface comparison report written to: {written}")
+
+
+@app.command()
+def simulate_bandit(
+    top_k: int = DEFAULT_TOP_K,
+    rounds: int = 50,
+    seed: int = 42,
+    arms: str = ",".join(DEFAULT_COLD_START_ARMS),
+    holdout_ratio: float = 0.25,
+    alpha: float = 1.0,
+    report_name: str | None = typer.Option(
+        None,
+        "--report-name",
+        help="Name for the bandit simulation JSON report.",
+    ),
+    report_dir: str | None = typer.Option(
+        None,
+        "--report-dir",
+        help="Directory for the persistent bandit simulation report.",
+    ),
+) -> None:
+    """Simulate a LinUCB cold-start exploration bandit against the current fallback."""
+    resolved_report_dir = Path(report_dir) if report_dir is not None else REPORTS_DIR
+    try:
+        df = load_and_validate_interactions(RAW_DATA_PATH)
+        selected_arms = tuple(arm.strip() for arm in arms.split(",") if arm.strip())
+        report = simulate_cold_start_exploration(
+            df,
+            top_k=top_k,
+            rounds=rounds,
+            seed=seed,
+            arms=selected_arms,
+            holdout_ratio=holdout_ratio,
+            alpha=alpha,
+        )
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"Cold-start exploration bandit simulation (top_k={top_k}):")
+    typer.echo(f"{'Arm':<12} {'Selected':>9} {'Cum. Reward':>12} {'Mean Reward':>12}")
+    typer.echo("-" * 48)
+    for arm, stats in report["arms"].items():
+        typer.echo(
+            f"{arm:<12} {stats['selections']:>9} {stats['total_reward']:>12.4f} "
+            f"{stats['mean_reward']:>12.4f}"
+        )
+    summary = report["summary"]
+    typer.echo("-" * 48)
+    typer.echo(f"Rounds completed: {summary['rounds_completed']}")
+    typer.echo(f"Cumulative reward: {summary['cumulative_reward']:.4f}")
+    typer.echo(f"Best in hindsight: {summary['best_in_hindsight']:.4f}")
+    typer.echo(f"Regret: {summary['regret']:.4f}")
+    typer.echo(
+        f"Always-popular control mean reward: "
+        f"{summary['always_popular']['mean_reward']:.4f}"
+    )
+
+    written = write_bandit_report(
+        report,
+        resolved_report_dir,
+        report_name=report_name,
+    )
+    typer.echo(f"Bandit simulation report written to: {written}")
 
 
 if __name__ == "__main__":
