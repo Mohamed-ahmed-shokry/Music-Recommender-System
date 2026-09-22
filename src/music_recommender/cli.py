@@ -403,9 +403,12 @@ def recommend_user(
 ) -> None:
     """Recommend artists for a user."""
     try:
-        service = RecommenderService.from_artifacts(
-            cold_start_policy_path=cold_start_policy_path
-        )
+        if cold_start_policy_path is not None:
+            service = RecommenderService.from_artifacts(
+                cold_start_policy_path=cold_start_policy_path
+            )
+        else:
+            service = RecommenderService.from_artifacts()
         if ltr:
             response = service.recommend_user_ltr(
                 user_id=user_id,
