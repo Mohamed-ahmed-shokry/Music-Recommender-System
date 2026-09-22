@@ -533,7 +533,20 @@ def _write_bandit_report(tmp_path: Path) -> Path:
             "long_tail": {"selections": 1, "mean_reward": 0.6},
         },
         "summary": {"rounds_completed": 2},
-        "rounds": [],
+        "rounds": [
+            {
+                "round": 1,
+                "arm": "popular",
+                "context": [1.0, 0.5, 0.2],
+                "reward": 0.2,
+            },
+            {
+                "round": 2,
+                "arm": "long_tail",
+                "context": [0.2, 0.8, 0.4],
+                "reward": 0.8,
+            },
+        ],
     }
     report_path = tmp_path / "bandit_simulation.json"
     report_path.write_text(json.dumps(report), encoding="utf-8")
@@ -806,3 +819,211 @@ class TestSimulateFromPrior:
                 arms=("popular",),
                 initial_state=state,
             )
+
+
+class TestCLISimulateBanditState:
+    def test_cli_simulate_bandit_write_state(self, tmp_path: Path) -> None:
+        state_path = tmp_path / "engine_state.json"
+        result = runner.invoke(
+            cli.app,
+            [
+                "simulate-bandit",
+                "--top-k",
+                "5",
+                "--rounds",
+                "20",
+                "--seed",
+                "1",
+                "--report-dir",
+                str(tmp_path),
+                "--write-state",
+                str(state_path),
+            ],
+        )
+        assert result.exit_code == 0
+        assert (tmp_path / "bandit_simulation.json").exists()
+        assert state_path.exists()
+        assert "Bandit state written to:" in result.output
+
+        loaded = load_bandit_state(state_path)
+        assert loaded["config"]["arms"] == list(DEFAULT_COLD_START_ARMS)
+
+    def test_cli_simulate_bandit_from_state_resumes(self, tmp_path: Path) -> None:
+        state_path = tmp_path / "prior_state.json"
+        prior = snapshot_bandit_state(
+            LinUCBContextualBandit(
+                DEFAULT_COLD_START_ARMS,
+                len(DEFAULT_CONTEXT_FEATURES),
+                alpha=0.5,
+            )
+        )
+        write_bandit_state(prior, tmp_path, state_name="prior_state")
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "simulate-bandit",
+                "--top-k",
+                "5",
+                "--rounds",
+                "20",
+                "--seed",
+                "1",
+                "--alpha",
+                "0.5",
+                "--from-state",
+                str(state_path),
+                "--report-dir",
+                str(tmp_path),
+                "--report-name",
+                "from_prior",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Resumed from a prior state" in result.output
+
+        report = load_bandit_report(tmp_path / "from_prior.json")
+        assert report["config"]["prior"]["selections"] == 0
+
+
+class TestCLIBanditUpdate:
+    def test_cli_bandit_update_from_report(self, tmp_path: Path) -> None:
+        state_path = tmp_path / "prior_state.json"
+        write_bandit_state(
+            snapshot_bandit_state(
+                LinUCBContextualBandit(
+                    DEFAULT_COLD_START_ARMS,
+                    len(DEFAULT_CONTEXT_FEATURES),
+                    alpha=0.5,
+                )
+            ),
+            tmp_path,
+            state_name="prior_state",
+        )
+        report_path = _write_bandit_report(tmp_path)
+        output = tmp_path / "updated_state.json"
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "bandit-update",
+                "--state-path",
+                str(state_path),
+                "--report-path",
+                str(report_path),
+                "--journal-path",
+                str(tmp_path / "missing_journal.json"),
+                "--output-state",
+                str(output),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Bandit state after folding feedback:" in result.output
+        assert output.exists()
+        assert "Updated bandit state written to:" in result.output
+
+    def test_cli_bandit_update_from_journal(self, tmp_path: Path) -> None:
+        state_path = tmp_path / "prior_state.json"
+        write_bandit_state(
+            snapshot_bandit_state(
+                LinUCBContextualBandit(
+                    DEFAULT_COLD_START_ARMS,
+                    len(DEFAULT_CONTEXT_FEATURES),
+                    alpha=0.5,
+                )
+            ),
+            tmp_path,
+            state_name="prior_state",
+        )
+        journal = tmp_path / "feedback.json"
+        append_bandit_feedback(
+            {
+                "context": [1.0, 0.5, 0.2],
+                "arm": "popular",
+                "reward": 0.7,
+            },
+            journal,
+        )
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "bandit-update",
+                "--state-path",
+                str(state_path),
+                "--journal-path",
+                str(journal),
+            ],
+        )
+        assert result.exit_code == 0
+        updated = load_bandit_state(state_path)
+        assert updated["arms"]["popular"]["selections"] == 1
+
+    def test_cli_bandit_update_no_feedback(self, tmp_path: Path) -> None:
+        state_path = tmp_path / "prior_state.json"
+        write_bandit_state(
+            snapshot_bandit_state(
+                LinUCBContextualBandit(
+                    DEFAULT_COLD_START_ARMS,
+                    len(DEFAULT_CONTEXT_FEATURES),
+                    alpha=0.5,
+                )
+            ),
+            tmp_path,
+            state_name="prior_state",
+        )
+        result = runner.invoke(
+            cli.app,
+            [
+                "bandit-update",
+                "--state-path",
+                str(state_path),
+                "--journal-path",
+                str(tmp_path / "missing_journal.json"),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "Error:" in result.output
+
+
+class TestCLIRecordBanditFeedback:
+    def test_cli_record_feedback(self, tmp_path: Path) -> None:
+        journal = tmp_path / "feedback.json"
+        result = runner.invoke(
+            cli.app,
+            [
+                "record-bandit-feedback",
+                "--context",
+                "1.0, 0.5, 0.2",
+                "--arm",
+                "popular",
+                "--reward",
+                "0.7",
+                "--journal-path",
+                str(journal),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Recorded reward 0.7000" in result.output
+        records = load_bandit_feedback(journal)
+        assert len(records) == 1
+        assert records[0]["arm"] == "popular"
+
+    def test_cli_record_feedback_invalid_context(self, tmp_path: Path) -> None:
+        journal = tmp_path / "feedback.json"
+        result = runner.invoke(
+            cli.app,
+            [
+                "record-bandit-feedback",
+                "--context",
+                "1.0, nope",
+                "--arm",
+                "popular",
+                "--reward",
+                "0.5",
+                "--journal-path",
+                str(journal),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "Error:" in result.output

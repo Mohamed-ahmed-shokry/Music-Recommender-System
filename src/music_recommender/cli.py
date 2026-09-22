@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,14 +13,24 @@ import typer
 from music_recommender import __version__
 from music_recommender.bandit import (
     DEFAULT_COLD_START_ARMS,
+    LinUCBContextualBandit,
+    append_bandit_feedback,
     derive_cold_start_policy,
+    feedback_from_report,
+    fold_bandit_state,
+    load_bandit_feedback,
     load_bandit_report,
+    load_bandit_state,
     simulate_cold_start_exploration,
+    snapshot_bandit_state,
     write_bandit_report,
+    write_bandit_state,
     write_cold_start_policy,
 )
 from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
+    BANDIT_FEEDBACK_PATH,
+    BANDIT_STATE_PATH,
     COLD_START_POLICY_PATH,
     DATA_DIR,
     DEFAULT_ALS_ALPHA,
@@ -1994,12 +2005,25 @@ def simulate_bandit(
         "--report-dir",
         help="Directory for the persistent bandit simulation report.",
     ),
+    from_state: str | None = typer.Option(
+        None,
+        "--from-state",
+        help="Path to a persisted bandit state to resume learning from (prior).",
+    ),
+    write_state: str | None = typer.Option(
+        None,
+        "--write-state",
+        help="Path to persist the trained bandit state after the simulation.",
+    ),
 ) -> None:
     """Simulate a LinUCB cold-start exploration bandit against the current fallback."""
     resolved_report_dir = Path(report_dir) if report_dir is not None else REPORTS_DIR
     try:
         df = load_and_validate_interactions(RAW_DATA_PATH)
         selected_arms = tuple(arm.strip() for arm in arms.split(",") if arm.strip())
+        initial_state = (
+            load_bandit_state(from_state) if from_state is not None else None
+        )
         report = simulate_cold_start_exploration(
             df,
             top_k=top_k,
@@ -2008,11 +2032,18 @@ def simulate_bandit(
             arms=selected_arms,
             holdout_ratio=holdout_ratio,
             alpha=alpha,
+            initial_state=initial_state,
         )
     except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
+    if from_state is not None:
+        prior = report["config"]["prior"]
+        typer.echo(
+            f"Resumed from a prior state ({prior['selections']} selections, "
+            f"total reward {prior['total_reward']:.4f})."
+        )
     typer.echo(f"Cold-start exploration bandit simulation (top_k={top_k}):")
     typer.echo(f"{'Arm':<12} {'Selected':>9} {'Cum. Reward':>12} {'Mean Reward':>12}")
     typer.echo("-" * 48)
@@ -2038,6 +2069,26 @@ def simulate_bandit(
         report_name=report_name,
     )
     typer.echo(f"Bandit simulation report written to: {written}")
+
+    if write_state is not None:
+        base_state = (
+            initial_state
+            if initial_state is not None
+            else snapshot_bandit_state(
+                LinUCBContextualBandit(
+                    selected_arms,
+                    len(report["config"]["context_features"]),
+                    alpha=report["config"]["alpha"],
+                )
+            )
+        )
+        trained = fold_bandit_state(base_state, feedback_from_report(report))
+        state_path = write_bandit_state(
+            trained,
+            Path(write_state).parent,
+            state_name=Path(write_state).stem,
+        )
+        typer.echo(f"Bandit state written to: {state_path}")
 
 
 @app.command()
@@ -2089,6 +2140,113 @@ def bandit_policy(
             "Policy saved to the default serving location; "
             "recommend-user will now use it for unknown users."
         )
+
+
+@app.command()
+def bandit_update(
+    state_path: str = typer.Option(
+        BANDIT_STATE_PATH,
+        "--state-path",
+        help="Path to the persisted bandit state to fold feedback into.",
+    ),
+    report_path: str | None = typer.Option(
+        None,
+        "--report-path",
+        help="Bandit report whose per-round observations become offline feedback.",
+    ),
+    journal_path: str | None = typer.Option(
+        BANDIT_FEEDBACK_PATH,
+        "--journal-path",
+        help="Feedback journal to fold (skipped when the journal is absent).",
+    ),
+    output_state: str | None = typer.Option(
+        None,
+        "--output-state",
+        help="Path to write the updated state (defaults to --state-path).",
+    ),
+) -> None:
+    """Fold observed feedback into a bandit state as its new prior."""
+    try:
+        state = load_bandit_state(state_path)
+        report = load_bandit_report(report_path) if report_path else None
+        feedback = feedback_from_report(report) if report is not None else []
+
+        journal = (
+            Path(journal_path) if journal_path is not None else BANDIT_FEEDBACK_PATH
+        )
+        if journal.exists():
+            feedback = feedback + load_bandit_feedback(journal)
+        if not feedback:
+            raise ValueError(
+                "No feedback to fold: provide --report-path or a journal file."
+            )
+
+        updated = fold_bandit_state(state, feedback)
+        target = Path(output_state) if output_state is not None else Path(state_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            json.dumps(updated, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo("Bandit state after folding feedback:")
+    typer.echo(f"{'Arm':<12} {'Selected':>9} {'Cum. Reward':>12} {'Mean Reward':>12}")
+    typer.echo("-" * 48)
+    for arm, stats in updated["arms"].items():
+        selections = stats["selections"]
+        total_reward = stats["rewards"]
+        mean_reward = total_reward / selections if selections else 0.0
+        typer.echo(
+            f"{arm:<12} {selections:>9} {total_reward:>12.4f} {mean_reward:>12.4f}"
+        )
+    typer.echo(f"Updated bandit state written to: {target}")
+
+
+@app.command()
+def record_bandit_feedback(
+    context: str = typer.Option(
+        ...,
+        "--context",
+        help="Comma-separated context feature values served for the request.",
+    ),
+    arm: str = typer.Option(
+        ...,
+        "--arm",
+        help="Arm the service chose for this request.",
+    ),
+    reward: float = typer.Option(
+        ...,
+        "--reward",
+        help="Engagement reward observed for the served recommendation.",
+    ),
+    user_id: str | None = typer.Option(
+        None,
+        "--user-id",
+        help="Optional identifier of the served user.",
+    ),
+    journal_path: str = typer.Option(
+        BANDIT_FEEDBACK_PATH,
+        "--journal-path",
+        help="Feedback journal to append the observation to.",
+    ),
+) -> None:
+    """Record a served-request bandit observation into the feedback journal."""
+    try:
+        parsed = [float(value.strip()) for value in context.split(",") if value.strip()]
+        record = {"context": parsed, "arm": arm, "reward": reward}
+        if user_id:
+            record["user_id"] = user_id
+        journal = append_bandit_feedback(record, journal_path)
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(
+        f"Recorded reward {reward:.4f} for arm '{arm}' into feedback journal: {journal}"
+    )
 
 
 if __name__ == "__main__":
