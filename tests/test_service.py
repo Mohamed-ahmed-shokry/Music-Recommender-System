@@ -95,7 +95,7 @@ def create_service(
     )
     artifact_path = tmp_path / "artifact.joblib"
     save_artifact(artifact, artifact_path)
-    return RecommenderService.from_artifacts(artifact_path)
+    return RecommenderService.from_artifacts(artifact_path, cold_start_policy_path=None)
 
 
 def test_known_user_returns_hybrid_strategy(tmp_path: Path) -> None:
@@ -976,3 +976,81 @@ def test_recommend_tracks_with_novelty_weight(tmp_path: Path) -> None:
     )
     assert result["strategy"] == "track_similarity"
     assert len(result["recommendations"]) == 3
+
+
+def test_unknown_user_served_by_bandit_policy(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    service.cold_start_policy = {"long_tail": 1.0}
+
+    response = service.recommend_user("missing_user", top_k=2)
+
+    assert response["strategy"] == "bandit_fallback"
+    assert "cold-start bandit policy" in response["message"]
+    assert len(response["recommendations"]) == 2
+
+
+def test_bandit_policy_blend_differs_from_popular(tmp_path: Path) -> None:
+    bandit_service = create_service(tmp_path)
+    bandit_service.cold_start_policy = {"long_tail": 1.0}
+    popular_service = create_service(tmp_path)
+
+    bandit_response = bandit_service.recommend_user("missing_user", top_k=4)
+    popular_response = popular_service.recommend_user("other_missing", top_k=4)
+
+    assert bandit_response["strategy"] == "bandit_fallback"
+    assert popular_response["strategy"] == "popular_fallback"
+    assert [r["artist_id"] for r in bandit_response["recommendations"]] != [
+        r["artist_id"] for r in popular_response["recommendations"]
+    ]
+
+
+def test_metadata_reports_cold_start_strategy(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    assert service.metadata()["cold_start"] == {
+        "strategy": "popular",
+        "policy": None,
+    }
+
+    service.cold_start_policy = {"popular": 0.5, "long_tail": 0.5}
+    assert service.metadata()["cold_start"]["strategy"] == "bandit"
+
+
+def test_from_artifacts_loads_policy_when_present(tmp_path: Path) -> None:
+    import json
+
+    create_service(tmp_path)
+    artifact_path = tmp_path / "artifact.joblib"
+
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(
+        json.dumps({"popular": 0.5, "long_tail": 0.5}), encoding="utf-8"
+    )
+
+    loaded = RecommenderService.from_artifacts(
+        artifact_path, cold_start_policy_path=policy_path
+    )
+    assert loaded.cold_start_policy == {"popular": 0.5, "long_tail": 0.5}
+
+
+def test_from_artifacts_ignores_missing_policy(tmp_path: Path) -> None:
+    create_service(tmp_path)
+    artifact_path = tmp_path / "artifact.joblib"
+
+    loaded = RecommenderService.from_artifacts(
+        artifact_path,
+        cold_start_policy_path=tmp_path / "does_not_exist.json",
+    )
+    assert loaded.cold_start_policy is None
+
+
+def test_from_artifacts_rejects_invalid_policy(tmp_path: Path) -> None:
+    create_service(tmp_path)
+    artifact_path = tmp_path / "artifact.joblib"
+
+    bad_policy = tmp_path / "bad_policy.json"
+    bad_policy.write_text('{"fake": 1.0}', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Unknown arm"):
+        RecommenderService.from_artifacts(
+            artifact_path, cold_start_policy_path=bad_policy
+        )

@@ -8,9 +8,14 @@ from typing import Any, Literal, cast
 import numpy as np
 
 from music_recommender.artifacts import RecommenderArtifact, load_artifact
+from music_recommender.bandit import (
+    load_cold_start_policy,
+    rank_cold_start_bandit,
+)
 from music_recommender.baselines import popular_artists
 from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
+    COLD_START_POLICY_PATH,
     DEFAULT_CONTENT_WEIGHT,
     RAW_TRACK_DATA_PATH,
     RAW_TRACK_METADATA_PATH,
@@ -51,16 +56,30 @@ from music_recommender.tracks import (
 class RecommenderService:
     """Thin serving layer around a loaded recommender artifact."""
 
-    def __init__(self, artifact: RecommenderArtifact) -> None:
+    def __init__(
+        self,
+        artifact: RecommenderArtifact,
+        cold_start_policy: dict[str, float] | None = None,
+    ) -> None:
         self.artifact = artifact
+        self.cold_start_policy = cold_start_policy
 
     @classmethod
     def from_artifacts(
         cls,
         artifact_path: str | Path = ARTIFACT_BUNDLE_PATH,
+        cold_start_policy_path: str | Path | None = COLD_START_POLICY_PATH,
     ) -> RecommenderService:
-        """Load a service from a saved artifact bundle."""
-        return cls(load_artifact(artifact_path))
+        """Load a service from a saved artifact bundle.
+
+        If ``cold_start_policy_path`` points at an existing cold-start bandit
+        policy JSON (default: the project report path), it is loaded so unknown
+        users are served by the learned bandit blend instead of pure popularity.
+        """
+        service = cls(load_artifact(artifact_path))
+        if cold_start_policy_path is not None and Path(cold_start_policy_path).exists():
+            service.cold_start_policy = load_cold_start_policy(cold_start_policy_path)
+        return service
 
     def metadata(self) -> dict[str, Any]:
         """Return artifact and training metadata."""
@@ -70,6 +89,10 @@ class RecommenderService:
             "training_config": self.artifact.training_config,
             "hybrid_config": self.artifact.hybrid_config,
             "ranking_config": self.artifact.ranking_config,
+            "cold_start": {
+                "strategy": ("bandit" if self.cold_start_policy else "popular"),
+                "policy": self.cold_start_policy,
+            },
             "ltr": {
                 "available": self.artifact.ltr_model is not None,
                 "track_available": (
@@ -158,6 +181,22 @@ class RecommenderService:
                 "user_id": user_id,
                 "strategy": "hybrid_personalized",
                 "content_weight": content_weight,
+                "recommendations": recommendations,
+            }
+
+        if self.cold_start_policy:
+            recommendations = rank_cold_start_bandit(
+                self.cold_start_policy,
+                self.artifact.artist_stats,
+                top_k,
+            )
+            return {
+                "user_id": user_id,
+                "strategy": "bandit_fallback",
+                "message": (
+                    f"Unknown user_id '{user_id}'. Returning artists ranked "
+                    "by the learned cold-start bandit policy."
+                ),
                 "recommendations": recommendations,
             }
 
