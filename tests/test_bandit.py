@@ -18,11 +18,14 @@ from music_recommender.bandit import (
     build_cold_start_context,
     derive_cold_start_policy,
     load_bandit_report,
+    load_bandit_state,
     load_cold_start_policy,
     rank_cold_start_arm,
     rank_cold_start_bandit,
     simulate_cold_start_exploration,
+    snapshot_bandit_state,
     write_bandit_report,
+    write_bandit_state,
     write_cold_start_policy,
 )
 from music_recommender.baselines import popular_artists
@@ -371,6 +374,107 @@ class TestColdStartPolicyIO:
     def test_write_validates_policy(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="Unknown arm"):
             write_cold_start_policy({"fake": 1.0}, tmp_path)
+
+
+def _trained_bandit(context_dim: int = 2) -> LinUCBContextualBandit:
+    bandit = LinUCBContextualBandit(DEFAULT_COLD_START_ARMS, context_dim, alpha=0.5)
+    for _ in range(40):
+        context = [1.0, 0.5] + [0.0] * (context_dim - 2)
+        arm = bandit.select_arm(context)
+        bandit.update(arm, context, 0.2)
+    return bandit
+
+
+class TestBanditStateSnapshotRestore:
+    def test_snapshot_restore_roundtrip(self) -> None:
+        bandit = _trained_bandit()
+        state = snapshot_bandit_state(bandit)
+        restored = LinUCBContextualBandit.from_state(state)
+
+        assert restored.arms == bandit.arms
+        assert restored.context_dim == bandit.context_dim
+        assert restored.alpha == bandit.alpha
+        assert restored.selections == bandit.selections
+        assert restored.rewards == bandit.rewards
+        for arm in bandit.arms:
+            assert np.allclose(restored._a[arm], bandit._a[arm])
+            assert np.allclose(restored._b[arm], bandit._b[arm])
+
+    def test_restored_engine_selects_identically(self) -> None:
+        bandit = _trained_bandit()
+        restored = LinUCBContextualBandit.from_state(snapshot_bandit_state(bandit))
+        assert bandit.select_arm([1.0, 0.5]) == restored.select_arm([1.0, 0.5])
+
+    def test_fresh_state_has_identity_statistics(self) -> None:
+        bandit = LinUCBContextualBandit(("popular", "long_tail"), 2)
+        state = snapshot_bandit_state(bandit)
+        for arm in bandit.arms:
+            assert state["arms"][arm]["selections"] == 0
+            assert state["arms"][arm]["rewards"] == 0.0
+            assert np.allclose(state["arms"][arm]["a"], np.eye(2))
+
+    def test_from_state_validation(self) -> None:
+        bandit = _trained_bandit()
+        state = snapshot_bandit_state(bandit)
+
+        with pytest.raises(ValueError, match="config"):
+            LinUCBContextualBandit.from_state({"arms": {}})
+        with pytest.raises(ValueError, match="arms"):
+            LinUCBContextualBandit.from_state(
+                {"config": {"arms": [], "context_dim": 2, "alpha": 0.5}, "arms": {}}
+            )
+        with pytest.raises(ValueError, match="context_dim"):
+            LinUCBContextualBandit.from_state(
+                {
+                    "config": {
+                        "arms": list(bandit.arms),
+                        "context_dim": 0,
+                        "alpha": 0.5,
+                    },
+                    "arms": {},
+                }
+            )
+        with pytest.raises(ValueError, match="match the configured arm"):
+            mismatch = dict(state)
+            mismatch["arms"] = {"popular": state["arms"]["popular"]}
+            LinUCBContextualBandit.from_state(mismatch)
+        with pytest.raises(ValueError, match="shape"):
+            bad_shape = dict(state)
+            bad_shape["arms"]["popular"]["a"] = [[1.0, 0.0]]
+            LinUCBContextualBandit.from_state(bad_shape)
+
+
+class TestBanditStateIO:
+    def test_state_roundtrip(self, tmp_path: Path) -> None:
+        bandit = _trained_bandit()
+        state = snapshot_bandit_state(bandit)
+        written = write_bandit_state(state, tmp_path, state_name="prior")
+        assert written.exists()
+        assert written.name == "prior.json"
+
+        loaded = load_bandit_state(written)
+        assert loaded["config"] == state["config"]
+        assert loaded["arms"] == state["arms"]
+
+    def test_default_state_name(self, tmp_path: Path) -> None:
+        bandit = _trained_bandit()
+        written = write_bandit_state(snapshot_bandit_state(bandit), tmp_path)
+        assert written.name == "bandit_state.json"
+
+    def test_load_state_validates_file(self, tmp_path: Path) -> None:
+        missing = tmp_path / "missing.json"
+        with pytest.raises(FileNotFoundError, match="not found"):
+            load_bandit_state(missing)
+
+        corrupt = tmp_path / "corrupt.json"
+        corrupt.write_text("{nope", encoding="utf-8")
+        with pytest.raises(ValueError, match="Failed to parse"):
+            load_bandit_state(corrupt)
+
+        wrong_schema = tmp_path / "wrong.json"
+        wrong_schema.write_text(json.dumps({"foo": 1}), encoding="utf-8")
+        with pytest.raises(ValueError, match="not a valid bandit state"):
+            load_bandit_state(wrong_schema)
 
 
 class TestCLISimulateBandit:

@@ -1,4 +1,4 @@
-"""Contextual bandit simulation for cold-start exploration.
+"""Contextual bandit simulation and online feedback for cold-start exploration.
 
 Cold-start users have no listening history, so the system currently serves a
 static ``popular_artists`` fallback with no exploration. This module simulates
@@ -6,6 +6,12 @@ an online contextual bandit that decides which *arm* (cold-start strategy) to
 serve per user context, learns from a precision@k-style engagement reward, and
 reports cumulative reward and regret against always-popular and best-in-
 hindsight policies.
+
+The learned bandit state (ridge-regression statistics ``a``/``b`` plus
+selection and reward tallies per arm) can be snapshotted to a persistent
+``bandit_state.json``, folded together with new observations from a live
+serving feedback journal, and restored as the prior of a future simulation so
+the cold-start policy keeps improving across deployments.
 """
 
 from __future__ import annotations
@@ -133,6 +139,142 @@ class LinUCBContextualBandit:
         self._b[arm] = self._b[arm] + reward * context_array
         self.selections[arm] += 1
         self.rewards[arm] += float(reward)
+
+    @classmethod
+    def from_state(cls, state: dict[str, Any]) -> LinUCBContextualBandit:
+        """Build an engine from a persisted bandit state snapshot."""
+        if not isinstance(state, dict) or "config" not in state or "arms" not in state:
+            raise ValueError("Bandit state must contain 'config' and 'arms' sections.")
+
+        config = state["config"]
+        if not isinstance(config, dict):
+            raise ValueError("Bandit state 'config' must be a dictionary.")
+        arms = config.get("arms")
+        context_dim = config.get("context_dim")
+        alpha = config.get("alpha")
+        if not isinstance(arms, list) or not arms:
+            raise ValueError("Bandit state 'config.arms' must be a non-empty list.")
+        if type(context_dim) is not int or context_dim < 1:
+            raise ValueError(
+                "Bandit state 'config.context_dim' must be a positive int."
+            )
+        if (
+            not isinstance(alpha, (int, float))
+            or not np.isfinite(float(alpha))
+            or float(alpha) <= 0
+        ):
+            raise ValueError(
+                "Bandit state 'config.alpha' must be a finite positive number."
+            )
+        alpha_value = float(alpha)
+
+        _validate_arms([str(arm) for arm in arms])
+        bandit = cls(
+            [str(arm) for arm in arms],
+            context_dim,
+            alpha=alpha_value,
+        )
+
+        recorded = state["arms"]
+        if not isinstance(recorded, dict) or set(recorded) != set(bandit.arms):
+            raise ValueError(
+                "Bandit state 'arms' must match the configured arm names exactly."
+            )
+        for arm in bandit.arms:
+            arm_state = recorded[arm]
+            if not isinstance(arm_state, dict):
+                raise ValueError(f"Bandit state for arm '{arm}' must be a dictionary.")
+            matrix = arm_state.get("a")
+            vector = arm_state.get("b")
+            selections = arm_state.get("selections")
+            rewards = arm_state.get("rewards")
+            try:
+                matrix_array = np.asarray(matrix, dtype=float)
+                vector_array = np.asarray(vector, dtype=float)
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    f"Bandit state for arm '{arm}' has non-numeric statistics."
+                ) from error
+            if matrix_array.shape != (context_dim, context_dim):
+                raise ValueError(
+                    f"Bandit state for arm '{arm}' has an invalid 'a' matrix shape."
+                )
+            if vector_array.shape != (context_dim,):
+                raise ValueError(
+                    f"Bandit state for arm '{arm}' has an invalid 'b' vector shape."
+                )
+            if type(selections) is not int or selections < 0:
+                raise ValueError(
+                    f"Bandit state for arm '{arm}' has invalid "
+                    "selection/reward tallies."
+                )
+            if not isinstance(rewards, (int, float)) or not np.isfinite(rewards):
+                raise ValueError(
+                    f"Bandit state for arm '{arm}' has invalid "
+                    "selection/reward tallies."
+                )
+            reward_value = float(rewards)
+
+            bandit._a[arm] = matrix_array
+            bandit._b[arm] = vector_array
+            bandit.selections[arm] = selections
+            bandit.rewards[arm] = reward_value
+        return bandit
+
+
+def snapshot_bandit_state(bandit: LinUCBContextualBandit) -> dict[str, Any]:
+    """Serialize a bandit engine's learned state for persistence."""
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "config": {
+            "arms": list(bandit.arms),
+            "context_dim": bandit.context_dim,
+            "alpha": bandit.alpha,
+        },
+        "arms": {
+            arm: {
+                "a": [[float(value) for value in row] for row in bandit._a[arm]],
+                "b": [float(value) for value in bandit._b[arm]],
+                "selections": int(bandit.selections[arm]),
+                "rewards": float(bandit.rewards[arm]),
+            }
+            for arm in bandit.arms
+        },
+    }
+
+
+def write_bandit_state(
+    state: dict[str, Any],
+    state_dir: Path | str,
+    *,
+    state_name: str | None = None,
+) -> Path:
+    """Persist a bandit engine state as JSON."""
+    target_dir = Path(state_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    state_path = target_dir / f"{state_name or 'bandit_state'}.json"
+    state_path.write_text(
+        json.dumps(state, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return state_path
+
+
+def load_bandit_state(state_path: Path | str) -> dict[str, Any]:
+    """Load and validate a persisted bandit engine state."""
+    path = Path(state_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Bandit state not found: {path}")
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(f"Failed to parse bandit state '{path}': {error}") from error
+    if not isinstance(state, dict) or "config" not in state or "arms" not in state:
+        raise ValueError(
+            f"'{path}' is not a valid bandit state (missing 'config' or 'arms')."
+        )
+    LinUCBContextualBandit.from_state(state)
+    return state
 
 
 def rank_cold_start_arm(
