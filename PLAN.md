@@ -187,7 +187,49 @@ It is updated incrementally as phases land.
   `evaluate --pareto-frontier` command, and track evaluation parity. (commit `ee6ecd0`)
 - Phase 65 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to 0.18.0.
 
-## Current milestone (0.20.0) — shipped
+## Current milestone (0.21.0) — in progress
+
+Online bandit updates from live serving feedback: the LinUCB engine's learned
+state (ridge-statistics A/b, selection counts, cumulative rewards) becomes a
+persisted, mergeable prior. Simulation resumes from a prior state, a feedback
+journal captures reward observed per served request, and an update step folds
+new observations into the prior so the next simulation (and the policy derived
+from its report) starts from accumulated experience instead of scratch.
+
+- Phase 75 — LinUCB state snapshot/restore:
+  - `snapshot_bandit_state` / `LinUCBContextualBandit.from_state`: export and
+    restore the engine's sufficient statistics (per-arm `a`, `b`,
+    `selections`, `rewards`) plus config (arms, context_dim, alpha), with
+    full validation so a restored engine is byte-identical in behavior.
+  - `write_bandit_state` / `load_bandit_state`: persistent JSON state files
+    mirroring the report/policy I/O pattern; default `reports/bandit_state.json`.
+- Phase 76 — Feedback journal and additive fold:
+  - `append_bandit_feedback` / `load_bandit_feedback`: append/read served-
+    request observations `{context, arm, reward}` at `reports/bandit_feedback.json`.
+  - `fold_bandit_state`: apply a batch of feedback records to a prior state by
+    replaying the engine's additive ridge regression (`A += x xᵀ`,
+    `b += r x`, tally increments), returning an updated prior.
+  - `feedback_from_report`: extract round observations from a bandit report so
+    offline batches can be folded too.
+- Phase 77 — Simulation from a prior:
+  - `simulate_cold_start_exploration` gains `initial_state`; round records now
+    carry the `context` vector so reports are replayable as feedback. Report
+    arms statistics accumulate prior + new learning.
+- Phase 78 — CLI wiring:
+  - `simulate-bandit --from-state` (resume learning from a persisted state), and
+    `--write-state` writes the trained state to `reports/bandit_state.json`.
+  - New `bandit-update` command folding a report or journal into a prior state
+    (defaults to the persisted state), printing per-arm before/after stats.
+  - New `record-bandit-feedback` command appending a served-request observation
+    to the feedback journal.
+- Phase 79 — Tests: state snapshot/restore roundtrips and validation, additive
+  fold correctness vs. direct engine updates, feedback journal append/load,
+  report-context extraction, prior-seeded simulation determinism and cumulative
+  stats, CLI wiring and error paths.
+- Phase 80 — Docs and release: PLAN, README (feedback loop), CHANGELOG, version
+  bump to 0.21.0.
+
+## Previous milestone (0.20.0) — shipped
 
 Live serving integration of the cold-start bandit: the `popular_fallback` path is
 rewritten so an unknown user is served by the bandit's learned policy (arm weights
@@ -241,11 +283,12 @@ is preserved when no policy file exists.
 - Phase 69 — Docs and release: PLAN, README (evaluation + CLI), CHANGELOG,
   version bump to 0.19.0.
 
-## Next steps (after 0.20.0)
+## Next steps (after 0.21.0)
 
 1. Two-tower neural candidate retrieval (PyTorch / ONNX runtime).
-2. Online bandit updates from live serving feedback (reward observed per served
-   request, persisted as the next simulation's prior).
+2. Per-request online serving: `recommend-user` (unknown-user branch) logs the
+   served context and computes an engagement reward for `record-bandit-feedback`
+   directly from the blended serving response.
 
 ## Quality gates (every change)
 
