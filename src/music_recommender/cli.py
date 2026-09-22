@@ -12,11 +12,15 @@ import typer
 from music_recommender import __version__
 from music_recommender.bandit import (
     DEFAULT_COLD_START_ARMS,
+    derive_cold_start_policy,
+    load_bandit_report,
     simulate_cold_start_exploration,
     write_bandit_report,
+    write_cold_start_policy,
 )
 from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
+    COLD_START_POLICY_PATH,
     DATA_DIR,
     DEFAULT_ALS_ALPHA,
     DEFAULT_ALS_FACTORS,
@@ -386,6 +390,11 @@ def recommend_user(
     ),
     content_weight: float = DEFAULT_CONTENT_WEIGHT,
     explain: bool = False,
+    cold_start_policy_path: str | None = typer.Option(
+        None,
+        "--cold-start-policy-path",
+        help="Path to a cold-start bandit policy JSON for unknown-user serving.",
+    ),
     ltr: bool = typer.Option(
         False,
         "--ltr/--no-ltr",
@@ -394,7 +403,9 @@ def recommend_user(
 ) -> None:
     """Recommend artists for a user."""
     try:
-        service = RecommenderService.from_artifacts()
+        service = RecommenderService.from_artifacts(
+            cold_start_policy_path=cold_start_policy_path
+        )
         if ltr:
             response = service.recommend_user_ltr(
                 user_id=user_id,
@@ -2024,6 +2035,57 @@ def simulate_bandit(
         report_name=report_name,
     )
     typer.echo(f"Bandit simulation report written to: {written}")
+
+
+@app.command()
+def bandit_policy(
+    report_path: str = typer.Option(
+        REPORTS_DIR / "bandit_simulation.json",
+        "--report-path",
+        help="Path to a bandit simulation JSON report to derive weights from.",
+    ),
+    temperature: float = typer.Option(
+        1.0,
+        "--temperature",
+        min=0.01,
+        help="Softmax temperature scaling arm weights from mean rewards.",
+    ),
+    policy_name: str | None = typer.Option(
+        None,
+        "--policy-name",
+        help="Name for the cold-start policy JSON file.",
+    ),
+    policy_dir: str | None = typer.Option(
+        None,
+        "--policy-dir",
+        help="Directory for the persisted cold-start policy.",
+    ),
+) -> None:
+    """Derive cold-start arm weights from a bandit report into a serving policy."""
+    resolved_policy_dir = Path(policy_dir) if policy_dir is not None else REPORTS_DIR
+    try:
+        report = load_bandit_report(report_path)
+        policy = derive_cold_start_policy(report, temperature=temperature)
+        written = write_cold_start_policy(
+            policy,
+            resolved_policy_dir,
+            policy_name=policy_name,
+        )
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo("Learned cold-start policy arm weights:")
+    typer.echo(f"{'Arm':<12} {'Weight':>12}")
+    typer.echo("-" * 26)
+    for arm, weight in sorted(policy.items(), key=lambda item: (-item[1], item[0])):
+        typer.echo(f"{arm:<12} {weight:>12.6f}")
+    typer.echo(f"Cold-start policy written to: {written}")
+    if Path(written).resolve() == COLD_START_POLICY_PATH.resolve():
+        typer.echo(
+            "Policy saved to the default serving location; "
+            "recommend-user will now use it for unknown users."
+        )
 
 
 if __name__ == "__main__":

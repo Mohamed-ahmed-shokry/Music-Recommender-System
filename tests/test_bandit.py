@@ -413,3 +413,73 @@ class TestCLISimulateBandit:
         )
         assert result.exit_code == 1
         assert "Error:" in result.output
+
+
+def _write_bandit_report(tmp_path: Path) -> Path:
+    report = {
+        "config": {"rounds": 2},
+        "arms": {
+            "popular": {"selections": 1, "mean_reward": 0.2},
+            "balanced": {"selections": 1, "mean_reward": 0.4},
+            "long_tail": {"selections": 1, "mean_reward": 0.6},
+        },
+        "summary": {"rounds_completed": 2},
+        "rounds": [],
+    }
+    report_path = tmp_path / "bandit_simulation.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    return report_path
+
+
+class TestCLIBanditPolicy:
+    def test_cli_bandit_policy_writes_policy(self, tmp_path: Path) -> None:
+        report_path = _write_bandit_report(tmp_path)
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "bandit-policy",
+                "--report-path",
+                str(report_path),
+                "--policy-dir",
+                str(tmp_path),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "Learned cold-start policy arm weights:" in result.output
+        assert (tmp_path / "cold_start_policy.json").exists()
+        assert "Cold-start policy written to:" in result.output
+
+    def test_cli_bandit_policy_custom_name(self, tmp_path: Path) -> None:
+        report_path = _write_bandit_report(tmp_path)
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "bandit-policy",
+                "--report-path",
+                str(report_path),
+                "--policy-name",
+                "learned_serving",
+                "--policy-dir",
+                str(tmp_path),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert (tmp_path / "learned_serving.json").exists()
+
+    def test_cli_bandit_policy_handles_missing_report(self, tmp_path: Path) -> None:
+        result = runner.invoke(
+            cli.app,
+            [
+                "bandit-policy",
+                "--report-path",
+                str(tmp_path / "missing.json"),
+                "--policy-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "Error:" in result.output

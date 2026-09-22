@@ -995,7 +995,7 @@ def install_fake_service(
     monkeypatch.setattr(
         cli,
         "RecommenderService",
-        SimpleNamespace(from_artifacts=lambda *_: fake),
+        SimpleNamespace(from_artifacts=lambda *_, **__: fake),
     )
     return fake
 
@@ -1092,6 +1092,25 @@ def test_recommend_user_command_reports_unknown_user(monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert "Unknown user_id 'new_user'." in result.output
+
+
+def test_recommend_user_command_accepts_cold_start_policy_path(monkeypatch) -> None:
+    fake = FakeService()
+    install_fake_service(monkeypatch, fake)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "recommend-user",
+            "--user-id",
+            "user_1",
+            "--cold-start-policy-path",
+            "some/policy.json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Strategy: hybrid_personalized" in result.output
 
 
 def test_recommend_user_command_with_ltr_uses_ltr_strategy(monkeypatch) -> None:
@@ -1369,7 +1388,7 @@ def test_recommendation_commands_report_service_errors(
     arguments: list[str],
     message: str,
 ) -> None:
-    def fail_load(*_: Any) -> None:
+    def fail_load(*_: Any, **__: Any) -> None:
         raise ValueError(message)
 
     monkeypatch.setattr(
