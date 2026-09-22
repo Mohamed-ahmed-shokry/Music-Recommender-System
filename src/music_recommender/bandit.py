@@ -521,6 +521,7 @@ def simulate_cold_start_exploration(
     arms: Sequence[str] = DEFAULT_COLD_START_ARMS,
     alpha: float = 1.0,
     context_features: Sequence[str] = DEFAULT_CONTEXT_FEATURES,
+    initial_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Simulate an online LinUCB bandit serving cold-start users.
 
@@ -536,6 +537,11 @@ def simulate_cold_start_exploration(
     fallback) and the in-hindsight best arm per round are evaluated so regret
     and exploration gains can be quantified. The simulation is deterministic
     for a given seed.
+
+    ``initial_state`` restores a persisted engine (e.g. from a prior run or a
+    folded feedback journal) so the simulation continues learning from
+    accumulated experience instead of starting fresh; when given, it must
+    match ``arms``, ``context_features``, and ``alpha``.
     """
     validate_ranking_parameters(top_k)
     if type(rounds) is not int or rounds < 1:
@@ -566,7 +572,25 @@ def simulate_cold_start_exploration(
         for artist_id, stats in artist_stats.items()
     }
 
-    bandit = LinUCBContextualBandit(arms, len(context_features), alpha=alpha)
+    if initial_state is not None:
+        bandit = LinUCBContextualBandit.from_state(initial_state)
+        if list(bandit.arms) != list(arms):
+            raise ValueError(
+                "initial_state arms must match the simulation arms "
+                f"({', '.join(arms)})."
+            )
+        if bandit.context_dim != len(context_features):
+            raise ValueError(
+                "initial_state context_dim must match the number of context_features."
+            )
+        if bandit.alpha != float(alpha):
+            raise ValueError("initial_state alpha must match the simulation alpha.")
+        prior_selections = sum(bandit.selections.values())
+        prior_rewards = sum(bandit.rewards.values())
+    else:
+        bandit = LinUCBContextualBandit(arms, len(context_features), alpha=alpha)
+        prior_selections = 0
+        prior_rewards = 0.0
 
     round_records: list[dict[str, Any]] = []
     cumulative_reward = 0.0
@@ -620,6 +644,7 @@ def simulate_cold_start_exploration(
                 "round": round_index + 1,
                 "user_id": str(user_id),
                 "arm": chosen_arm,
+                "context": [round(float(value), 6) for value in context],
                 "reward": round(reward, 6),
                 "best_reward": round(best_reward, 6),
             }
@@ -640,6 +665,10 @@ def simulate_cold_start_exploration(
             "context_features": list(context_features),
             "catalog_size": len(artist_stats),
             "cold_users": num_cold,
+            "prior": {
+                "selections": int(prior_selections),
+                "total_reward": round(prior_rewards, 6),
+            },
         },
         "arms": {
             arm: {

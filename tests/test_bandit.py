@@ -14,6 +14,7 @@ from typer.testing import CliRunner
 from music_recommender import cli
 from music_recommender.bandit import (
     DEFAULT_COLD_START_ARMS,
+    DEFAULT_CONTEXT_FEATURES,
     LinUCBContextualBandit,
     append_bandit_feedback,
     build_cold_start_context,
@@ -747,3 +748,61 @@ class TestFeedbackFromReport:
             feedback_from_report(report)
         with pytest.raises(ValueError, match="'rounds' list"):
             feedback_from_report({"summary": {}})
+
+
+class TestSimulateFromPrior:
+    def test_prior_augments_arm_stats(self) -> None:
+        df = _interactions_df()
+        first = simulate_cold_start_exploration(df, top_k=5, rounds=30, seed=1)
+        bandit = _trained_bandit(context_dim=len(DEFAULT_CONTEXT_FEATURES))
+        state = snapshot_bandit_state(bandit)
+
+        seeded = simulate_cold_start_exploration(
+            df,
+            top_k=5,
+            rounds=30,
+            seed=1,
+            arms=DEFAULT_COLD_START_ARMS,
+            alpha=0.5,
+            initial_state=state,
+        )
+        for arm in DEFAULT_COLD_START_ARMS:
+            assert seeded["arms"][arm]["selections"] >= state["arms"][arm]["selections"]
+        assert seeded["config"]["prior"]["selections"] == sum(
+            state["arms"][arm]["selections"] for arm in DEFAULT_COLD_START_ARMS
+        )
+        assert seeded["config"]["prior"] != first["config"]["prior"]
+
+    def test_round_records_include_context(self) -> None:
+        report = _run_simulation(seed=1)
+        for round_record in report["rounds"]:
+            assert len(round_record["context"]) == len(DEFAULT_CONTEXT_FEATURES)
+            assert all(np.isfinite(value) for value in round_record["context"])
+
+    def test_seeded_simulation_is_deterministic(self) -> None:
+        df = _interactions_df()
+        state = snapshot_bandit_state(
+            _trained_bandit(context_dim=len(DEFAULT_CONTEXT_FEATURES))
+        )
+        first = simulate_cold_start_exploration(
+            df, top_k=5, rounds=30, seed=1, alpha=0.5, initial_state=state
+        )
+        second = simulate_cold_start_exploration(
+            df, top_k=5, rounds=30, seed=1, alpha=0.5, initial_state=state
+        )
+        first.pop("generated_at", None)
+        second.pop("generated_at", None)
+        assert first == second
+
+    def test_prior_state_mismatch_validation(self) -> None:
+        df = _interactions_df()
+        state = snapshot_bandit_state(_trained_bandit())
+        with pytest.raises(ValueError, match="arms must match"):
+            simulate_cold_start_exploration(
+                df,
+                top_k=5,
+                rounds=30,
+                seed=1,
+                arms=("popular",),
+                initial_state=state,
+            )
