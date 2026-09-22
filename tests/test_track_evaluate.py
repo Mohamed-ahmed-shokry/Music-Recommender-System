@@ -514,5 +514,3 @@ def test_evaluate_track_holdout_rejects_invalid_novelty_weight() -> None:
             top_k=2,
             novelty_weight=1.5,
         )
-
-

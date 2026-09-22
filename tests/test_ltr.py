@@ -583,13 +583,16 @@ def test_rank_tracks_with_ltr_handles_unknown_candidates() -> None:
         {"track_id": "ghost_1", "score": 0.9},
         {"track_id": "ghost_2", "score": 0.8},
     ]
-    assert rank_tracks_with_ltr(
-        ranker,
-        recommendations=all_unknown,
-        user_id="u1",
-        resources=resources,
-        top_k=2,
-    ) == all_unknown
+    assert (
+        rank_tracks_with_ltr(
+            ranker,
+            recommendations=all_unknown,
+            user_id="u1",
+            resources=resources,
+            top_k=2,
+        )
+        == all_unknown
+    )
 
     # Mixed known and unknown: known comes first
     mixed = [
@@ -645,4 +648,3 @@ def test_track_popularity_features_helper() -> None:
     )
     assert log_plays_missing == 0.0
     assert norm_rank_missing == 0.0
-

@@ -825,4 +825,3 @@ def test_load_artifact_without_track_ltr_model_defaults_none(tmp_path: Path) -> 
 
     loaded = load_artifact(artifact_path)
     assert getattr(loaded, "track_ltr_model", None) is None
-

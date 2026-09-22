@@ -143,12 +143,11 @@ def rerank_multi_objective(
             best_idx = max(
                 remaining,
                 key=lambda idx: (
-                    w_rel * norm_scores[idx]
-                    + w_div * 1.0
-                    + w_nov * novelty_scores[idx]
+                    w_rel * norm_scores[idx] + w_div * 1.0 + w_nov * novelty_scores[idx]
                 ),
             )
         else:
+
             def marginal_utility(candidate_idx: int) -> float:
                 u_rel = norm_scores[candidate_idx]
                 u_nov = novelty_scores[candidate_idx]

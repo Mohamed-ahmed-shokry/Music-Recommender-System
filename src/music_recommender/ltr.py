@@ -29,7 +29,6 @@ if TYPE_CHECKING:
     from music_recommender.tracks import TrackServingResources
 
 
-
 def _validate_ltr_inputs(
     user_item_matrix: csr_matrix,
     model: Any,
@@ -463,15 +462,13 @@ def rank_tracks_with_ltr(
             if tid in resources.track_id_to_index
         ]
         if listened_indices:
-            similarity_scores = resources.similarity_matrix[
-                :, listened_indices
-            ].mean(axis=1)
+            similarity_scores = resources.similarity_matrix[:, listened_indices].mean(
+                axis=1
+            )
             user_interaction_count = float(len(listened_indices))
 
     candidate_rows: list[list[float]] = []
-    for track_index, recommendation in zip(
-        track_indices, recommendations, strict=True
-    ):
+    for track_index, recommendation in zip(track_indices, recommendations, strict=True):
         if track_index >= 0:
             if similarity_scores is not None:
                 base_score = float(similarity_scores[track_index])
@@ -490,9 +487,7 @@ def rank_tracks_with_ltr(
 
     scored_pairs: list[tuple[float, dict[str, Any]]] = []
     pred_idx = 0
-    for track_index, recommendation in zip(
-        track_indices, recommendations, strict=True
-    ):
+    for track_index, recommendation in zip(track_indices, recommendations, strict=True):
         if track_index >= 0:
             scored_pairs.append((float(predicted[pred_idx]), recommendation))
             pred_idx += 1
@@ -502,4 +497,3 @@ def rank_tracks_with_ltr(
     scored_pairs.sort(key=lambda pair: pair[0], reverse=True)
     re_ranked = [recommendation for _, recommendation in scored_pairs]
     return re_ranked[:top_k]
-

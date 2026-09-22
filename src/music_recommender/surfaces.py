@@ -46,9 +46,7 @@ def _extract_primary_metrics(metrics: Mapping[str, Any]) -> dict[str, float]:
     first_val = next(iter(metrics.values()))
     if isinstance(first_val, dict):
         return {
-            k: float(v)
-            for k, v in first_val.items()
-            if isinstance(v, (int, float))
+            k: float(v) for k, v in first_val.items() if isinstance(v, (int, float))
         }
     raise ValueError("Could not extract valid metric dictionary.")
 

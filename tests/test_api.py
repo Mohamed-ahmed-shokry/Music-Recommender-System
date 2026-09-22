@@ -1069,7 +1069,6 @@ def test_track_recommend_ltr_route() -> None:
     assert len(body["recommendations"]) == 1
 
 
-
 def test_track_recommend_route_rejects_invalid_method() -> None:
     with TestClient(api_main.app) as client:
         api_main.service = FakeService()
@@ -1242,4 +1241,3 @@ def test_recommend_tracks_novelty_weight() -> None:
 
     assert response.status_code == 200
     assert response.json()["novelty_weight"] == 0.45
-

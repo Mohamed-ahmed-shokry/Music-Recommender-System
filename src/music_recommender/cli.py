@@ -1735,10 +1735,7 @@ def evaluate_tracks(
             " --compare-baseline or --compare-all."
         )
     if ablations is not None and (
-        compare_settings is not None
-        or compare_baseline
-        or compare_all
-        or learn_to_rank
+        compare_settings is not None or compare_baseline or compare_all or learn_to_rank
     ):
         raise typer.BadParameter(
             "--ablations cannot be combined with --compare-settings,"
@@ -1936,9 +1933,7 @@ def evaluate_surfaces(
         raise typer.Exit(code=1) from error
 
     typer.echo(f"Cross-surface evaluation over {folds} fold(s) (top_k={top_k}):")
-    typer.echo(
-        f"{'Metric':<25} {'Artist (ALS)':>14} {'Track (Sim)':>14} {'Delta':>10}"
-    )
+    typer.echo(f"{'Metric':<25} {'Artist (ALS)':>14} {'Track (Sim)':>14} {'Delta':>10}")
     typer.echo("-" * 65)
     for metric, stats in comparison["comparison"].items():
         typer.echo(
@@ -1964,4 +1959,3 @@ def evaluate_surfaces(
 
 if __name__ == "__main__":
     app()  # pragma: no cover - CLI entry point invoked by `python -m`
-

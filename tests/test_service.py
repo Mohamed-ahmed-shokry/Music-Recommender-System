@@ -976,5 +976,3 @@ def test_recommend_tracks_with_novelty_weight(tmp_path: Path) -> None:
     )
     assert result["strategy"] == "track_similarity"
     assert len(result["recommendations"]) == 3
-
-

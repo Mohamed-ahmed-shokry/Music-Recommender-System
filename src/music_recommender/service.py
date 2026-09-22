@@ -846,9 +846,7 @@ class RecommenderService:
             if popularity_penalty is None
             else popularity_penalty,
             champion["diversity"] if diversity is None else diversity,
-            champion["novelty_weight"]
-            if novelty_weight is None
-            else novelty_weight,
+            champion["novelty_weight"] if novelty_weight is None else novelty_weight,
         )
 
     def _collaborative_scores_for_user(self, user_id: str) -> np.ndarray:

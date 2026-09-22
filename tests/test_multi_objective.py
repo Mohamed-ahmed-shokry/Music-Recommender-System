@@ -124,18 +124,12 @@ def test_rerank_multi_objective_novelty_promotes_long_tail() -> None:
 
 def test_rerank_multi_objective_edge_cases() -> None:
     assert rerank_multi_objective([], np.array([]), None, None, None, top_k=5) == []
-    assert (
-        rerank_multi_objective(
-            [3], np.array([0, 0, 0, 1.0]), None, None, None, top_k=5
-        )
-        == [3]
-    )
-    assert (
-        rerank_multi_objective(
-            [1, 2], np.array([0, 0.5, 0.8]), None, None, None, top_k=1
-        )
-        == [1]
-    )
+    assert rerank_multi_objective(
+        [3], np.array([0, 0, 0, 1.0]), None, None, None, top_k=5
+    ) == [3]
+    assert rerank_multi_objective(
+        [1, 2], np.array([0, 0.5, 0.8]), None, None, None, top_k=1
+    ) == [1]
     with pytest.raises(ValueError, match="top_k must be a positive integer"):
         rerank_multi_objective([1], np.array([1.0]), None, None, None, top_k=0)
 

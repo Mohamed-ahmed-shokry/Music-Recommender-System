@@ -1775,7 +1775,6 @@ def test_evaluate_tracks_compare_all_learn_to_rank() -> None:
     assert "LTR:" in result.output
 
 
-
 def test_evaluate_tracks_compare_settings_prints_labeled_rows() -> None:
     result = runner.invoke(
         cli.app,
