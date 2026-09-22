@@ -187,7 +187,36 @@ It is updated incrementally as phases land.
   `evaluate --pareto-frontier` command, and track evaluation parity. (commit `ee6ecd0`)
 - Phase 65 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to 0.18.0.
 
-## Current milestone (0.19.0) — shipped
+## Current milestone (0.20.0) — in progress
+
+Live serving integration of the cold-start bandit: rewrite the `popular_fallback`
+path so an unknown user is served by the bandit's learned policy (arm weights from
+a `simulate-bandit` report) instead of pure popularity, while preserving the old
+behavior when no policy file exists.
+
+- Phase 70 — Bandit policy derivation and serving ranking:
+  - `derive_cold_start_policy(report)`: read a bandit report and compute per-arm
+    serving weights (softmax over `mean_reward`), deterministic.
+  - `rank_cold_start_bandit(policy, artist_stats, top_k)`: serve top-k by a
+    positional weighted blend of the arm rankings (Borda-style), deterministic,
+    reducing to `popular_artists` when the policy is `{"popular": 1.0}`.
+  - `write_cold_start_policy` / `load_cold_start_policy`: persist/validate the
+    policy JSON, mirroring the report helpers.
+- Phase 71 — Service integration: `RecommenderService` gains a `cold_start_policy`
+  loaded by `from_artifacts` (from `COLD_START_POLICY_PATH` when present);
+  `recommend_user` unknown-user branch serves `bandit_fallback` when a policy is
+  set and keeps `popular_fallback` otherwise; `metadata()` reports the active
+  cold-start strategy.
+- Phase 72 — CLI: `bandit-policy` command (derive weights from a bandit report and
+  write the policy JSON) and `recommend-user --cold-start-policy-path` to serve
+  with the learned policy.
+- Phase 73 — Tests: policy derivation determinism/validation, blended ranking
+  behavior, policy report roundtrip, service `bandit_fallback`/`popular_fallback`
+  paths, `metadata` strategy, and CLI end-to-end + error paths.
+- Phase 74 — Docs and release: PLAN, README (bandit serving), CHANGELOG, version
+  bump to 0.20.0.
+
+## Previous milestone (0.19.0) — shipped
 
 - Phase 66 — Cold-start exploration bandit simulation:
   - `bandit.py` with a LinUCB contextual bandit engine (`LinUCBContextualBandit`)
@@ -212,11 +241,11 @@ It is updated incrementally as phases land.
 - Phase 69 — Docs and release: PLAN, README (evaluation + CLI), CHANGELOG,
   version bump to 0.19.0.
 
-## Next steps (after 0.19.0)
+## Next steps (after 0.20.0)
 
 1. Two-tower neural candidate retrieval (PyTorch / ONNX runtime).
-2. Live serving integration of the bandit (rewriting the `popular_fallback`
-   cold-start path based on learned arm weights).
+2. Online bandit updates from live serving feedback (reward observed per served
+   request, persisted as the next simulation's prior).
 
 ## Quality gates (every change)
 
