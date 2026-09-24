@@ -3,6 +3,33 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
+## Current milestone (0.23.0) — in progress
+
+Contextual, per-arm served bandit feedback. 0.22.0 records served feedback but
+the context is always the neutral zero vector (the folded ridge update is a
+no-op on `A`/`b` for live serves) and only the dominant policy arm receives
+reward credit. This milestone makes live feedback genuinely train the
+contextual prior and credit every arm of the policy.
+
+- Phase 87 — Per-arm serve feedback records: `feedback_records_from_bandit_serve`
+  returns one validated record per policy arm, each rewarded by the precision@k
+  of the blended serve against that arm's own ranking; `feedback_from_bandit_serve`
+  delegates to it (dominant-arm record, unchanged contract).
+- Phase 88 — Serve-context validation: `validate_serve_context` enforces a
+  finite, non-empty numeric vector of the default feature dimension so caller
+  supplied contexts can be folded safely; wired into the serve-feedback path.
+- Phase 89 — Service integration: `recommend_user` accepts an optional
+  `context` and records the full per-arm feedback batch when `record_feedback`
+  is set, echoing the dominant arm plus the list of credited arms.
+- Phase 90 — CLI wiring: `recommend-user --context "a,b,c"` forwards a real
+  observation window (rejected without `--record-feedback`).
+- Phase 91 — API wiring: `GET /recommend/user/{user_id}?context=a,b,c` forwards
+  the observation context.
+- Phase 92 — Tests: per-arm record attribution/determinism, context validation,
+  service/CLI/API wiring and error paths.
+- Phase 93 — Docs and release: PLAN, README (contextual feedback), CHANGELOG,
+  version bump to 0.23.0.
+
 ## Previous milestone (0.22.0) — shipped
 
 Online serve-feedback loop. `recommend-user` (unknown-user branch) records the
@@ -313,18 +340,18 @@ is preserved when no policy file exists.
 - Phase 69 — Docs and release: PLAN, README (evaluation + CLI), CHANGELOG,
   version bump to 0.19.0.
 
-## Next steps (after 0.22.0)
+## Next steps (after 0.23.0)
 
 1. Two-tower neural candidate retrieval (PyTorch / ONNX runtime) — deferred
    until a real-scale catalog is available: the current sample dataset (18
    artists, 36 tracks) cannot meaningfully train or validate a neural
    retrieval model, and the phase would add heavy new dependencies.
-2. Per-request context capture: feed real user observation windows into
-   `recommend-user` so the recorded feedback context is user-specific instead
-   of the neutral vector, and fold per-arm attribution.
-3. Online bandit state snapshot and scheduled `bandit-update` folding of live
+2. Online bandit state snapshot and scheduled `bandit-update` folding of live
    serves back into the simulation prior, surfaced in the dashboard/API
    metadata.
+3. Automatic relationship between artist counts and context features when the
+   feature set changes (e.g., re-derive `DEFAULT_CONTEXT_FEATURES` from a
+   persisted configuration instead of the hard-coded tuple).
 
 ## Quality gates (every change)
 
