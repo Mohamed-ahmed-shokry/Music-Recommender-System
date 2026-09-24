@@ -241,8 +241,14 @@ def recommend_user(
     novelty_weight: UnitInterval = 0.0,
     content_weight: UnitInterval = DEFAULT_CONTENT_WEIGHT,
     explain: bool = False,
+    record_feedback: bool = False,
 ) -> dict[str, object]:
-    """Return artist recommendations for a user."""
+    """Return artist recommendations for a user.
+
+    When ``record_feedback`` is set and the user is served via the cold-start
+    bandit branch, the served context, dominant arm, and serve-fidelity reward
+    are appended to the bandit feedback journal.
+    """
     try:
         return get_service().recommend_user(
             user_id=user_id,
@@ -253,6 +259,7 @@ def recommend_user(
             novelty_weight=novelty_weight,
             content_weight=content_weight,
             explain=explain,
+            record_feedback=record_feedback,
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

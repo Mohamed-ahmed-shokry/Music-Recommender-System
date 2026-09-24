@@ -83,7 +83,22 @@ class FakeService:
         content_weight: float,
         explain: bool,
         novelty_weight: float = 0.0,
+        record_feedback: bool = False,
     ) -> dict[str, object]:
+        self.last_record_feedback = record_feedback
+        if record_feedback:
+            return {
+                "user_id": user_id,
+                "strategy": "bandit_fallback",
+                "feedback": {"recorded": True, "arm": "popular", "reward": 1.0},
+                "recommendations": [
+                    {
+                        "artist_id": "artist_2",
+                        "artist_name": "B",
+                        "score": 0.9,
+                    }
+                ][:top_k],
+            }
         return {
             "user_id": user_id,
             "strategy": "hybrid_personalized",
@@ -635,6 +650,33 @@ def test_recommend_user_ltr_route_returns_ltr_ranked_hits() -> None:
     assert body["recommendations"][0]["artist_id"] == "artist_4"
     assert body["diversity"] == 0.2
     assert body["popularity_penalty"] == 0.1
+
+
+def test_recommend_user_route_records_bandit_feedback_when_asked() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get(
+            "/recommend/user/new_user",
+            params={"record_feedback": True, "top_k": 2},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["strategy"] == "bandit_fallback"
+    assert body["feedback"] == {"recorded": True, "arm": "popular", "reward": 1.0}
+
+
+def test_recommend_user_route_no_feedback_by_default() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/recommend/user/user_1")
+
+    assert response.status_code == 200
+    assert response.json()["strategy"] == "hybrid_personalized"
 
 
 def test_recommend_user_ltr_route_turns_value_errors_into_422() -> None:
