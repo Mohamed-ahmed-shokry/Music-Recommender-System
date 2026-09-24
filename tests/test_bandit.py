@@ -1163,7 +1163,9 @@ class TestPerArmServeFeedback:
         )
         state = snapshot_bandit_state(bandit)
         updated = fold_bandit_state(state, records)
-        assert sum(updated["arms"][record["arm"]]["selections"] for record in records) == 3
+        assert (
+            sum(updated["arms"][record["arm"]]["selections"] for record in records) == 3
+        )
 
 
 class TestValidateServeContext:

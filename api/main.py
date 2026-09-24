@@ -256,9 +256,7 @@ def recommend_user(
         parsed_context: list[float] | None = None
         if context is not None:
             parsed_context = [
-                float(value.strip())
-                for value in context.split(",")
-                if value.strip()
+                float(value.strip()) for value in context.split(",") if value.strip()
             ]
             if not parsed_context:
                 raise ValueError("Serve context must be a non-empty vector.")
