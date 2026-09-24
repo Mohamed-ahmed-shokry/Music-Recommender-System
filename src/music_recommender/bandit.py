@@ -12,6 +12,11 @@ selection and reward tallies per arm) can be snapshotted to a persistent
 ``bandit_state.json``, folded together with new observations from a live
 serving feedback journal, and restored as the prior of a future simulation so
 the cold-start policy keeps improving across deployments.
+
+Live serving closes the loop too: ``feedback_from_bandit_serve`` turns a
+``rank_cold_start_bandit`` response into a ``{context, arm, reward}`` record
+(mapped to the dominant policy arm) that is appended to the same journal, so
+served traffic contributes directly to the next policy.
 """
 
 from __future__ import annotations
@@ -428,6 +433,72 @@ def feedback_from_report(report: dict[str, Any]) -> list[dict[str, Any]]:
             record["user_id"] = str(item["user_id"])
         extracted.append(record)
     return extracted
+
+
+def neutral_serve_context(
+    features: Sequence[str] = DEFAULT_CONTEXT_FEATURES,
+) -> list[float]:
+    """Return the neutral context of a brand-new, unknown user.
+
+    An unknown user has no interaction history, so none of the context features
+    (plays, artist breadth, popularity exposure) is observable yet; the serve
+    context is the zero vector matching the simulation's cold-start features.
+    """
+    return [0.0] * len(features)
+
+
+def dominant_policy_arm(policy: dict[str, float]) -> str:
+    """Return the arm with the highest policy weight (deterministic).
+
+    Ties are broken by the lexicographically smallest arm name so repeated
+    calls agree even when weights are equal.
+    """
+    _validate_policy(policy)
+    max_weight = max(policy.values())
+    top_arms = sorted(arm for arm, weight in policy.items() if weight == max_weight)
+    return top_arms[0]
+
+
+def feedback_from_bandit_serve(
+    policy: dict[str, float],
+    artist_stats: dict[str, dict[str, Any]],
+    top_k: int,
+    *,
+    context: Sequence[float] | None = None,
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    """Build a feedback record for a live bandit-fallback serve.
+
+    The blended serving response (``rank_cold_start_bandit``) is rewarded by
+    how closely it matches the dominant arm's own ranking: the reward is
+    precision@k of the served artist ids against the dominant arm's top-k, an
+    engagement proxy computed entirely from the serve itself. Unknown users
+    carry the neutral (zero) context unless one is supplied.
+    """
+    _validate_policy(policy)
+    validate_ranking_parameters(top_k)
+    arm = dominant_policy_arm(policy)
+    served = rank_cold_start_bandit(policy, artist_stats, top_k)
+    served_ids = [str(rec["artist_id"]) for rec in served]
+    dominant_served = rank_cold_start_arm(arm, artist_stats, top_k)
+    reward = precision_at_k(
+        served_ids,
+        [str(rec["artist_id"]) for rec in dominant_served],
+        top_k,
+    )
+    record: dict[str, Any] = {
+        "context": (
+            [float(value) for value in context]
+            if context is not None
+            else neutral_serve_context()
+        ),
+        "arm": arm,
+        "reward": reward,
+    }
+    if user_id is not None:
+        record["user_id"] = user_id
+    _validate_feedback_record(record)
+    return record
 
 
 def rank_cold_start_arm(

@@ -19,12 +19,15 @@ from music_recommender.bandit import (
     append_bandit_feedback,
     build_cold_start_context,
     derive_cold_start_policy,
+    dominant_policy_arm,
+    feedback_from_bandit_serve,
     feedback_from_report,
     fold_bandit_state,
     load_bandit_feedback,
     load_bandit_report,
     load_bandit_state,
     load_cold_start_policy,
+    neutral_serve_context,
     rank_cold_start_arm,
     rank_cold_start_bandit,
     simulate_cold_start_exploration,
@@ -1027,3 +1030,82 @@ class TestCLIRecordBanditFeedback:
         )
         assert result.exit_code == 1
         assert "Error:" in result.output
+
+
+class TestServeFeedback:
+    POLICY = {"popular": 0.6, "balanced": 0.3, "long_tail": 0.1}
+
+    def test_dominant_policy_arm(self) -> None:
+        assert dominant_policy_arm({"popular": 0.4, "balanced": 0.6}) == "balanced"
+        assert dominant_policy_arm({"popular": 0.5, "balanced": 0.5}) == "balanced"
+
+    def test_dominant_policy_arm_validation(self) -> None:
+        with pytest.raises(ValueError, match="empty"):
+            dominant_policy_arm({})
+        with pytest.raises(ValueError, match="non-negative"):
+            dominant_policy_arm({"popular": -0.1})
+        with pytest.raises(ValueError, match="Unknown arm"):
+            dominant_policy_arm({"fake": 1.0})
+
+    def test_neutral_serve_context(self) -> None:
+        context = neutral_serve_context()
+        assert context == [0.0, 0.0, 0.0]
+        assert len(context) == len(DEFAULT_CONTEXT_FEATURES)
+
+    def test_pure_popular_policy_scores_full_fidelity(self) -> None:
+        record = feedback_from_bandit_serve(
+            {"popular": 1.0},
+            _artist_stats(),
+            top_k=5,
+            user_id="new_user",
+        )
+        assert record["arm"] == "popular"
+        assert record["reward"] == pytest.approx(1.0)
+        assert record["context"] == [0.0, 0.0, 0.0]
+        assert record["user_id"] == "new_user"
+
+    def test_blended_policy_record_is_valid_and_deterministic(self) -> None:
+        first = feedback_from_bandit_serve(
+            dict(self.POLICY),
+            _artist_stats(),
+            top_k=5,
+        )
+        second = feedback_from_bandit_serve(
+            dict(self.POLICY),
+            _artist_stats(),
+            top_k=5,
+        )
+        assert first == second
+        assert first["arm"] == "popular"
+        assert 0.0 < first["reward"] <= 1.0
+        assert len(first["context"]) == len(DEFAULT_CONTEXT_FEATURES)
+
+    def test_custom_context_and_user_id(self) -> None:
+        record = feedback_from_bandit_serve(
+            dict(self.POLICY),
+            _artist_stats(),
+            top_k=3,
+            context=[1.0, 0.5, 2.0],
+            user_id="u7",
+        )
+        assert record["context"] == [1.0, 0.5, 2.0]
+
+    def test_feedback_is_foldable_into_state(self) -> None:
+        record = feedback_from_bandit_serve(
+            {"popular": 1.0},
+            _artist_stats(),
+            top_k=5,
+        )
+        bandit = LinUCBContextualBandit(
+            DEFAULT_COLD_START_ARMS,
+            len(DEFAULT_CONTEXT_FEATURES),
+            alpha=0.5,
+        )
+        state = snapshot_bandit_state(bandit)
+        updated = fold_bandit_state(state, [record])
+        assert updated["arms"]["popular"]["selections"] == 1
+        bandit.update(record["arm"], record["context"], record["reward"])
+        direct = snapshot_bandit_state(bandit)
+        assert np.allclose(
+            updated["arms"]["popular"]["a"], direct["arms"]["popular"]["a"]
+        )
