@@ -3,34 +3,31 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.22.0) — in progress
+## Previous milestone (0.22.0) — shipped
 
-Online serve-feedback loop: the bandit feedback loop becomes usable from the
-live serving surface. `recommend-user` (unknown-user branch) can record the
+Online serve-feedback loop. `recommend-user` (unknown-user branch) records the
 served feedback — the neutral cold-start context, the dominant arm of the
 active policy, and an engagement reward computed from the blended serving
-response — straight into the feedback journal that `record-bandit-feedback`
-writes and `bandit-update` folds. This closes the loop described in 0.21.0
-end-to-end without any new dependency.
+response — into the feedback journal that `record-bandit-feedback` writes and
+`bandit-update` folds. This closes the loop described in 0.21.0 end-to-end
+without any new dependency.
 
-- Phase 81 — Serve-feedback helpers:
-  - `dominant_policy_arm`: deterministic pick of the highest-weight policy arm.
-  - `feedback_from_bandit_serve`: given a policy, artist stats, and top-k,
-    produce a validated `{context, arm, reward}` record whose reward is the
-    precision@k of the blended served response against the dominant arm's own
-    ranking — an engagement proxy computed entirely from the serve.
-- Phase 82 — Service integration: `RecommenderService.recommend_user` gains
+- Phase 81 — Serve-feedback helpers: `dominant_policy_arm` (deterministic
+  highest-weight arm, lexicographic tie-break) and
+  `feedback_from_bandit_serve` (validated `{context, arm, reward}` record whose
+  reward is the precision@k of the blended serve against the dominant arm's own
+  ranking); `neutral_serve_context` exposes the brand-new-user zero context.
+- Phase 82 — Service integration: `RecommenderService.recommend_user` gained
   `record_feedback` and `feedback_journal_path`; the `bandit_fallback` branch
-  appends the serve-feedback to the journal (`reports/bandit_feedback.json` by
-  default) and reports it in the response. Known users and the pure
-  `popular_fallback` branch never record.
-- Phase 83 — CLI wiring: `recommend-user --record-feedback` (plus
-  `--feedback-path`), printing where feedback was recorded.
-- Phase 84 — API wiring: `GET /recommend/user/{user_id}?record_feedback=true`
-  records the serve-feedback for the bandit branch.
-- Phase 85 — Tests: helper determinism/validation (dominant arm selection,
-  pure-popular reduction to reward 1.0, neutral context), service recording
-  on/off and error paths, CLI and API wiring.
+  appends to the journal (`reports/bandit_feedback.json` by default) and reports
+  arm/reward/path in its response. Known users and `popular_fallback` never
+  record.
+- Phase 83 — CLI: `recommend-user --record-feedback` (plus `--feedback-path`),
+  printing where feedback was recorded; rejected together with `--ltr`.
+- Phase 84 — API: `GET /recommend/user/{user_id}?record_feedback=true`.
+- Phase 85 — Tests: helper determinism/validation, pure-popular reward-1.0,
+  neutral context, fold of a serve record into a prior, service on/off and
+  known-user exclusion, CLI and API wiring. 811 tests.
 - Phase 86 — Docs and release: PLAN, README (online feedback), CHANGELOG,
   version bump to 0.22.0.
 

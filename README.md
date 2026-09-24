@@ -1429,9 +1429,16 @@ See [PLAN.md](PLAN.md) for the full phased plan.
   mergeable prior (`--write-state` / `--from-state`); `record-bandit-feedback`
   journals per-request observations and `bandit-update` folds them (or an offline
   report) into the prior that seeds the next simulation. ✓ (0.21.0)
-- Next: two-tower neural candidate retrieval, then per-request online serving
-  (`recommend-user` logging the served context and computing an engagement reward
-  for `record-bandit-feedback` directly from the blended response).
+- Online served feedback: `recommend-user --record-feedback` (and the API's
+  `record_feedback=true`) journals the served context, dominant policy arm, and
+  a serve-fidelity reward for the cold-start bandit branch, so live traffic
+  folds back into the next prior — closing the loop from serving. ✓ (0.22.0)
+- Next: two-tower neural candidate retrieval (deferred until a real-scale
+  catalog exists), per-request context capture, and a scheduled snapshot of the
+  online bandit state.
+- Deferred: two-tower neural candidate retrieval (PyTorch / ONNX runtime) until
+  a real-scale catalog is available; the sample dataset cannot validate a
+  neural retrieval model.
 
 
 ## License
