@@ -2349,3 +2349,58 @@ def test_recommend_user_rejects_record_feedback_with_ltr(monkeypatch) -> None:
 
     assert result.exit_code == 1
     assert "--record-feedback only applies" in result.output
+
+
+def test_recommend_user_rejects_context_without_record_feedback(monkeypatch) -> None:
+    fake = _FeedbackRecordingService()
+    install_fake_service(monkeypatch, fake)
+
+    result = runner.invoke(
+        cli.app,
+        ["recommend-user", "--user-id", "new_user", "--context", "1.0,0.5,2.0"],
+    )
+
+    assert result.exit_code == 1
+    assert "--context requires --record-feedback" in result.output
+
+
+def test_recommend_user_rejects_context_with_ltr(monkeypatch) -> None:
+    fake = _FeedbackRecordingService()
+    install_fake_service(monkeypatch, fake)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "recommend-user",
+            "--user-id",
+            "user_1",
+            "--ltr",
+            "--context",
+            "1.0,0.5,2.0",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--context only applies" in result.output
+
+
+def test_recommend_user_forwards_parsed_context(monkeypatch) -> None:
+    fake = _FeedbackRecordingService()
+    install_fake_service(monkeypatch, fake)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "recommend-user",
+            "--user-id",
+            "new_user",
+            "--record-feedback",
+            "--context",
+            "1.0, 0.5, 2.0",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert fake.captured_kwargs is not None
+    assert fake.captured_kwargs["context"] == [1.0, 0.5, 2.0]
+    assert "credited arms: popular" in result.output

@@ -419,6 +419,15 @@ def recommend_user(
         "--feedback-path",
         help="Journal path for recorded serve feedback.",
     ),
+    context: str | None = typer.Option(
+        None,
+        "--context",
+        help=(
+            "Comma-separated cold-start context features observed for this "
+            "request (log_plays, log_unique_artists, mean_popularity_rank); "
+            "recorded with --record-feedback instead of the neutral context."
+        ),
+    ),
     ltr: bool = typer.Option(
         False,
         "--ltr/--no-ltr",
@@ -439,6 +448,11 @@ def recommend_user(
                     "--record-feedback only applies to the cold-start bandit "
                     "serving branch (use without --ltr)."
                 )
+            if context is not None:
+                raise ValueError(
+                    "--context only applies to the cold-start bandit "
+                    "serving branch (use without --ltr)."
+                )
             response = service.recommend_user_ltr(
                 user_id=user_id,
                 top_k=top_k,
@@ -448,6 +462,18 @@ def recommend_user(
                 novelty_weight=novelty_weight,
             )
         else:
+            parsed_context: list[float] | None = None
+            if context is not None:
+                if not record_feedback:
+                    raise ValueError(
+                        "--context requires --record-feedback so the served "
+                        "observation is actually journaled."
+                    )
+                parsed_context = [
+                    float(value.strip())
+                    for value in context.split(",")
+                    if value.strip()
+                ]
             response = service.recommend_user(
                 user_id=user_id,
                 top_k=top_k,
@@ -459,6 +485,7 @@ def recommend_user(
                 explain=explain,
                 record_feedback=record_feedback,
                 feedback_journal_path=feedback_journal_path,
+                context=parsed_context,
             )
     except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
@@ -470,10 +497,12 @@ def recommend_user(
         typer.echo(response["message"])
     typer.echo(format_recommendations(response["recommendations"]))
     if response.get("feedback"):
+        feedback = response["feedback"]
+        arms = ", ".join(feedback["arms"]) if feedback.get("arms") else feedback["arm"]
         typer.secho(
-            f"Served feedback recorded to {response['feedback']['journal_path']} "
-            f"(arm='{response['feedback']['arm']}', "
-            f"reward={response['feedback']['reward']})",
+            f"Served feedback recorded to {feedback['journal_path']} "
+            f"(arm='{feedback['arm']}', reward={feedback['reward']}, "
+            f"credited arms: {arms})",
             fg=typer.colors.GREEN,
         )
 
