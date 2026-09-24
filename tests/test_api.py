@@ -84,13 +84,22 @@ class FakeService:
         explain: bool,
         novelty_weight: float = 0.0,
         record_feedback: bool = False,
+        context: list[float] | None = None,
     ) -> dict[str, object]:
         self.last_record_feedback = record_feedback
+        self.last_context = context
         if record_feedback:
             return {
                 "user_id": user_id,
                 "strategy": "bandit_fallback",
-                "feedback": {"recorded": True, "arm": "popular", "reward": 1.0},
+                "feedback": {
+                    "recorded": True,
+                    "arm": "popular",
+                    "reward": 1.0,
+                    "context": (
+                        list(context) if context is not None else [0.0, 0.0, 0.0]
+                    ),
+                },
                 "recommendations": [
                     {
                         "artist_id": "artist_2",
@@ -665,7 +674,40 @@ def test_recommend_user_route_records_bandit_feedback_when_asked() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["strategy"] == "bandit_fallback"
-    assert body["feedback"] == {"recorded": True, "arm": "popular", "reward": 1.0}
+    assert body["feedback"] == {
+        "recorded": True,
+        "arm": "popular",
+        "reward": 1.0,
+        "context": [0.0, 0.0, 0.0],
+    }
+
+
+def test_recommend_user_route_forwards_context_to_service() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get(
+            "/recommend/user/new_user",
+            params={"record_feedback": True, "context": "0.1,0.2,0.3"},
+        )
+
+    assert response.status_code == 200
+    assert api_main.service.last_context == [0.1, 0.2, 0.3]
+    assert response.json()["feedback"]["context"] == [0.1, 0.2, 0.3]
+
+
+def test_recommend_user_route_rejects_malformed_context() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get(
+            "/recommend/user/new_user",
+            params={"record_feedback": True, "context": "0.1,abc"},
+        )
+
+    assert response.status_code == 422
 
 
 def test_recommend_user_route_no_feedback_by_default() -> None:

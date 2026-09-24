@@ -242,14 +242,26 @@ def recommend_user(
     content_weight: UnitInterval = DEFAULT_CONTENT_WEIGHT,
     explain: bool = False,
     record_feedback: bool = False,
+    context: str | None = None,
 ) -> dict[str, object]:
     """Return artist recommendations for a user.
 
     When ``record_feedback`` is set and the user is served via the cold-start
-    bandit branch, the served context, dominant arm, and serve-fidelity reward
-    are appended to the bandit feedback journal.
+    bandit branch, one feedback record per positive-weight policy arm is
+    appended to the bandit feedback journal. ``context`` optionally carries the
+    cold-start feature vector observed for this request, so the recorded
+    feedback is contextual instead of the neutral vector.
     """
     try:
+        parsed_context: list[float] | None = None
+        if context is not None:
+            parsed_context = [
+                float(value.strip())
+                for value in context.split(",")
+                if value.strip()
+            ]
+            if not parsed_context:
+                raise ValueError("Serve context must be a non-empty vector.")
         return get_service().recommend_user(
             user_id=user_id,
             top_k=top_k,
@@ -260,6 +272,7 @@ def recommend_user(
             content_weight=content_weight,
             explain=explain,
             record_feedback=record_feedback,
+            context=parsed_context,
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
