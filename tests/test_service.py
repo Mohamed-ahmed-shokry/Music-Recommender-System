@@ -9,6 +9,7 @@ from music_recommender.artifacts import (
     build_recommender_artifact,
     save_artifact,
 )
+from music_recommender.bandit import load_bandit_feedback
 from music_recommender.content import build_content_artifacts
 from music_recommender.ltr import train_ltr_ranker
 from music_recommender.model import train_als_model
@@ -1054,3 +1055,55 @@ def test_from_artifacts_rejects_invalid_policy(tmp_path: Path) -> None:
         RecommenderService.from_artifacts(
             artifact_path, cold_start_policy_path=bad_policy
         )
+
+
+def test_bandit_serve_records_feedback_when_asked(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    service.cold_start_policy = {"popular": 1.0}
+    journal = tmp_path / "bandit_feedback.json"
+
+    response = service.recommend_user(
+        "new_user",
+        top_k=3,
+        record_feedback=True,
+        feedback_journal_path=journal,
+    )
+
+    assert response["strategy"] == "bandit_fallback"
+    assert response["feedback"]["recorded"] is True
+    assert response["feedback"]["arm"] == "popular"
+    assert response["feedback"]["reward"] == pytest.approx(1.0)
+    assert response["feedback"]["journal_path"] == str(journal)
+    assert load_bandit_feedback(journal)[0]["reward"] == pytest.approx(1.0)
+
+
+def test_bandit_serve_does_not_record_by_default(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    service.cold_start_policy = {"popular": 1.0}
+    journal = tmp_path / "bandit_feedback.json"
+
+    response = service.recommend_user(
+        "new_user",
+        top_k=3,
+        feedback_journal_path=journal,
+    )
+
+    assert response["strategy"] == "bandit_fallback"
+    assert "feedback" not in response
+    assert not journal.exists()
+
+
+def test_known_user_never_records_serve_feedback(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    service.cold_start_policy = {"popular": 1.0}
+    journal = tmp_path / "bandit_feedback.json"
+
+    response = service.recommend_user(
+        "user_1",
+        top_k=2,
+        record_feedback=True,
+        feedback_journal_path=journal,
+    )
+
+    assert response["strategy"] == "hybrid_personalized"
+    assert not journal.exists()

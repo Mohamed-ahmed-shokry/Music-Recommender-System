@@ -9,12 +9,15 @@ import numpy as np
 
 from music_recommender.artifacts import RecommenderArtifact, load_artifact
 from music_recommender.bandit import (
+    append_bandit_feedback,
+    feedback_from_bandit_serve,
     load_cold_start_policy,
     rank_cold_start_bandit,
 )
 from music_recommender.baselines import popular_artists
 from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
+    BANDIT_FEEDBACK_PATH,
     COLD_START_POLICY_PATH,
     DEFAULT_CONTENT_WEIGHT,
     RAW_TRACK_DATA_PATH,
@@ -135,8 +138,16 @@ class RecommenderService:
         novelty_weight: float | None = None,
         content_weight: float | None = None,
         explain: bool = False,
+        record_feedback: bool = False,
+        feedback_journal_path: str | Path = BANDIT_FEEDBACK_PATH,
     ) -> dict[str, Any]:
-        """Recommend artists for a user, with a popularity fallback if unknown."""
+        """Recommend artists for a user, with a popularity fallback if unknown.
+
+        When ``record_feedback`` is set and the unknown user is served through
+        the cold-start bandit policy, the served context, dominant arm, and
+        serve-fidelity reward are appended to the feedback journal so
+        ``bandit-update`` can fold live traffic into the next prior.
+        """
         content_weight = self._content_weight(content_weight)
         (
             include_listened,
@@ -190,7 +201,7 @@ class RecommenderService:
                 self.artifact.artist_stats,
                 top_k,
             )
-            return {
+            response: dict[str, Any] = {
                 "user_id": user_id,
                 "strategy": "bandit_fallback",
                 "message": (
@@ -199,6 +210,24 @@ class RecommenderService:
                 ),
                 "recommendations": recommendations,
             }
+            if record_feedback:
+                feedback = feedback_from_bandit_serve(
+                    self.cold_start_policy,
+                    self.artifact.artist_stats,
+                    top_k,
+                    user_id=user_id,
+                )
+                append_bandit_feedback(
+                    feedback,
+                    Path(feedback_journal_path),
+                )
+                response["feedback"] = {
+                    "recorded": True,
+                    "journal_path": str(feedback_journal_path),
+                    "arm": feedback["arm"],
+                    "reward": feedback["reward"],
+                }
+            return response
 
         recommendations = popular_artists(self.artifact.artist_stats, top_k=top_k)
         return {
