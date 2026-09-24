@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -10,9 +11,11 @@ import numpy as np
 from music_recommender.artifacts import RecommenderArtifact, load_artifact
 from music_recommender.bandit import (
     append_bandit_feedback,
-    feedback_from_bandit_serve,
+    dominant_policy_arm,
+    feedback_records_from_bandit_serve,
     load_cold_start_policy,
     rank_cold_start_bandit,
+    validate_serve_context,
 )
 from music_recommender.baselines import popular_artists
 from music_recommender.config import (
@@ -140,13 +143,17 @@ class RecommenderService:
         explain: bool = False,
         record_feedback: bool = False,
         feedback_journal_path: str | Path = BANDIT_FEEDBACK_PATH,
+        context: Sequence[float] | None = None,
     ) -> dict[str, Any]:
         """Recommend artists for a user, with a popularity fallback if unknown.
 
         When ``record_feedback`` is set and the unknown user is served through
-        the cold-start bandit policy, the served context, dominant arm, and
-        serve-fidelity reward are appended to the feedback journal so
-        ``bandit-update`` can fold live traffic into the next prior.
+        the cold-start bandit policy, the served context, and one feedback
+        record per positive-weight policy arm (rewarded by the serve's fidelity
+        to each arm's own ranking), are appended to the feedback journal so
+        ``bandit-update`` can fold live traffic into the next prior. ``context``
+        supplies the observed observation window (the cold-start feature
+        vector) for that request; a missing context stays neutral.
         """
         content_weight = self._content_weight(content_weight)
         (
@@ -211,21 +218,30 @@ class RecommenderService:
                 "recommendations": recommendations,
             }
             if record_feedback:
-                feedback = feedback_from_bandit_serve(
+                validate_serve_context(context) if context is not None else None
+                feedback = feedback_records_from_bandit_serve(
                     self.cold_start_policy,
                     self.artifact.artist_stats,
                     top_k,
+                    context=context,
                     user_id=user_id,
                 )
-                append_bandit_feedback(
-                    feedback,
-                    Path(feedback_journal_path),
+                for record in feedback:
+                    append_bandit_feedback(
+                        record,
+                        Path(feedback_journal_path),
+                    )
+                dominant_arm = dominant_policy_arm(self.cold_start_policy)
+                dominant = next(
+                    record for record in feedback if record["arm"] == dominant_arm
                 )
                 response["feedback"] = {
                     "recorded": True,
                     "journal_path": str(feedback_journal_path),
-                    "arm": feedback["arm"],
-                    "reward": feedback["reward"],
+                    "arm": str(dominant["arm"]),
+                    "reward": float(dominant["reward"]),
+                    "arms": [str(record["arm"]) for record in feedback],
+                    "context": list(feedback[0]["context"]),
                 }
             return response
 

@@ -1107,3 +1107,54 @@ def test_known_user_never_records_serve_feedback(tmp_path: Path) -> None:
 
     assert response["strategy"] == "hybrid_personalized"
     assert not journal.exists()
+
+
+def test_bandit_serve_records_per_arm_batch(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    service.cold_start_policy = {"popular": 0.6, "balanced": 0.4}
+    journal = tmp_path / "bandit_feedback.json"
+
+    response = service.recommend_user(
+        "new_user",
+        top_k=3,
+        record_feedback=True,
+        feedback_journal_path=journal,
+    )
+
+    assert response["strategy"] == "bandit_fallback"
+    assert response["feedback"]["recorded"] is True
+    assert response["feedback"]["arm"] == "popular"
+    assert response["feedback"]["arms"] == ["balanced", "popular"]
+    assert len(load_bandit_feedback(journal)) == 2
+
+
+def test_bandit_serve_records_caller_context(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    service.cold_start_policy = {"popular": 1.0}
+    journal = tmp_path / "bandit_feedback.json"
+
+    response = service.recommend_user(
+        "new_user",
+        top_k=3,
+        record_feedback=True,
+        feedback_journal_path=journal,
+        context=[1.0, 0.5, 2.0],
+    )
+
+    assert response["feedback"]["context"] == [1.0, 0.5, 2.0]
+    assert load_bandit_feedback(journal)[0]["context"] == [1.0, 0.5, 2.0]
+
+
+def test_bandit_serve_rejects_invalid_context(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    service.cold_start_policy = {"popular": 1.0}
+    journal = tmp_path / "bandit_feedback.json"
+
+    with pytest.raises(ValueError, match="expected 3"):
+        service.recommend_user(
+            "new_user",
+            top_k=3,
+            record_feedback=True,
+            feedback_journal_path=journal,
+            context=[0.0, 0.0],
+        )
