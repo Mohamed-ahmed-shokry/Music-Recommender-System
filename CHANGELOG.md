@@ -7,6 +7,46 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-25
+
+### Added
+
+- Contextual, per-arm served bandit feedback: live serves now journal real
+  request context and credit every positive-weight policy arm, so
+  `bandit-update` folds feedback influence across the whole policy instead of
+  only the dominant arm.
+  - `feedback_records_from_bandit_serve`: returns one `{context, arm, reward,
+    user_id}` record per positive-weight policy arm — each reward is the
+    precision@k of the blended serve against that arm's own ranking; arms are
+    emitted in a stable sorted order.
+  - `feedback_from_bandit_serve` delegates to the per-arm builder and keeps the
+    dominant-arm single-record contract for existing callers.
+  - `validate_serve_context`: rejects non-numeric, non-finite, and wrong-length
+    context vectors; `neutral_serve_context` remains the default when the caller
+    supplies nothing.
+  - `RecommenderService.recommend_user(context)`: the `bandit_fallback` branch
+    validates caller context up front and appends the per-arm batch to the
+    journal, reporting dominant arm, reward, credited arms, and the recorded
+    context in its response.
+  - CLI: `recommend-user --context a,b,c` parses and forwards the observation
+    window (rejected without `--record-feedback` or with `--ltr`); the feedback
+    line lists the credited arms.
+  - API: `GET /recommend/user/{user_id}?context=a,b,c` forwards the parsed
+    context; malformed or empty values raise 422.
+
+### Tests
+
+- 829 tests; added coverage for per-arm record attribution and fold
+  determinism, serve-context validation, service per-arm batching with caller
+  and neutral contexts plus invalid-context rejection, CLI forwarding and
+  rejection paths, and the API context query-param wiring.
+
+### Documentation
+
+- README documents the contextual per-arm served-feedback flow
+  (`recommend-user --record-feedback --context=...` → `bandit-update`) and the
+  API equivalent; PLAN and CHANGELOG updated for the 0.23.0 milestone.
+
 ## [0.22.0] - 2026-09-24
 
 ### Added

@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.23.0) — in progress
+## Current milestone (0.23.0) — shipped
 
 Contextual, per-arm served bandit feedback. 0.22.0 records served feedback but
 the context is always the neutral zero vector (the folded ridge update is a
