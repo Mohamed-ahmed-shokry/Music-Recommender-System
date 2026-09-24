@@ -658,6 +658,30 @@ uv run python -m music_recommender.cli bandit-update \
 update — the state then serves as the next simulation's prior and the report
 derived from it feeds `bandit-policy`.
 
+### Serving the learned bandit policy with online feedback
+
+`recommend-user` serves unknown users through the learned cold-start policy
+when `reports/cold_start_policy.json` exists (see above). Pass
+`--record-feedback` to journal every such serve — the served context (neutral
+for a brand-new user), the dominant policy arm, and a serve-fidelity reward
+(the precision@k of the blended response against the dominant arm's own
+ranking) are appended to the feedback journal so live traffic folds back into
+the next prior via `bandit-update`:
+
+```bash
+# serve an unknown user, recording the bandit's own serve feedback
+uv run python -m music_recommender.cli recommend-user --user-id new_user \
+  --record-feedback
+
+# fold the served observations into the next simulation prior
+uv run python -m music_recommender.cli bandit-update \
+  --state-path reports/bandit_state.json --journal-path reports/bandit_feedback.json
+```
+
+The API equivalent is `GET /recommend/user/{user_id}?record_feedback=true`,
+and `--feedback-path` overrides the journal used by the CLI. Known users and
+the plain `popular_fallback` branch never record.
+
 Track evaluation reports land in `reports/` as JSON (`track_evaluation.json`
 by default), recording the run configuration and per-arm metrics. Specify
 `--report-dir` to customize the output directory.

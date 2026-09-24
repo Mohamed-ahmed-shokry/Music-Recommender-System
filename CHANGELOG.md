@@ -7,6 +7,43 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-24
+
+### Added
+
+- Online serving closes the bandit feedback loop end-to-end: the live
+  `recommend-user` cold-start branch can journal its own serve feedback so
+  served traffic folds back into the next simulation prior.
+  - `dominant_policy_arm`: deterministic highest-weight policy arm selection
+    (lexicographic tie-break).
+  - `feedback_from_bandit_serve`: builds a validated `{context, arm, reward}`
+    record directly from a blended bandit serve — the reward is the precision@k
+    of the served response against the dominant arm's own ranking, an
+    engagement proxy computed entirely from the serve.
+  - `neutral_serve_context`: the zero cold-start context of a brand-new user.
+  - `RecommenderService.recommend_user(record_feedback, feedback_journal_path)`:
+    the `bandit_fallback` branch appends the serve feedback to the journal
+    (default `reports/bandit_feedback.json`) and reports arm/reward/path in its
+    response; known users and the `popular_fallback` branch never record.
+  - CLI: `recommend-user --record-feedback` (with `--feedback-path`) journals
+    and prints where the serve feedback was recorded.
+  - API: `GET /recommend/user/{user_id}?record_feedback=true` records the
+    serve feedback for the bandit branch.
+
+### Tests
+
+- 811 tests; added coverage for serve-feedback record determinism and
+  validation, the pure-popular reward-1.0 reduction, neutral context, folding a
+  serve feedback record into a prior state, service recording on/off and
+  known-user exclusion, CLI pass-through and `--record-feedback` + `--ltr`
+  rejection, and the API query-param wiring.
+
+### Documentation
+
+- README documents the served-feedback flow
+  (`recommend-user --record-feedback` → `bandit-update`) and the API equivalent;
+  PLAN and CHANGELOG updated for the 0.22.0 milestone.
+
 ## [0.21.0] - 2026-09-23
 
 ### Added
