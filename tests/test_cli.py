@@ -2268,3 +2268,84 @@ def test_spotify_commands_require_credentials(
 
     assert result.exit_code == 1
     assert "SPOTIFY_CLIENT_ID" in result.output
+
+
+class _FeedbackRecordingService(FakeService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.user_response = {
+            "strategy": "bandit_fallback",
+            "message": "Unknown user_id 'new_user'. Returned by bandit policy.",
+            "feedback": {
+                "recorded": True,
+                "journal_path": "reports/bandit_feedback.json",
+                "arm": "popular",
+                "reward": 1.0,
+            },
+            "recommendations": [
+                {
+                    "artist_id": "artist_2",
+                    "artist_name": "Drake",
+                    "score": 174.0,
+                }
+            ],
+        }
+        self.captured_kwargs: dict[str, Any] | None = None
+
+    def recommend_user(self, **kwargs: Any) -> dict[str, Any]:
+        self.captured_kwargs = dict(kwargs)
+        return self.user_response
+
+
+def test_recommend_user_records_feedback_when_requested(monkeypatch) -> None:
+    fake = _FeedbackRecordingService()
+    install_fake_service(monkeypatch, fake)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "recommend-user",
+            "--user-id",
+            "new_user",
+            "--record-feedback",
+            "--feedback-path",
+            "reports/bandit_feedback.json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert fake.captured_kwargs is not None
+    assert fake.captured_kwargs["record_feedback"] is True
+    assert (
+        fake.captured_kwargs["feedback_journal_path"] == "reports/bandit_feedback.json"
+    )
+    assert "Served feedback recorded to reports/bandit_feedback.json" in result.output
+
+
+def test_recommend_user_no_feedback_flag_keeps_false_and_default_path(
+    monkeypatch,
+) -> None:
+    fake = _FeedbackRecordingService()
+    install_fake_service(monkeypatch, fake)
+
+    result = runner.invoke(cli.app, ["recommend-user", "--user-id", "new_user"])
+
+    assert result.exit_code == 0
+    assert fake.captured_kwargs is not None
+    assert fake.captured_kwargs["record_feedback"] is False
+    assert fake.captured_kwargs["feedback_journal_path"] == str(
+        cli.BANDIT_FEEDBACK_PATH
+    )
+
+
+def test_recommend_user_rejects_record_feedback_with_ltr(monkeypatch) -> None:
+    fake = _FeedbackRecordingService()
+    install_fake_service(monkeypatch, fake)
+
+    result = runner.invoke(
+        cli.app,
+        ["recommend-user", "--user-id", "user_1", "--ltr", "--record-feedback"],
+    )
+
+    assert result.exit_code == 1
+    assert "--record-feedback only applies" in result.output

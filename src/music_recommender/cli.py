@@ -406,6 +406,19 @@ def recommend_user(
         "--cold-start-policy-path",
         help="Path to a cold-start bandit policy JSON for unknown-user serving.",
     ),
+    record_feedback: bool = typer.Option(
+        False,
+        "--record-feedback",
+        help=(
+            "Record served bandit feedback (context, arm, reward) for unknown "
+            "users to the feedback journal."
+        ),
+    ),
+    feedback_journal_path: str = typer.Option(
+        str(BANDIT_FEEDBACK_PATH),
+        "--feedback-path",
+        help="Journal path for recorded serve feedback.",
+    ),
     ltr: bool = typer.Option(
         False,
         "--ltr/--no-ltr",
@@ -421,6 +434,11 @@ def recommend_user(
         else:
             service = RecommenderService.from_artifacts()
         if ltr:
+            if record_feedback:
+                raise ValueError(
+                    "--record-feedback only applies to the cold-start bandit "
+                    "serving branch (use without --ltr)."
+                )
             response = service.recommend_user_ltr(
                 user_id=user_id,
                 top_k=top_k,
@@ -439,6 +457,8 @@ def recommend_user(
                 novelty_weight=novelty_weight,
                 content_weight=content_weight,
                 explain=explain,
+                record_feedback=record_feedback,
+                feedback_journal_path=feedback_journal_path,
             )
     except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
@@ -449,6 +469,13 @@ def recommend_user(
     if response.get("message"):
         typer.echo(response["message"])
     typer.echo(format_recommendations(response["recommendations"]))
+    if response.get("feedback"):
+        typer.secho(
+            f"Served feedback recorded to {response['feedback']['journal_path']} "
+            f"(arm='{response['feedback']['arm']}', "
+            f"reward={response['feedback']['reward']})",
+            fg=typer.colors.GREEN,
+        )
 
 
 @app.command()
