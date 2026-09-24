@@ -3,7 +3,38 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.14.0) — shipped
+## Current milestone (0.22.0) — in progress
+
+Online serve-feedback loop: the bandit feedback loop becomes usable from the
+live serving surface. `recommend-user` (unknown-user branch) can record the
+served feedback — the neutral cold-start context, the dominant arm of the
+active policy, and an engagement reward computed from the blended serving
+response — straight into the feedback journal that `record-bandit-feedback`
+writes and `bandit-update` folds. This closes the loop described in 0.21.0
+end-to-end without any new dependency.
+
+- Phase 81 — Serve-feedback helpers:
+  - `dominant_policy_arm`: deterministic pick of the highest-weight policy arm.
+  - `feedback_from_bandit_serve`: given a policy, artist stats, and top-k,
+    produce a validated `{context, arm, reward}` record whose reward is the
+    precision@k of the blended served response against the dominant arm's own
+    ranking — an engagement proxy computed entirely from the serve.
+- Phase 82 — Service integration: `RecommenderService.recommend_user` gains
+  `record_feedback` and `feedback_journal_path`; the `bandit_fallback` branch
+  appends the serve-feedback to the journal (`reports/bandit_feedback.json` by
+  default) and reports it in the response. Known users and the pure
+  `popular_fallback` branch never record.
+- Phase 83 — CLI wiring: `recommend-user --record-feedback` (plus
+  `--feedback-path`), printing where feedback was recorded.
+- Phase 84 — API wiring: `GET /recommend/user/{user_id}?record_feedback=true`
+  records the serve-feedback for the bandit branch.
+- Phase 85 — Tests: helper determinism/validation (dominant arm selection,
+  pure-popular reduction to reward 1.0, neutral context), service recording
+  on/off and error paths, CLI and API wiring.
+- Phase 86 — Docs and release: PLAN, README (online feedback), CHANGELOG,
+  version bump to 0.22.0.
+
+## Previous milestone (0.14.0) — shipped
 
 - Phase 41 — Track evaluation parity metrics: added `unexpectedness_at_k`
   and `intra_list_diversity` to the track evaluator, closing the last two
@@ -172,7 +203,7 @@ It is updated incrementally as phases land.
   JSON reports. (commit `c3cc8ac`)
 - Phase 59 — Docs and release: refreshed PLAN, README, CHANGELOG, bumped to 0.17.0.
 
-## Current milestone (0.18.0) — shipped
+## Previous milestone (0.18.0) — shipped
 
 - Phase 60 — Track LTR model serving parity: include track LTR ranker in artifact
   bundle and serve via `RecommenderService.recommend_tracks_ltr`. (commit `4afbd34`)
@@ -285,12 +316,18 @@ is preserved when no policy file exists.
 - Phase 69 — Docs and release: PLAN, README (evaluation + CLI), CHANGELOG,
   version bump to 0.19.0.
 
-## Next steps (after 0.21.0)
+## Next steps (after 0.22.0)
 
-1. Two-tower neural candidate retrieval (PyTorch / ONNX runtime).
-2. Per-request online serving: `recommend-user` (unknown-user branch) logs the
-   served context and computes an engagement reward for `record-bandit-feedback`
-   directly from the blended serving response.
+1. Two-tower neural candidate retrieval (PyTorch / ONNX runtime) — deferred
+   until a real-scale catalog is available: the current sample dataset (18
+   artists, 36 tracks) cannot meaningfully train or validate a neural
+   retrieval model, and the phase would add heavy new dependencies.
+2. Per-request context capture: feed real user observation windows into
+   `recommend-user` so the recorded feedback context is user-specific instead
+   of the neutral vector, and fold per-arm attribution.
+3. Online bandit state snapshot and scheduled `bandit-update` folding of live
+   serves back into the simulation prior, surfaced in the dashboard/API
+   metadata.
 
 ## Quality gates (every change)
 
