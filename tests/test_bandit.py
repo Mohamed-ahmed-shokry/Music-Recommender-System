@@ -22,6 +22,7 @@ from music_recommender.bandit import (
     dominant_policy_arm,
     feedback_from_bandit_serve,
     feedback_from_report,
+    feedback_records_from_bandit_serve,
     fold_bandit_state,
     load_bandit_feedback,
     load_bandit_report,
@@ -32,6 +33,7 @@ from music_recommender.bandit import (
     rank_cold_start_bandit,
     simulate_cold_start_exploration,
     snapshot_bandit_state,
+    validate_serve_context,
     write_bandit_report,
     write_bandit_state,
     write_cold_start_policy,
@@ -1109,3 +1111,86 @@ class TestServeFeedback:
         assert np.allclose(
             updated["arms"]["popular"]["a"], direct["arms"]["popular"]["a"]
         )
+
+
+class TestPerArmServeFeedback:
+    POLICY = {"popular": 0.6, "balanced": 0.3, "long_tail": 0.1}
+
+    def test_every_policy_arm_gets_a_record(self) -> None:
+        records = feedback_records_from_bandit_serve(
+            dict(self.POLICY),
+            _artist_stats(),
+            top_k=5,
+        )
+        assert [r["arm"] for r in records] == ["balanced", "long_tail", "popular"]
+
+    def test_zero_weight_arms_are_skipped(self) -> None:
+        records = feedback_records_from_bandit_serve(
+            {"popular": 1.0, "balanced": 0.0},
+            _artist_stats(),
+            top_k=5,
+        )
+        assert [r["arm"] for r in records] == ["popular"]
+
+    def test_dominant_record_matches_single_arm_contract(self) -> None:
+        batch = feedback_records_from_bandit_serve(
+            dict(self.POLICY),
+            _artist_stats(),
+            top_k=5,
+            user_id="u1",
+            context=[0.2, 0.4, 0.6],
+        )
+        single = feedback_from_bandit_serve(
+            dict(self.POLICY),
+            _artist_stats(),
+            top_k=5,
+            user_id="u1",
+            context=[0.2, 0.4, 0.6],
+        )
+        assert single in batch
+        assert single["arm"] == "popular"
+
+    def test_per_arm_rewards_are_foldable(self) -> None:
+        records = feedback_records_from_bandit_serve(
+            dict(self.POLICY),
+            _artist_stats(),
+            top_k=5,
+        )
+        bandit = LinUCBContextualBandit(
+            DEFAULT_COLD_START_ARMS,
+            len(DEFAULT_CONTEXT_FEATURES),
+            alpha=0.5,
+        )
+        state = snapshot_bandit_state(bandit)
+        updated = fold_bandit_state(state, records)
+        assert sum(updated["arms"][record["arm"]]["selections"] for record in records) == 3
+
+
+class TestValidateServeContext:
+    def test_valid_context_normalized(self) -> None:
+        assert validate_serve_context([1, 0.5, 2]) == [1.0, 0.5, 2.0]
+
+    def test_empty_context_rejected(self) -> None:
+        with pytest.raises(ValueError, match="non-empty"):
+            validate_serve_context([])
+
+    def test_wrong_dimension_rejected(self) -> None:
+        with pytest.raises(ValueError, match="2 features; expected 3"):
+            validate_serve_context([0.0, 0.0])
+
+    def test_non_numeric_rejected(self) -> None:
+        with pytest.raises(ValueError, match="numeric"):
+            validate_serve_context([0.0, "nope", 2.0])
+
+    def test_non_finite_rejected(self) -> None:
+        with pytest.raises(ValueError, match="finite"):
+            validate_serve_context([float("nan"), 0.0, 0.0])
+
+    def test_records_reject_invalid_context(self) -> None:
+        with pytest.raises(ValueError, match="expected 3"):
+            feedback_records_from_bandit_serve(
+                {"popular": 1.0},
+                _artist_stats(),
+                top_k=5,
+                context=[0.0, 0.0],
+            )

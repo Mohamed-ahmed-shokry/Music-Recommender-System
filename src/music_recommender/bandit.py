@@ -447,6 +447,34 @@ def neutral_serve_context(
     return [0.0] * len(features)
 
 
+def validate_serve_context(
+    context: Sequence[float],
+    *,
+    features: Sequence[str] = DEFAULT_CONTEXT_FEATURES,
+) -> list[float]:
+    """Validate a caller-supplied serve context and normalize it to floats.
+
+    Live serving is expected to record contexts with the same feature set the
+    simulation uses (``DEFAULT_CONTEXT_FEATURES`` by default), so the vector
+    must be non-empty, fully numeric, finite, and of the expected dimension.
+    Returns the normalized float vector.
+    """
+    values = list(context)
+    if not values:
+        raise ValueError("Serve context must be a non-empty vector.")
+    try:
+        floats = [float(value) for value in values]
+    except (TypeError, ValueError) as error:
+        raise ValueError("Serve context must contain only numeric values.") from error
+    if any(not np.isfinite(value) for value in floats):
+        raise ValueError("Serve context values must all be finite.")
+    if len(floats) != len(features):
+        raise ValueError(
+            f"Serve context has {len(floats)} features; expected {len(features)}."
+        )
+    return floats
+
+
 def dominant_policy_arm(policy: dict[str, float]) -> str:
     """Return the arm with the highest policy weight (deterministic).
 
@@ -457,6 +485,54 @@ def dominant_policy_arm(policy: dict[str, float]) -> str:
     max_weight = max(policy.values())
     top_arms = sorted(arm for arm, weight in policy.items() if weight == max_weight)
     return top_arms[0]
+
+
+def feedback_records_from_bandit_serve(
+    policy: dict[str, float],
+    artist_stats: dict[str, dict[str, Any]],
+    top_k: int,
+    *,
+    context: Sequence[float] | None = None,
+    user_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Build one feedback record per policy arm for a live bandit serve.
+
+    The blended serving response (``rank_cold_start_bandit``) is rewarded per
+    arm: each record's reward is the precision@k of the served artist ids
+    against that arm's own ranking, an engagement proxy computed entirely from
+    the serve. Crediting every arm (not just the dominant one) lets
+    ``bandit-update`` fold influence across the whole policy. Unknown users
+    carry the neutral (zero) context unless one is supplied.
+    """
+    _validate_policy(policy)
+    validate_ranking_parameters(top_k)
+    served = rank_cold_start_bandit(policy, artist_stats, top_k)
+    served_ids = [str(rec["artist_id"]) for rec in served]
+    records: list[dict[str, Any]] = []
+    for arm in sorted(policy):
+        weight = policy[arm]
+        if weight <= 0:
+            continue
+        arm_served = rank_cold_start_arm(arm, artist_stats, top_k)
+        reward = precision_at_k(
+            served_ids,
+            [str(rec["artist_id"]) for rec in arm_served],
+            top_k,
+        )
+        record: dict[str, Any] = {
+            "context": (
+                validate_serve_context(context)
+                if context is not None
+                else neutral_serve_context()
+            ),
+            "arm": arm,
+            "reward": reward,
+        }
+        if user_id is not None:
+            record["user_id"] = user_id
+        _validate_feedback_record(record)
+        records.append(record)
+    return records
 
 
 def feedback_from_bandit_serve(
@@ -475,30 +551,18 @@ def feedback_from_bandit_serve(
     engagement proxy computed entirely from the serve itself. Unknown users
     carry the neutral (zero) context unless one is supplied.
     """
-    _validate_policy(policy)
-    validate_ranking_parameters(top_k)
-    arm = dominant_policy_arm(policy)
-    served = rank_cold_start_bandit(policy, artist_stats, top_k)
-    served_ids = [str(rec["artist_id"]) for rec in served]
-    dominant_served = rank_cold_start_arm(arm, artist_stats, top_k)
-    reward = precision_at_k(
-        served_ids,
-        [str(rec["artist_id"]) for rec in dominant_served],
+    records = feedback_records_from_bandit_serve(
+        policy,
+        artist_stats,
         top_k,
+        context=context,
+        user_id=user_id,
     )
-    record: dict[str, Any] = {
-        "context": (
-            [float(value) for value in context]
-            if context is not None
-            else neutral_serve_context()
-        ),
-        "arm": arm,
-        "reward": reward,
-    }
-    if user_id is not None:
-        record["user_id"] = user_id
-    _validate_feedback_record(record)
-    return record
+    dominant = dominant_policy_arm(policy)
+    for record in records:
+        if record["arm"] == dominant:
+            return record
+    raise ValueError(f"Policy has no feedback record for dominant arm '{dominant}'.")
 
 
 def rank_cold_start_arm(
