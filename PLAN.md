@@ -3,7 +3,40 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.23.0) — shipped
+## Current milestone (0.24.0) — in progress
+
+Online bandit state lifecycle and observability. Live serves append to the
+feedback journal but nothing folds those observations into the persisted
+bandit state automatically: `bandit-update` re-folds the *entire* journal on
+every run, so a repeated or scheduled invocation double-counts previously
+folded records, and the bandit state / journal statistics are only visible in
+raw JSON files. This milestone makes the online fold idempotent (safe to
+schedule) and surfaces the bandit lifecycle in the service, API, CLI, and
+dashboard.
+
+- Phase 94 — Idempotent journal sweep: `sweep_bandit_journal` folds only the
+  pending (not-yet-folded) records into a bandit state and records a fold
+  watermark (`journal_fold_offset`, `journal_folded_at`) in the state config,
+  so repeated sweeps are safe; a journal that shrank below the offset resets
+  the watermark.
+- Phase 95 — Status summary: a `bandit_status` helper builds a readable
+  snapshot (per-arm selections/rewards/mean reward, active policy weights,
+  journal record and pending counts, last fold time) from the persisted files.
+- Phase 96 — Service integration: `RecommenderService.bandit_status()` and
+  `sweep_bandit_feedback()`; `metadata()` cold-start section gains the bandit
+  state summary.
+- Phase 97 — CLI: `bandit-status` command (read-only) and `bandit-update`
+  folds the journal through the idempotent sweep.
+- Phase 98 — API: `POST /bandit/update` triggers the online sweep and returns
+  the updated status.
+- Phase 99 — Dashboard: a "Cold-Start Bandit" tab renders the lifecycle status
+  with a "fold pending feedback" action.
+- Phase 100 — Tests: sweep idempotency/watermark/reset, status summary with and
+  without files, and service/CLI/API/dashboard wiring.
+- Phase 101 — Docs and release: PLAN, README (online sweep), CHANGELOG, version
+  bump to 0.24.0.
+
+## Previous milestone (0.23.0) — shipped
 
 Contextual, per-arm served bandit feedback. 0.22.0 records served feedback but
 the context is always the neutral zero vector (the folded ridge update is a
@@ -340,16 +373,13 @@ is preserved when no policy file exists.
 - Phase 69 — Docs and release: PLAN, README (evaluation + CLI), CHANGELOG,
   version bump to 0.19.0.
 
-## Next steps (after 0.23.0)
+## Next steps (after 0.24.0)
 
 1. Two-tower neural candidate retrieval (PyTorch / ONNX runtime) — deferred
    until a real-scale catalog is available: the current sample dataset (18
    artists, 36 tracks) cannot meaningfully train or validate a neural
    retrieval model, and the phase would add heavy new dependencies.
-2. Online bandit state snapshot and scheduled `bandit-update` folding of live
-   serves back into the simulation prior, surfaced in the dashboard/API
-   metadata.
-3. Automatic relationship between artist counts and context features when the
+2. Automatic relationship between artist counts and context features when the
    feature set changes (e.g., re-derive `DEFAULT_CONTEXT_FEATURES` from a
    persisted configuration instead of the hard-coded tuple).
 
