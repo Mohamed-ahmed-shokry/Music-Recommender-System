@@ -702,6 +702,96 @@ def _render_ablation_summary_tab(service: RecommenderService) -> None:
     _render_ablation_summary_body(summary)
 
 
+def _bandit_arm_rows(status: dict[str, Any]) -> pd.DataFrame:
+    """Shape the bandit lifecycle summary into a per-arm comparison table."""
+    rows = []
+    for arm, stats in status["state"]["arms"].items():
+        rows.append(
+            {
+                "Arm": arm,
+                "Selections": stats["selections"],
+                "Cum. Reward": round(stats["total_reward"], 4),
+                "Mean Reward": round(stats["mean_reward"], 4),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _render_bandit_tab(service: RecommenderService) -> None:
+    st.write(
+        "Cold-start bandit lifecycle: persisted state, active policy, and served "
+        "feedback journal."
+    )
+    st.caption(
+        "Served feedback is recorded to the journal by `recommend-user "
+        "--record-feedback` and folded into the state by the idempotent sweep "
+        "below (safe to rerun)."
+    )
+    try:
+        status = service.bandit_status()
+    except (FileNotFoundError, ValueError) as error:
+        st.error(f"Bandit lifecycle unavailable: {error}")
+        return
+
+    if not status["available"]:
+        st.info(
+            "No bandit state yet. Run `simulate-bandit --write-state` or "
+            "`bandit-update`."
+        )
+    else:
+        state = status["state"]
+        cols = st.columns(4)
+        cols[0].metric("Arms", len(state["arms"]))
+        cols[1].metric("Context dim", state["context_dim"])
+        cols[2].metric("Alpha", f"{state['alpha']:.2f}")
+        cols[3].metric("Total selections", state["total_selections"])
+        st.dataframe(
+            _bandit_arm_rows(status),
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "Selections": st.column_config.NumberColumn(format="%d"),
+                "Cum. Reward": st.column_config.NumberColumn(format="%.4f"),
+                "Mean Reward": st.column_config.NumberColumn(format="%.4f"),
+            },
+        )
+        st.caption(f"State generated at {state['generated_at']}.")
+
+    if status["policy"]:
+        st.write(
+            "Active policy: "
+            + ", ".join(
+                f"**{arm}** {weight:.3f}" for arm, weight in status["policy"].items()
+            )
+        )
+    else:
+        st.write("Active policy: none (cold start serves popular items).")
+
+    fold = status["last_fold"]
+    if fold:
+        st.write(
+            f"Journal: **{status['journal']['length']}** record(s), "
+            f"**{status['journal']['pending']}** pending (last fold {fold['at']} "
+            f"at offset {fold['offset']})."
+        )
+    else:
+        st.write(
+            f"Journal: **{status['journal']['length']}** record(s), "
+            f"**{status['journal']['pending']}** pending (no fold yet)."
+        )
+
+    if st.button("Fold pending feedback", type="primary"):
+        try:
+            updated = service.sweep_bandit_feedback()
+        except (FileNotFoundError, ValueError) as error:
+            st.error(f"Fold failed: {error}")
+        else:
+            st.success(
+                f"Folded pending feedback. Journal now "
+                f"{updated['journal']['pending']} pending."
+            )
+
+
 def render_dashboard(service: RecommenderService) -> None:
     """Render the dashboard using an already loaded recommender service."""
     health = service.health()
@@ -743,6 +833,7 @@ def render_dashboard(service: RecommenderService) -> None:
             "Tracks",
             "Catalog",
             "Ablation Summary",
+            "Cold-Start Bandit",
         ]
     )
     with tabs[0]:
@@ -772,6 +863,8 @@ def render_dashboard(service: RecommenderService) -> None:
         _render_catalog_tab(service)
     with tabs[6]:
         _render_ablation_summary_tab(service)
+    with tabs[7]:
+        _render_bandit_tab(service)
 
 
 def main() -> None:

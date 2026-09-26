@@ -81,6 +81,38 @@ class FakeDashboardService:
             "content_features": 12,
         }
 
+    def bandit_status(self) -> dict[str, object]:
+        return {
+            "available": True,
+            "state": {
+                "generated_at": "2026-01-01T00:00:00+00:00",
+                "context_dim": 3,
+                "alpha": 0.5,
+                "total_selections": 2,
+                "arms": {
+                    "popular": {
+                        "selections": 2,
+                        "total_reward": 1.4,
+                        "mean_reward": 0.7,
+                    },
+                    "long_tail": {
+                        "selections": 1,
+                        "total_reward": 0.4,
+                        "mean_reward": 0.4,
+                    },
+                },
+            },
+            "policy": {"popular": 0.7, "long_tail": 0.3},
+            "journal": {"length": 3, "pending": 1},
+            "last_fold": {"offset": 2, "at": "2026-01-01T00:00:00+00:00"},
+        }
+
+    def sweep_bandit_feedback(self) -> dict[str, object]:
+        self.last_sweep_called = True
+        status = self.bandit_status()
+        status["journal"]["pending"] = 0
+        return status
+
     def browse_artists(
         self,
         *,
@@ -353,12 +385,17 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Tracks",
         "Catalog",
         "Ablation Summary",
+        "Cold-Start Bandit",
     ]
     assert [metric.label for metric in app.metric] == [
         "Listeners",
         "Artists",
         "Interactions",
         "Content features",
+        "Arms",
+        "Context dim",
+        "Alpha",
+        "Total selections",
     ]
 
 
@@ -408,6 +445,76 @@ def test_dashboard_personalized_form_uses_ltr_when_enabled() -> None:
 
     assert not app.exception
     assert any(caption.value == "Strategy: Ltr Ranked" for caption in app.caption)
+
+
+def test_dashboard_bandit_tab_renders_lifecycle_and_folds() -> None:
+    service = FakeDashboardService()
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(
+        caption.value.startswith("Served feedback is recorded")
+        for caption in app.caption
+    )
+    assert any(metric.label == "Total selections" for metric in app.metric)
+    rendered = [
+        *[caption.value for caption in app.caption],
+        *[markdown.value for markdown in app.markdown],
+    ]
+    assert any("Journal" in text and "3" in text for text in rendered)
+
+    fold_button = next(
+        button for button in app.button if button.label == "Fold pending feedback"
+    )
+    fold_button.click().run()
+
+    assert service.last_sweep_called is True
+    assert not app.exception
+
+
+class NoBanditService(FakeDashboardService):
+    def bandit_status(self) -> dict[str, object]:
+        return {
+            "available": False,
+            "state": None,
+            "policy": None,
+            "journal": {"length": 0, "pending": 0},
+            "last_fold": None,
+        }
+
+
+def test_dashboard_bandit_tab_handles_missing_state() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(NoBanditService(),),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(info.value.startswith("No bandit state yet") for info in app.info)
+
+
+def test_dashboard_bandit_tab_surfaces_fold_errors() -> None:
+    class FailingSweepService(FakeDashboardService):
+        def sweep_bandit_feedback(self) -> dict[str, object]:
+            raise ValueError("Failed to parse bandit state")
+
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(FailingSweepService(),),
+        default_timeout=10,
+    ).run()
+    fold_button = next(
+        button for button in app.button if button.label == "Fold pending feedback"
+    )
+    fold_button.click().run()
+
+    assert not app.exception
+    assert any(error.value.startswith("Fold failed:") for error in app.error)
 
 
 def test_ablation_ranking_rows_shapes_summary_data() -> None:
@@ -812,4 +919,5 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
         "Tracks",
         "Catalog",
         "Ablation Summary",
+        "Cold-Start Bandit",
     ]
