@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -13,14 +14,19 @@ from music_recommender.bandit import (
     append_bandit_feedback,
     dominant_policy_arm,
     feedback_records_from_bandit_serve,
+    load_bandit_feedback,
+    load_bandit_state,
     load_cold_start_policy,
     rank_cold_start_bandit,
+    summarize_bandit_lifecycle,
+    sweep_bandit_journal,
     validate_serve_context,
 )
 from music_recommender.baselines import popular_artists
 from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
     BANDIT_FEEDBACK_PATH,
+    BANDIT_STATE_PATH,
     COLD_START_POLICY_PATH,
     DEFAULT_CONTENT_WEIGHT,
     RAW_TRACK_DATA_PATH,
@@ -89,6 +95,10 @@ class RecommenderService:
 
     def metadata(self) -> dict[str, Any]:
         """Return artifact and training metadata."""
+        try:
+            bandit = self.bandit_status()
+        except (FileNotFoundError, ValueError) as error:
+            bandit = {"available": False, "error": str(error)}
         return {
             "version": self.artifact.version,
             "metadata": self.artifact.metadata,
@@ -99,6 +109,7 @@ class RecommenderService:
                 "strategy": ("bandit" if self.cold_start_policy else "popular"),
                 "policy": self.cold_start_policy,
             },
+            "bandit": bandit,
             "ltr": {
                 "available": self.artifact.ltr_model is not None,
                 "track_available": (
@@ -115,6 +126,66 @@ class RecommenderService:
                 "feature_names": self.artifact.content_artifacts.feature_names,
             },
         }
+
+    def bandit_status(
+        self,
+        *,
+        state_path: str | Path | None = None,
+        feedback_journal_path: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Return a readable snapshot of the cold-start bandit lifecycle.
+
+        Reads the persisted bandit state and feedback journal (defaults to the
+        project report paths) together with the active policy and reports
+        per-arm statistics, policy weights, journal length/pending count, and
+        last fold time. Missing files are reported cleanly; corrupt files
+        raise so the operator sees the problem.
+        """
+        state_path = Path(state_path) if state_path is not None else BANDIT_STATE_PATH
+        journal_path = (
+            Path(feedback_journal_path)
+            if feedback_journal_path is not None
+            else BANDIT_FEEDBACK_PATH
+        )
+        state = load_bandit_state(state_path) if state_path.exists() else None
+        feedback = load_bandit_feedback(journal_path) if journal_path.exists() else []
+        return summarize_bandit_lifecycle(
+            state=state,
+            policy=self.cold_start_policy,
+            feedback=feedback,
+        )
+
+    def sweep_bandit_feedback(
+        self,
+        *,
+        state_path: str | Path | None = None,
+        feedback_journal_path: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Fold pending served feedback into the persisted bandit state.
+
+        Applies the idempotent journal sweep (only records not yet folded are
+        applied), persists the updated state, and returns the refreshed
+        lifecycle status. Requires a state already to have been written (by
+        ``simulate-bandit --write-state`` or ``bandit-update``).
+        """
+        state_path = Path(state_path) if state_path is not None else BANDIT_STATE_PATH
+        journal_path = (
+            Path(feedback_journal_path)
+            if feedback_journal_path is not None
+            else BANDIT_FEEDBACK_PATH
+        )
+        state = load_bandit_state(state_path)
+        feedback = load_bandit_feedback(journal_path) if journal_path.exists() else []
+        updated, _ = sweep_bandit_journal(state, feedback)
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(
+            json.dumps(updated, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return self.bandit_status(
+            state_path=state_path,
+            feedback_journal_path=journal_path,
+        )
 
     def health(self) -> dict[str, Any]:
         """Return lightweight service health details."""

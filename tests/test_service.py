@@ -9,7 +9,15 @@ from music_recommender.artifacts import (
     build_recommender_artifact,
     save_artifact,
 )
-from music_recommender.bandit import load_bandit_feedback
+from music_recommender.bandit import (
+    DEFAULT_COLD_START_ARMS,
+    DEFAULT_CONTEXT_FEATURES,
+    LinUCBContextualBandit,
+    append_bandit_feedback,
+    load_bandit_feedback,
+    snapshot_bandit_state,
+    write_bandit_state,
+)
 from music_recommender.content import build_content_artifacts
 from music_recommender.ltr import train_ltr_ranker
 from music_recommender.model import train_als_model
@@ -1158,3 +1166,159 @@ def test_bandit_serve_rejects_invalid_context(tmp_path: Path) -> None:
             feedback_journal_path=journal,
             context=[0.0, 0.0],
         )
+
+
+def _write_test_state(tmp_path: Path) -> Path:
+    state_path = tmp_path / "bandit_state.json"
+    write_bandit_state(
+        snapshot_bandit_state(
+            LinUCBContextualBandit(
+                DEFAULT_COLD_START_ARMS,
+                len(DEFAULT_CONTEXT_FEATURES),
+                alpha=0.5,
+            )
+        ),
+        tmp_path,
+        state_name="bandit_state",
+    )
+    return state_path
+
+
+def _append_test_feedback(journal: Path, count: int = 1) -> None:
+    for _ in range(count):
+        append_bandit_feedback(
+            {"context": [1.0, 0.5, 0.2], "arm": "popular", "reward": 0.7},
+            journal,
+        )
+
+
+def test_bandit_status_reports_absence_cleanly(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    status = service.bandit_status(
+        state_path=tmp_path / "missing_state.json",
+        feedback_journal_path=tmp_path / "missing_journal.json",
+    )
+    assert status["available"] is False
+    assert status["state"] is None
+    assert status["policy"] is None
+    assert status["journal"] == {"length": 0, "pending": 0}
+    assert status["last_fold"] is None
+
+
+def test_bandit_status_reports_state_policy_and_pending(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    service.cold_start_policy = {"popular": 0.7, "long_tail": 0.3}
+    state_path = _write_test_state(tmp_path)
+    journal = tmp_path / "bandit_feedback.json"
+    _append_test_feedback(journal, count=2)
+
+    status = service.bandit_status(
+        state_path=state_path,
+        feedback_journal_path=journal,
+    )
+    assert status["available"] is True
+    assert status["policy"] == {"popular": 0.7, "long_tail": 0.3}
+    assert status["journal"] == {"length": 2, "pending": 2}
+    assert status["state"]["context_dim"] == len(DEFAULT_CONTEXT_FEATURES)
+    assert status["state"]["arms"]["popular"]["selections"] == 0
+    assert status["last_fold"] is None
+
+
+def test_bandit_status_pending_uses_fold_watermark(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    service.cold_start_policy = {"popular": 1.0}
+    state_path = _write_test_state(tmp_path)
+    journal = tmp_path / "bandit_feedback.json"
+    _append_test_feedback(journal, count=2)
+
+    service.sweep_bandit_feedback(
+        state_path=state_path,
+        feedback_journal_path=journal,
+    )
+    _append_test_feedback(journal, count=1)
+
+    status = service.bandit_status(
+        state_path=state_path,
+        feedback_journal_path=journal,
+    )
+    assert status["journal"] == {"length": 3, "pending": 1}
+    assert status["last_fold"]["offset"] == 2
+
+
+def test_sweep_bandit_feedback_folds_and_persists(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    state_path = _write_test_state(tmp_path)
+    journal = tmp_path / "bandit_feedback.json"
+    _append_test_feedback(journal, count=3)
+
+    status = service.sweep_bandit_feedback(
+        state_path=state_path,
+        feedback_journal_path=journal,
+    )
+    loaded = service.bandit_status(
+        state_path=state_path,
+        feedback_journal_path=journal,
+    )
+    assert status["journal"] == {"length": 3, "pending": 0}
+    assert loaded["state"]["arms"]["popular"]["selections"] == 3
+    assert loaded["last_fold"]["offset"] == 3
+
+
+def test_sweep_bandit_feedback_is_idempotent(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    state_path = _write_test_state(tmp_path)
+    journal = tmp_path / "bandit_feedback.json"
+    _append_test_feedback(journal, count=2)
+
+    first = service.sweep_bandit_feedback(
+        state_path=state_path,
+        feedback_journal_path=journal,
+    )
+    second = service.sweep_bandit_feedback(
+        state_path=state_path,
+        feedback_journal_path=journal,
+    )
+    assert first["state"]["arms"]["popular"]["selections"] == 2
+    assert second["state"]["arms"]["popular"]["selections"] == 2
+    assert second["journal"]["pending"] == 0
+
+
+def test_sweep_bandit_feedback_requires_existing_state(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    with pytest.raises(FileNotFoundError, match="not found"):
+        service.sweep_bandit_feedback(
+            state_path=tmp_path / "missing_state.json",
+            feedback_journal_path=tmp_path / "missing_journal.json",
+        )
+
+
+def test_metadata_exposes_bandit_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = create_service(tmp_path)
+    state_path = _write_test_state(tmp_path)
+    journal = tmp_path / "bandit_feedback.json"
+    _append_test_feedback(journal, count=1)
+    monkeypatch.setattr("music_recommender.service.BANDIT_STATE_PATH", state_path)
+    monkeypatch.setattr("music_recommender.service.BANDIT_FEEDBACK_PATH", journal)
+    service.sweep_bandit_feedback()
+
+    service.cold_start_policy = {"popular": 1.0}
+    metadata = service.metadata()
+    assert metadata["bandit"]["available"] is True
+    assert metadata["bandit"]["policy"] == {"popular": 1.0}
+    assert metadata["bandit"]["journal"] == {"length": 1, "pending": 0}
+    assert metadata["cold_start"]["strategy"] == "bandit"
+
+
+def test_metadata_tolerates_corrupt_bandit_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = create_service(tmp_path)
+    corrupt = tmp_path / "bandit_state.json"
+    corrupt.write_text("{nope", encoding="utf-8")
+    monkeypatch.setattr("music_recommender.service.BANDIT_STATE_PATH", corrupt)
+
+    metadata = service.metadata()
+    assert "error" in metadata["bandit"]
+    assert metadata["bandit"]["available"] is False
