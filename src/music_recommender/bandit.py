@@ -22,7 +22,7 @@ served traffic contributes directly to the next policy.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -38,6 +38,94 @@ from music_recommender.ranking import validate_ranking_parameters
 
 DEFAULT_COLD_START_ARMS: tuple[str, ...] = ("popular", "balanced", "long_tail")
 DEFAULT_CONTEXT_FEATURES = ("log_plays", "log_unique_artists", "mean_popularity_rank")
+
+
+def _context_feature_log_plays(
+    user_df: pd.DataFrame,
+    rank_by_artist_id: dict[str, int],
+) -> float:
+    """Context feature: log1p of the user's total observe-window play count."""
+    return float(np.log1p(float(user_df["play_count"].sum())))
+
+
+def _context_feature_log_unique_artists(
+    user_df: pd.DataFrame,
+    rank_by_artist_id: dict[str, int],
+) -> float:
+    """Context feature: log1p of the distinct artists observed for the user."""
+    return float(np.log1p(int(user_df["artist_id"].nunique())))
+
+
+def _context_feature_mean_popularity_rank(
+    user_df: pd.DataFrame,
+    rank_by_artist_id: dict[str, int],
+) -> float:
+    """Context feature: mean popularity rank of the observed artists.
+
+    Artists absent from the training catalog take the worst-known rank plus
+    one, so the mean still rewards breadth toward popular artists.
+    """
+    artist_ranks = [
+        rank_by_artist_id.get(str(artist_id), len(rank_by_artist_id) + 1)
+        for artist_id in user_df["artist_id"].unique()
+    ]
+    return float(np.mean(artist_ranks)) if artist_ranks else 0.0
+
+
+CONTEXT_FEATURE_EXTRACTORS: dict[
+    str, Callable[[pd.DataFrame, dict[str, int]], float]
+] = {
+    "log_plays": _context_feature_log_plays,
+    "log_unique_artists": _context_feature_log_unique_artists,
+    "mean_popularity_rank": _context_feature_mean_popularity_rank,
+}
+# Registry mapping context feature names to their value extractors. Each
+# extractor computes one feature value from a user's bootstrap observation
+# window (a dataframe of interactions) and the catalog's popularity-rank
+# lookup. Adding a new feature is a registry-only change; enabling it is
+# configuration.
+
+SUPPORTED_CONTEXT_FEATURES: tuple[str, ...] = tuple(CONTEXT_FEATURE_EXTRACTORS)
+
+
+def validate_context_features(features: Sequence[str]) -> tuple[str, ...]:
+    """Validate a bandit context feature set, returning the canonical tuple.
+
+    Rejects empty, unknown, or duplicated feature names with an error that
+    names every offending feature and lists the supported ones, so a
+    misconfigured feature set fails fast at config time instead of surfacing a
+    raw lookup error mid-flight.
+    """
+    resolved = tuple(features)
+    if not resolved:
+        raise ValueError("Context features must not be empty.")
+    unknown = [f for f in resolved if f not in CONTEXT_FEATURE_EXTRACTORS]
+    if unknown:
+        raise ValueError(
+            "Unknown context feature(s): "
+            + ", ".join(repr(f) for f in unknown)
+            + ". Supported features: "
+            + ", ".join(SUPPORTED_CONTEXT_FEATURES)
+            + "."
+        )
+    if len(set(resolved)) != len(resolved):
+        raise ValueError("Context features must not contain duplicates.")
+    return resolved
+
+
+def resolve_context_features(
+    features: Sequence[str] | None = None,
+) -> tuple[str, ...]:
+    """Resolve the active context feature set from an explicit override.
+
+    ``None`` (unset) returns the project default
+    (``DEFAULT_CONTEXT_FEATURES``); any supplied sequence is validated and
+    returned as the canonical feature tuple. Persisted-config and environment
+    resolution build on this and live in the CLI/service wiring.
+    """
+    if features is None:
+        return DEFAULT_CONTEXT_FEATURES
+    return validate_context_features(features)
 
 
 def _validate_arms(arms: Sequence[str]) -> None:
@@ -733,31 +821,28 @@ def build_cold_start_context(
 
     The bootstrap window stands in for the signals a real system observes
     during the first moments of a new user's arrival (a short observation
-    window before full personalization kicks in). Available features:
+    window before full personalization kicks in). Values are computed through
+    the context-feature registry, so any subset or reordering of the supported
+    features is valid and the vector follows the requested order:
 
     - ``log_plays``: log1p of total play count.
     - ``log_unique_artists``: log1p of distinct artists played.
     - ``mean_popularity_rank``: mean popularity rank of the played artists,
-       falling back to the median catalog rank for artists absent from the
-       training catalog.
+      using the worst-known rank plus one for artists absent from the training
+      catalog.
+
+    Unknown feature names are rejected with a helpful error listing the
+    supported features.
     """
+    resolved = validate_context_features(features)
     if user_df.empty:
-        return [0.0] * len(features)
+        return [0.0] * len(resolved)
 
-    artist_ranks = [
-        rank_by_artist_id.get(str(artist_id), len(rank_by_artist_id) + 1)
-        for artist_id in user_df["artist_id"].unique()
-    ]
-    total_plays = float(user_df["play_count"].sum())
-    unique_artists = int(user_df["artist_id"].nunique())
-    mean_rank = float(np.mean(artist_ranks)) if artist_ranks else 0.0
-
-    values: dict[str, float] = {
-        "log_plays": float(np.log1p(total_plays)),
-        "log_unique_artists": float(np.log1p(unique_artists)),
-        "mean_popularity_rank": mean_rank,
+    values = {
+        name: CONTEXT_FEATURE_EXTRACTORS[name](user_df, rank_by_artist_id)
+        for name in resolved
     }
-    return [values[feature] for feature in features]
+    return [values[name] for name in resolved]
 
 
 def simulate_cold_start_exploration(

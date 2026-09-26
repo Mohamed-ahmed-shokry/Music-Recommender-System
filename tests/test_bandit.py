@@ -13,8 +13,10 @@ from typer.testing import CliRunner
 
 from music_recommender import cli
 from music_recommender.bandit import (
+    CONTEXT_FEATURE_EXTRACTORS,
     DEFAULT_COLD_START_ARMS,
     DEFAULT_CONTEXT_FEATURES,
+    SUPPORTED_CONTEXT_FEATURES,
     LinUCBContextualBandit,
     append_bandit_feedback,
     build_cold_start_context,
@@ -32,10 +34,12 @@ from music_recommender.bandit import (
     pending_feedback_count,
     rank_cold_start_arm,
     rank_cold_start_bandit,
+    resolve_context_features,
     simulate_cold_start_exploration,
     snapshot_bandit_state,
     summarize_bandit_lifecycle,
     sweep_bandit_journal,
+    validate_context_features,
     validate_serve_context,
     write_bandit_report,
     write_bandit_state,
@@ -176,6 +180,55 @@ class TestBuildColdStartContext:
             features=("log_plays",),
         )
         assert context == [0.0]
+
+    def test_feature_subset_and_reordering(self) -> None:
+        df = _interactions_df(1, 5).assign(user_id="u0")
+        ranks = {"a1": 1, "a2": 2, "a3": 3}
+        full = build_cold_start_context(df, ranks)
+        reordered = build_cold_start_context(
+            df, ranks, features=("mean_popularity_rank", "log_plays")
+        )
+        assert reordered == [full[2], full[0]]
+
+    def test_unknown_feature_raises_with_supported_names(self) -> None:
+        df = _interactions_df(1, 5).assign(user_id="u0")
+        with pytest.raises(ValueError, match="Unknown context feature"):
+            build_cold_start_context(df, {"a1": 1}, features=("log_plays", "magic"))
+
+
+class TestContextFeatureRegistry:
+    def test_registry_ships_default_features(self) -> None:
+        assert set(SUPPORTED_CONTEXT_FEATURES) == set(DEFAULT_CONTEXT_FEATURES)
+        for name in DEFAULT_CONTEXT_FEATURES:
+            assert name in CONTEXT_FEATURE_EXTRACTORS
+
+    def test_validate_context_features_returns_canonical_tuple(self) -> None:
+        assert validate_context_features(["log_plays", "mean_popularity_rank"]) == (
+            "log_plays",
+            "mean_popularity_rank",
+        )
+        assert validate_context_features(("log_plays",)) == ("log_plays",)
+
+    def test_validate_rejects_empty(self) -> None:
+        with pytest.raises(ValueError, match="must not be empty"):
+            validate_context_features([])
+
+    def test_validate_rejects_unknown_feature(self) -> None:
+        with pytest.raises(ValueError, match="Unknown context feature"):
+            validate_context_features(["log_plays", "genre_match"])
+
+    def test_validate_rejects_duplicates(self) -> None:
+        with pytest.raises(ValueError, match="must not contain duplicates"):
+            validate_context_features(["log_plays", "log_plays"])
+
+    def test_resolve_context_features_defaults(self) -> None:
+        assert resolve_context_features(None) == DEFAULT_CONTEXT_FEATURES
+        assert resolve_context_features() == DEFAULT_CONTEXT_FEATURES
+
+    def test_resolve_context_features_validates_override(self) -> None:
+        assert resolve_context_features(("log_plays",)) == ("log_plays",)
+        with pytest.raises(ValueError, match="Unknown context feature"):
+            resolve_context_features(("nope",))
 
 
 def _run_simulation(**overrides: object) -> dict[str, object]:
