@@ -23,6 +23,7 @@ from music_recommender.bandit import (
     summarize_bandit_lifecycle,
     sweep_bandit_journal,
     validate_serve_context,
+    validate_state_context_features,
 )
 from music_recommender.baselines import popular_artists
 from music_recommender.config import (
@@ -171,13 +172,16 @@ class RecommenderService:
         *,
         state_path: str | Path | None = None,
         feedback_journal_path: str | Path | None = None,
+        context_features: Sequence[str] | None = None,
     ) -> dict[str, Any]:
         """Fold pending served feedback into the persisted bandit state.
 
         Applies the idempotent journal sweep (only records not yet folded are
         applied), persists the updated state, and returns the refreshed
         lifecycle status. Requires a state already to have been written (by
-        ``simulate-bandit --write-state`` or ``bandit-update``).
+        ``simulate-bandit --write-state`` or ``bandit-update``). When
+        ``context_features`` is supplied, it is cross-checked against the
+        state's recorded feature set before folding.
         """
         state_path = Path(state_path) if state_path is not None else BANDIT_STATE_PATH
         journal_path = (
@@ -186,6 +190,8 @@ class RecommenderService:
             else BANDIT_FEEDBACK_PATH
         )
         state = load_bandit_state(state_path)
+        if context_features is not None:
+            validate_state_context_features(state, context_features)
         feedback = load_bandit_feedback(journal_path) if journal_path.exists() else []
         updated, _ = sweep_bandit_journal(state, feedback)
         state_path.parent.mkdir(parents=True, exist_ok=True)

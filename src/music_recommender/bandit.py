@@ -457,6 +457,27 @@ def load_bandit_state(state_path: Path | str) -> dict[str, Any]:
     return state
 
 
+def validate_state_context_features(
+    state: dict[str, Any],
+    requested: Sequence[str],
+) -> tuple[str, ...]:
+    """Cross-check a requested context feature set against a state's records.
+
+    When the state records ``config.context_features``, the requested set must
+    match exactly; folding with a different context dimension would silently
+    misalign ridge statistics. Raises an actionable error on mismatch.
+    """
+    resolved = validate_context_features(requested)
+    recorded = state["config"].get("context_features")
+    if recorded is not None and list(resolved) != recorded:
+        raise ValueError(
+            f"Requested context features {list(resolved)} do not match the "
+            f"state's recorded feature set {recorded}; use the state's "
+            "context dimension or retrain the state."
+        )
+    return resolved
+
+
 def _feedback_record_context(
     record: dict[str, Any], dim: int | None = None
 ) -> np.ndarray:

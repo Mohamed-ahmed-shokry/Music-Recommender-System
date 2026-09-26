@@ -10,6 +10,13 @@ from api.middleware import RequestSafetyMiddleware
 
 
 class FakeService:
+    def __init__(self) -> None:
+        self.context_features: list[str] = [
+            "log_plays",
+            "log_unique_artists",
+            "mean_popularity_rank",
+        ]
+
     def health(self) -> dict[str, object]:
         return {"status": "ok", "artifact_version": "4.0"}
 
@@ -37,8 +44,15 @@ class FakeService:
             "last_fold": {"offset": 2, "at": "2026-01-01T00:00:00+00:00"},
         }
 
-    def sweep_bandit_feedback(self) -> dict[str, object]:
+    def sweep_bandit_feedback(
+        self, *, context_features: list[str] | None = None
+    ) -> dict[str, object]:
         self.last_sweep_called = True
+        if context_features is not None and context_features != self.context_features:
+            raise ValueError(
+                f"Requested context features {context_features} do not match "
+                f"the state's recorded feature set {self.context_features}"
+            )
         return self.bandit_status()
 
     def popular_artists(self, top_k: int) -> dict[str, object]:
@@ -734,6 +748,11 @@ def test_bandit_status_route_reports_lifecycle() -> None:
     assert body["available"] is True
     assert body["journal"] == {"length": 2, "pending": 0}
     assert body["state"]["arms"]["popular"]["selections"] == 2
+    assert body["context_features"] == [
+        "log_plays",
+        "log_unique_artists",
+        "mean_popularity_rank",
+    ]
 
 
 def test_bandit_update_route_folds_pending_feedback() -> None:
@@ -748,9 +767,45 @@ def test_bandit_update_route_folds_pending_feedback() -> None:
     assert response.json()["available"] is True
 
 
+def test_bandit_update_route_matching_context_features() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.post(
+            "/bandit/update",
+            json={
+                "context_features": [
+                    "log_plays",
+                    "log_unique_artists",
+                    "mean_popularity_rank",
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    assert api_main.service.last_sweep_called is True
+
+
+def test_bandit_update_route_mismatched_context_features_is_unprocessable() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.post(
+            "/bandit/update",
+            json={"context_features": ["log_plays", "mean_popularity_rank"]},
+        )
+
+    assert response.status_code == 422
+    assert "do not match the state's recorded feature set" in response.json()["detail"]
+
+
 def test_bandit_update_route_missing_state_is_not_found() -> None:
     class NoStateService(FakeService):
-        def sweep_bandit_feedback(self) -> dict[str, object]:
+        def sweep_bandit_feedback(
+            self, *, context_features: list[str] | None = None
+        ) -> dict[str, object]:
             raise FileNotFoundError("bandit_state.json")
 
     with TestClient(api_main.app) as client:
@@ -765,7 +820,9 @@ def test_bandit_update_route_missing_state_is_not_found() -> None:
 
 def test_bandit_update_route_corrupt_state_is_unprocessable() -> None:
     class CorruptStateService(FakeService):
-        def sweep_bandit_feedback(self) -> dict[str, object]:
+        def sweep_bandit_feedback(
+            self, *, context_features: list[str] | None = None
+        ) -> dict[str, object]:
             raise ValueError("Failed to parse bandit state")
 
     with TestClient(api_main.app) as client:

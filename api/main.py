@@ -484,14 +484,36 @@ def browse_tracks(
 @app.get("/bandit/status")
 def bandit_status() -> dict[str, object]:
     """Return the cold-start bandit lifecycle snapshot."""
-    return get_service().bandit_status()
+    service = get_service()
+    status = service.bandit_status()
+    status["context_features"] = list(service.context_features)
+    return status
+
+
+class BanditUpdateRequest(BaseModel):
+    """Optional validation body for folding bandit feedback."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    context_features: list[str] | None = Field(
+        default=None,
+        max_length=MAX_REQUEST_VALUES,
+        description=(
+            "Expected context feature names; verified against the state's "
+            "recorded set before folding."
+        ),
+    )
 
 
 @app.post("/bandit/update")
-def bandit_update() -> dict[str, object]:
+def bandit_update(
+    payload: BanditUpdateRequest | None = None,
+) -> dict[str, object]:
     """Fold pending served feedback into the persisted bandit state."""
     try:
-        return get_service().sweep_bandit_feedback()
+        return get_service().sweep_bandit_feedback(
+            context_features=(payload.context_features if payload is not None else None)
+        )
     except FileNotFoundError as error:
         raise HTTPException(
             status_code=404,

@@ -29,6 +29,7 @@ from music_recommender.bandit import (
     snapshot_bandit_state,
     summarize_bandit_lifecycle,
     sweep_bandit_journal,
+    validate_state_context_features,
     write_bandit_report,
     write_bandit_state,
     write_cold_start_policy,
@@ -2282,14 +2283,7 @@ def bandit_update(
                 for feature in context_features.split(",")
                 if feature.strip()
             )
-            recorded = state["config"].get("context_features")
-            if recorded is not None and list(requested_features) != recorded:
-                raise ValueError(
-                    "--context-features "
-                    f"{list(requested_features)} do not match the state's "
-                    f"recorded feature set {recorded}; either fold with the "
-                    "state's context dimension or retrain the state."
-                )
+            validate_state_context_features(state, requested_features)
 
         journal = (
             Path(journal_path) if journal_path is not None else BANDIT_FEEDBACK_PATH
