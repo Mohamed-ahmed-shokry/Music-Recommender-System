@@ -3,7 +3,11 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.24.0) — in progress
+## Current milestone (0.25.0) — in progress
+
+TBD.
+
+## Previous milestone (0.24.0) — shipped
 
 Online bandit state lifecycle and observability. Live serves append to the
 feedback journal but nothing folds those observations into the persisted
@@ -19,22 +23,23 @@ dashboard.
   watermark (`journal_fold_offset`, `journal_folded_at`) in the state config,
   so repeated sweeps are safe; a journal that shrank below the offset resets
   the watermark.
-- Phase 95 — Status summary: a `bandit_status` helper builds a readable
-  snapshot (per-arm selections/rewards/mean reward, active policy weights,
-  journal record and pending counts, last fold time) from the persisted files.
+- Phase 95 — Status summary: `pending_feedback_count` and
+  `summarize_bandit_lifecycle` build a readable snapshot (per-arm
+  selections/rewards/mean reward, active policy weights, journal record and
+  pending counts, last fold time) from the persisted files.
 - Phase 96 — Service integration: `RecommenderService.bandit_status()` and
-  `sweep_bandit_feedback()`; `metadata()` cold-start section gains the bandit
-  state summary.
+  `sweep_bandit_feedback()`; `metadata()` gains a top-level `bandit` state
+  summary.
 - Phase 97 — CLI: `bandit-status` command (read-only) and `bandit-update`
   folds the journal through the idempotent sweep.
-- Phase 98 — API: `POST /bandit/update` triggers the online sweep and returns
-  the updated status.
+- Phase 98 — API: `GET /bandit/status` and `POST /bandit/update` (the online
+  sweep returning the updated status).
 - Phase 99 — Dashboard: a "Cold-Start Bandit" tab renders the lifecycle status
   with a "fold pending feedback" action.
 - Phase 100 — Tests: sweep idempotency/watermark/reset, status summary with and
-  without files, and service/CLI/API/dashboard wiring.
-- Phase 101 — Docs and release: PLAN, README (online sweep), CHANGELOG, version
-  bump to 0.24.0.
+  without files, and service/CLI/API/dashboard wiring. 858 tests.
+- Phase 101 — Docs and release: PLAN, README (online sweep and
+  observability), CHANGELOG, version bump to 0.24.0.
 
 ## Previous milestone (0.23.0) — shipped
 
@@ -382,6 +387,9 @@ is preserved when no policy file exists.
 2. Automatic relationship between artist counts and context features when the
    feature set changes (e.g., re-derive `DEFAULT_CONTEXT_FEATURES` from a
    persisted configuration instead of the hard-coded tuple).
+3. Scheduled online fold: run the idempotent sweep automatically (cron /
+   internal scheduler) so live served feedback folds back into the bandit
+   prior without manual `bandit-update` (the 0.24.0 watermark makes this safe).
 
 ## Quality gates (every change)
 

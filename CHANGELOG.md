@@ -7,6 +7,47 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-09-26
+
+### Added
+
+- Online bandit state lifecycle and observability: served feedback folding is
+  now **idempotent and schedulable**, and the whole bandit lifecycle is
+  inspectable from the service, CLI, API, and dashboard.
+  - `sweep_bandit_journal`: folds only the pending (not-yet-folded) records of a
+    feedback journal into a bandit state, recording a fold watermark
+    (`journal_fold_offset` / `journal_folded_at`) in the state config so reruns
+    never double-count; a journal that shrank below the watermark is treated as
+    fresh.
+  - `pending_feedback_count` and `summarize_bandit_lifecycle`: readable snapshot
+    of state (per-arm selections/cumulative/mean reward, alpha, context dim),
+    active policy, journal length and pending count, and last fold.
+  - `RecommenderService.bandit_status()` and `sweep_bandit_feedback()`: the
+    lifecycle snapshot, the idempotent fold, and a new top-level `bandit`
+    field in `/metadata` that degrades to an error diagnostic on corrupt state.
+  - CLI: `bandit-update` folds the journal through the watermarked sweep and
+    reports remaining pending; new read-only `bandit-status` prints the
+    lifecycle and exits 0 when files are absent, 1 when corrupt.
+  - API: `GET /bandit/status` returns the snapshot; `POST /bandit/update` folds
+    pending served feedback (missing state → 404, corrupt/validation → 422).
+  - Dashboard: "Cold-Start Bandit" tab renders the lifecycle and a "Fold
+    pending feedback" action that runs the idempotent sweep.
+
+### Tests
+
+- 858 tests; added coverage for the journal sweep (pending-only folding,
+  accumulation over a prior state, watermark reset on journal shrink, invalid
+  watermark), the lifecycle summary, service status/sweep/idempotency and
+  metadata integration, CLI status and repeat-fold idempotency, the API status
+  and update endpoints, and the dashboard bandit tab (render, fold, missing
+  state, fold errors).
+
+### Documentation
+
+- README documents idempotent journal folding, `bandit-status`, the new API
+  endpoints, and the dashboard tab; PLAN moved to the shipped 0.24.0
+  milestone; CHANGELOG updated.
+
 ## [0.23.0] - 2026-09-25
 
 ### Added

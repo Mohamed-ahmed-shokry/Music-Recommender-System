@@ -658,6 +658,16 @@ uv run python -m music_recommender.cli bandit-update \
 update — the state then serves as the next simulation's prior and the report
 derived from it feeds `bandit-policy`.
 
+Journal folding is **idempotent**: `bandit-update` records a fold watermark in
+the state and folds only the journal records not yet folded, so rerunning it
+(or scheduling it nightly, e.g. from a cron job) will never double-count
+already-folded feedback. Inspect the full lifecycle — state, per-arm stats,
+active policy, journal length/pending count, and last fold — read-only with:
+
+```bash
+uv run python -m music_recommender.cli bandit-status
+```
+
 ### Serving the learned bandit policy with online feedback
 
 `recommend-user` serves unknown users through the learned cold-start policy
@@ -679,7 +689,8 @@ uv run python -m music_recommender.cli recommend-user --user-id new_user \
 uv run python -m music_recommender.cli recommend-user --user-id new_user \
   --record-feedback --context 0.72,0.10,0.18
 
-# fold the served observations into the next simulation prior
+# fold the served observations into the next simulation prior (idempotent,
+# safe to rerun or schedule so live traffic always folds back into the state)
 uv run python -m music_recommender.cli bandit-update \
   --state-path reports/bandit_state.json --journal-path reports/bandit_feedback.json
 ```
@@ -689,7 +700,9 @@ The API equivalent is
 `context=a,b,c` query parameter), and `--feedback-path` overrides the journal
 used by the CLI. Crediting every arm (not just the dominant one) lets
 `bandit-update` fold feedback influence across the whole policy. Known users
-and the plain `popular_fallback` branch never record.
+and the plain `popular_fallback` branch never record. The same lifecycle is
+exposed over the API (`GET /bandit/status`, `POST /bandit/update`) and as a
+"Cold-Start Bandit" tab in the dashboard with a one-click fold action.
 
 Track evaluation reports land in `reports/` as JSON (`track_evaluation.json`
 by default), recording the run configuration and per-arm metrics. Specify
@@ -724,6 +737,8 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/tracks/similar/{track_id}?top_k=10` | Tracks similar to a selected track by audio features |
 | `GET` | `/tracks/popular?top_k=10` | Popular track recommendations |
 | `GET` | `/tracks/catalog?query=hit&artist=Drake&limit=25` | Search and page through the track catalog |
+| `GET` | `/bandit/status` | Cold-start bandit lifecycle snapshot (state, policy, journal) |
+| `POST` | `/bandit/update` | Fold pending served feedback into the persisted bandit state |
 | `POST` | `/recommend/profile` | Onboarding recommendations from artists, genres, and moods |
 | `POST` | `/recommend/session` | Short-term session recommendations from seeds, exclusions, and optional user taste |
 | `GET` | `/similar-artists/{artist_id}?method=hybrid&top_k=10` | ALS, content, or hybrid similar artists |
