@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -22,6 +23,7 @@ from music_recommender.bandit import (
     load_bandit_report,
     load_bandit_state,
     load_cold_start_policy,
+    resolve_context_features,
     simulate_cold_start_exploration,
     snapshot_bandit_state,
     summarize_bandit_lifecycle,
@@ -32,9 +34,11 @@ from music_recommender.bandit import (
 )
 from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
+    BANDIT_CONTEXT_FEATURES_PATH,
     BANDIT_FEEDBACK_PATH,
     BANDIT_STATE_PATH,
     COLD_START_POLICY_PATH,
+    CONTEXT_FEATURES_ENV_VAR,
     DATA_DIR,
     DEFAULT_ALS_ALPHA,
     DEFAULT_ALS_FACTORS,
@@ -2054,6 +2058,16 @@ def simulate_bandit(
     arms: str = ",".join(DEFAULT_COLD_START_ARMS),
     holdout_ratio: float = 0.25,
     alpha: float = 1.0,
+    context_features: str | None = typer.Option(
+        None,
+        "--context-features",
+        help=(
+            "Comma-separated bandit context feature names, e.g. "
+            "'log_plays,mean_popularity_rank'. Overrides the "
+            "MUSIC_RECOMMENDER_CONTEXT_FEATURES env var and any persisted "
+            "bandit_context_features.json config."
+        ),
+    ),
     report_name: str | None = typer.Option(
         None,
         "--report-name",
@@ -2080,6 +2094,20 @@ def simulate_bandit(
     try:
         df = load_and_validate_interactions(RAW_DATA_PATH)
         selected_arms = tuple(arm.strip() for arm in arms.split(",") if arm.strip())
+        features_arg = (
+            tuple(
+                feature.strip()
+                for feature in context_features.split(",")
+                if feature.strip()
+            )
+            if context_features is not None
+            else None
+        )
+        resolved_features = resolve_context_features(
+            features=features_arg,
+            env=os.getenv(CONTEXT_FEATURES_ENV_VAR),
+            config_path=BANDIT_CONTEXT_FEATURES_PATH,
+        )
         initial_state = (
             load_bandit_state(from_state) if from_state is not None else None
         )
@@ -2091,6 +2119,7 @@ def simulate_bandit(
             arms=selected_arms,
             holdout_ratio=holdout_ratio,
             alpha=alpha,
+            context_features=resolved_features,
             initial_state=initial_state,
         )
     except (FileNotFoundError, ValueError) as error:
@@ -2104,6 +2133,7 @@ def simulate_bandit(
             f"total reward {prior['total_reward']:.4f})."
         )
     typer.echo(f"Cold-start exploration bandit simulation (top_k={top_k}):")
+    typer.echo(f"Context features: {', '.join(resolved_features)}")
     typer.echo(f"{'Arm':<12} {'Selected':>9} {'Cum. Reward':>12} {'Mean Reward':>12}")
     typer.echo("-" * 48)
     for arm, stats in report["arms"].items():

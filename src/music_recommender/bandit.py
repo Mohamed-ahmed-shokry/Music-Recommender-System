@@ -175,8 +175,7 @@ def load_bandit_context_features(path: Path | str) -> tuple[str, ...]:
     non_string = [item for item in raw if not isinstance(item, str)]
     if non_string:
         raise ValueError(
-            f"Bandit context features '{config_path}' must contain only "
-            "feature names."
+            f"Bandit context features '{config_path}' must contain only feature names."
         )
     return validate_context_features(raw)
 
@@ -940,6 +939,7 @@ def simulate_cold_start_exploration(
         raise ValueError("holdout_ratio must be between 0 and 1 exclusive.")
     if not 0 < bootstrap_ratio < 1:
         raise ValueError("bootstrap_ratio must be between 0 and 1 exclusive.")
+    resolved_context_features = validate_context_features(context_features)
 
     normalized = normalize_interactions(df)
     users = sorted(normalized["user_id"].unique())
@@ -968,7 +968,7 @@ def simulate_cold_start_exploration(
                 "initial_state arms must match the simulation arms "
                 f"({', '.join(arms)})."
             )
-        if bandit.context_dim != len(context_features):
+        if bandit.context_dim != len(resolved_context_features):
             raise ValueError(
                 "initial_state context_dim must match the number of context_features."
             )
@@ -977,7 +977,9 @@ def simulate_cold_start_exploration(
         prior_selections = sum(bandit.selections.values())
         prior_rewards = sum(bandit.rewards.values())
     else:
-        bandit = LinUCBContextualBandit(arms, len(context_features), alpha=alpha)
+        bandit = LinUCBContextualBandit(
+            arms, len(resolved_context_features), alpha=alpha
+        )
         prior_selections = 0
         prior_rewards = 0.0
 
@@ -996,7 +998,7 @@ def simulate_cold_start_exploration(
         context = build_cold_start_context(
             bootstrap_df,
             rank_by_artist_id,
-            features=context_features,
+            features=resolved_context_features,
         )
 
         chosen_arm = bandit.select_arm(context)
@@ -1051,7 +1053,7 @@ def simulate_cold_start_exploration(
             "bootstrap_ratio": bootstrap_ratio,
             "alpha": alpha,
             "arms": list(arms),
-            "context_features": list(context_features),
+            "context_features": list(resolved_context_features),
             "catalog_size": len(artist_stats),
             "cold_users": num_cold,
             "prior": {

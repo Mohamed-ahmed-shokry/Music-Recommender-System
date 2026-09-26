@@ -362,6 +362,22 @@ class TestSimulateColdStartExploration:
         with pytest.raises(ValueError, match="holdout_ratio"):
             simulate_cold_start_exploration(df, top_k=5, rounds=1, holdout_ratio=1.2)
 
+    def test_context_features_subset_used_end_to_end(self) -> None:
+        report = _run_simulation(
+            seed=1, context_features=("log_plays", "mean_popularity_rank")
+        )
+        assert report["config"]["context_features"] == [
+            "log_plays",
+            "mean_popularity_rank",
+        ]
+        assert all(
+            len(round_record["context"]) == 2 for round_record in report["rounds"]
+        )
+
+    def test_context_features_validated_upfront(self) -> None:
+        with pytest.raises(ValueError, match="Unknown context feature"):
+            _run_simulation(context_features=("log_plays", "magic"))
+
 
 class TestBanditReportIO:
     def test_report_roundtrip(self, tmp_path: Path) -> None:
@@ -655,6 +671,50 @@ class TestCLISimulateBandit:
         )
         assert result.exit_code == 1
         assert "Error:" in result.output
+
+    def test_cli_simulate_bandit_context_features_flag(self, tmp_path: Path) -> None:
+        result = runner.invoke(
+            cli.app,
+            [
+                "simulate-bandit",
+                "--top-k",
+                "3",
+                "--rounds",
+                "6",
+                "--context-features",
+                "log_plays,mean_popularity_rank",
+                "--report-dir",
+                str(tmp_path),
+                "--report-name",
+                "feat_report",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Context features: log_plays, mean_popularity_rank" in result.output
+        report_path = tmp_path / "feat_report.json"
+        assert report_path.exists()
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        assert report["config"]["context_features"] == [
+            "log_plays",
+            "mean_popularity_rank",
+        ]
+
+    def test_cli_simulate_bandit_unknown_feature_fails(self) -> None:
+        result = runner.invoke(
+            cli.app,
+            [
+                "simulate-bandit",
+                "--top-k",
+                "5",
+                "--rounds",
+                "5",
+                "--context-features",
+                "log_plays,magic",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "Error:" in result.output
+        assert "Unknown context feature" in result.output
 
 
 def _write_bandit_report(tmp_path: Path) -> Path:
