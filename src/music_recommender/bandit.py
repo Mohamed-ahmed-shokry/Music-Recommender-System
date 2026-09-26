@@ -795,6 +795,7 @@ def feedback_records_from_bandit_serve(
     *,
     context: Sequence[float] | None = None,
     user_id: str | None = None,
+    features: Sequence[str] = DEFAULT_CONTEXT_FEATURES,
 ) -> list[dict[str, Any]]:
     """Build one feedback record per policy arm for a live bandit serve.
 
@@ -803,7 +804,8 @@ def feedback_records_from_bandit_serve(
     against that arm's own ranking, an engagement proxy computed entirely from
     the serve. Crediting every arm (not just the dominant one) lets
     ``bandit-update`` fold influence across the whole policy. Unknown users
-    carry the neutral (zero) context unless one is supplied.
+    carry the neutral (zero) context unless one is supplied; a supplied context
+    is validated against ``features`` (the active context feature set).
     """
     _validate_policy(policy)
     validate_ranking_parameters(top_k)
@@ -822,9 +824,9 @@ def feedback_records_from_bandit_serve(
         )
         record: dict[str, Any] = {
             "context": (
-                validate_serve_context(context)
+                validate_serve_context(context, features=features)
                 if context is not None
-                else neutral_serve_context()
+                else neutral_serve_context(features)
             ),
             "arm": arm,
             "reward": reward,
@@ -843,6 +845,7 @@ def feedback_from_bandit_serve(
     *,
     context: Sequence[float] | None = None,
     user_id: str | None = None,
+    features: Sequence[str] = DEFAULT_CONTEXT_FEATURES,
 ) -> dict[str, Any]:
     """Build a feedback record for a live bandit-fallback serve.
 
@@ -858,6 +861,7 @@ def feedback_from_bandit_serve(
         top_k,
         context=context,
         user_id=user_id,
+        features=features,
     )
     dominant = dominant_policy_arm(policy)
     for record in records:

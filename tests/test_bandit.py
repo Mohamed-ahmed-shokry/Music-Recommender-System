@@ -1851,3 +1851,32 @@ class TestValidateServeContext:
                 top_k=5,
                 context=[0.0, 0.0],
             )
+
+    def test_records_respect_custom_features(self) -> None:
+        records = feedback_records_from_bandit_serve(
+            {"popular": 1.0},
+            _artist_stats(),
+            top_k=5,
+            context=[1.0, 0.5],
+            features=("log_plays", "mean_popularity_rank"),
+        )
+        assert records[0]["context"] == [1.0, 0.5]
+
+    def test_records_use_neutral_context_with_custom_features(self) -> None:
+        records = feedback_records_from_bandit_serve(
+            {"popular": 1.0},
+            _artist_stats(),
+            top_k=5,
+            features=("log_plays", "mean_popularity_rank"),
+        )
+        assert records[0]["context"] == [0.0, 0.0]
+
+    def test_records_reject_mismatched_custom_features(self) -> None:
+        with pytest.raises(ValueError, match="expected 2"):
+            feedback_records_from_bandit_serve(
+                {"popular": 1.0},
+                _artist_stats(),
+                top_k=5,
+                context=[1.0, 0.5, 0.2],
+                features=("log_plays", "mean_popularity_rank"),
+            )

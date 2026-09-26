@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -18,6 +19,7 @@ from music_recommender.bandit import (
     load_bandit_state,
     load_cold_start_policy,
     rank_cold_start_bandit,
+    resolve_context_features,
     summarize_bandit_lifecycle,
     sweep_bandit_journal,
     validate_serve_context,
@@ -25,9 +27,11 @@ from music_recommender.bandit import (
 from music_recommender.baselines import popular_artists
 from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
+    BANDIT_CONTEXT_FEATURES_PATH,
     BANDIT_FEEDBACK_PATH,
     BANDIT_STATE_PATH,
     COLD_START_POLICY_PATH,
+    CONTEXT_FEATURES_ENV_VAR,
     DEFAULT_CONTENT_WEIGHT,
     RAW_TRACK_DATA_PATH,
     RAW_TRACK_METADATA_PATH,
@@ -72,9 +76,15 @@ class RecommenderService:
         self,
         artifact: RecommenderArtifact,
         cold_start_policy: dict[str, float] | None = None,
+        context_features: Sequence[str] | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
+        self.context_features = resolve_context_features(
+            features=context_features,
+            env=os.getenv(CONTEXT_FEATURES_ENV_VAR),
+            config_path=BANDIT_CONTEXT_FEATURES_PATH,
+        )
 
     @classmethod
     def from_artifacts(
@@ -108,6 +118,7 @@ class RecommenderService:
             "cold_start": {
                 "strategy": ("bandit" if self.cold_start_policy else "popular"),
                 "policy": self.cold_start_policy,
+                "context_features": list(self.context_features),
             },
             "bandit": bandit,
             "ltr": {
@@ -224,7 +235,8 @@ class RecommenderService:
         to each arm's own ranking), are appended to the feedback journal so
         ``bandit-update`` can fold live traffic into the next prior. ``context``
         supplies the observed observation window (the cold-start feature
-        vector) for that request; a missing context stays neutral.
+        vector) for that request; it is validated against the service's
+        resolved context feature set, and a missing context stays neutral.
         """
         content_weight = self._content_weight(content_weight)
         (
@@ -289,13 +301,15 @@ class RecommenderService:
                 "recommendations": recommendations,
             }
             if record_feedback:
-                validate_serve_context(context) if context is not None else None
+                if context is not None:
+                    validate_serve_context(context, features=self.context_features)
                 feedback = feedback_records_from_bandit_serve(
                     self.cold_start_policy,
                     self.artifact.artist_stats,
                     top_k,
                     context=context,
                     user_id=user_id,
+                    features=self.context_features,
                 )
                 for record in feedback:
                     append_bandit_feedback(

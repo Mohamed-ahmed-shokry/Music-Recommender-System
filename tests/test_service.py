@@ -4,9 +4,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import music_recommender.service as service_module
 from music_recommender.artifacts import (
     build_artist_stats,
     build_recommender_artifact,
+    load_artifact,
     save_artifact,
 )
 from music_recommender.bandit import (
@@ -15,9 +17,11 @@ from music_recommender.bandit import (
     LinUCBContextualBandit,
     append_bandit_feedback,
     load_bandit_feedback,
+    save_bandit_context_features,
     snapshot_bandit_state,
     write_bandit_state,
 )
+from music_recommender.config import CONTEXT_FEATURES_ENV_VAR
 from music_recommender.content import build_content_artifacts
 from music_recommender.ltr import train_ltr_ranker
 from music_recommender.model import train_als_model
@@ -1018,6 +1022,7 @@ def test_metadata_reports_cold_start_strategy(tmp_path: Path) -> None:
     assert service.metadata()["cold_start"] == {
         "strategy": "popular",
         "policy": None,
+        "context_features": list(DEFAULT_CONTEXT_FEATURES),
     }
 
     service.cold_start_policy = {"popular": 0.5, "long_tail": 0.5}
@@ -1166,6 +1171,69 @@ def test_bandit_serve_rejects_invalid_context(tmp_path: Path) -> None:
             feedback_journal_path=journal,
             context=[0.0, 0.0],
         )
+
+
+def test_service_resolves_default_context_features(tmp_path: Path) -> None:
+    create_service(tmp_path)
+    service = RecommenderService.from_artifacts(
+        tmp_path / "artifact.joblib", cold_start_policy_path=None
+    )
+    assert service.context_features == DEFAULT_CONTEXT_FEATURES
+
+
+def test_service_resolves_explicit_context_features(tmp_path: Path) -> None:
+    create_service(tmp_path)
+    service = RecommenderService(
+        load_artifact(tmp_path / "artifact.joblib"),
+        context_features=("log_plays", "mean_popularity_rank"),
+    )
+    assert service.context_features == ("log_plays", "mean_popularity_rank")
+    assert service.metadata()["cold_start"]["context_features"] == [
+        "log_plays",
+        "mean_popularity_rank",
+    ]
+    service.cold_start_policy = {"popular": 1.0}
+    journal = tmp_path / "bandit_feedback.json"
+    response = service.recommend_user(
+        "new_user",
+        top_k=3,
+        record_feedback=True,
+        feedback_journal_path=journal,
+        context=[1.0, 0.5],
+    )
+    assert response["feedback"]["context"] == [1.0, 0.5]
+    with pytest.raises(ValueError, match="expected 2"):
+        service.recommend_user(
+            "new_user",
+            top_k=3,
+            record_feedback=True,
+            feedback_journal_path=journal,
+            context=[1.0, 0.5, 0.2],
+        )
+
+
+def test_service_reads_env_context_features(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(CONTEXT_FEATURES_ENV_VAR, "log_plays")
+    create_service(tmp_path)
+    service = RecommenderService.from_artifacts(
+        tmp_path / "artifact.joblib", cold_start_policy_path=None
+    )
+    assert service.context_features == ("log_plays",)
+
+
+def test_service_reads_persisted_context_features(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    features_path = tmp_path / "bandit_context_features.json"
+    save_bandit_context_features(("mean_popularity_rank",), features_path)
+    monkeypatch.setattr(service_module, "BANDIT_CONTEXT_FEATURES_PATH", features_path)
+    create_service(tmp_path)
+    service = RecommenderService.from_artifacts(
+        tmp_path / "artifact.joblib", cold_start_policy_path=None
+    )
+    assert service.context_features == ("mean_popularity_rank",)
 
 
 def _write_test_state(tmp_path: Path) -> Path:
