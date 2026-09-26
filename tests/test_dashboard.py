@@ -19,6 +19,11 @@ from music_recommender.dashboard import (
 
 class FakeDashboardService:
     def __init__(self) -> None:
+        self.context_features: tuple[str, ...] = (
+            "log_plays",
+            "log_unique_artists",
+            "mean_popularity_rank",
+        )
         metadata = pd.DataFrame(
             {
                 "artist_id": ["artist_1", "artist_2", "artist_3"],
@@ -461,6 +466,7 @@ def test_dashboard_bandit_tab_renders_lifecycle_and_folds() -> None:
         for caption in app.caption
     )
     assert any(metric.label == "Total selections" for metric in app.metric)
+    assert any("Context features (3)" in caption.value for caption in app.caption)
     rendered = [
         *[caption.value for caption in app.caption],
         *[markdown.value for markdown in app.markdown],
@@ -474,6 +480,24 @@ def test_dashboard_bandit_tab_renders_lifecycle_and_folds() -> None:
 
     assert service.last_sweep_called is True
     assert not app.exception
+
+
+class SubsetFeatureStateService(FakeDashboardService):
+    def bandit_status(self) -> dict[str, object]:
+        status = super().bandit_status()
+        status["state"]["context_features"] = ["log_plays", "mean_popularity_rank"]
+        return status
+
+
+def test_dashboard_bandit_tab_shows_recorded_feature_subset() -> None:
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(SubsetFeatureStateService(),),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("Context features (2)" in caption.value for caption in app.caption)
 
 
 class NoBanditService(FakeDashboardService):

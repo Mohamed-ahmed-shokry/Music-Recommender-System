@@ -717,6 +717,17 @@ def _bandit_arm_rows(status: dict[str, Any]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _bandit_context_features(
+    service: RecommenderService, status: dict[str, Any]
+) -> tuple[str, ...]:
+    """Return the active context feature set, preferring state-recorded names."""
+    if status["available"] and status["state"]:
+        recorded = status["state"].get("context_features")
+        if recorded:
+            return tuple(recorded)
+    return service.context_features
+
+
 def _render_bandit_tab(service: RecommenderService) -> None:
     st.write(
         "Cold-start bandit lifecycle: persisted state, active policy, and served "
@@ -732,6 +743,13 @@ def _render_bandit_tab(service: RecommenderService) -> None:
     except (FileNotFoundError, ValueError) as error:
         st.error(f"Bandit lifecycle unavailable: {error}")
         return
+
+    active_features = _bandit_context_features(service, status)
+    st.caption(
+        f"Context features ({len(active_features)}): "
+        + ", ".join(f"`{feature}`" for feature in active_features)
+        + "."
+    )
 
     if not status["available"]:
         st.info(
