@@ -1116,6 +1116,182 @@ class TestCLIBanditUpdate:
         assert result.exit_code == 1
         assert "Error:" in result.output
 
+    def test_cli_bandit_update_from_journal_is_idempotent(self, tmp_path: Path) -> None:
+        state_path = tmp_path / "prior_state.json"
+        write_bandit_state(
+            snapshot_bandit_state(
+                LinUCBContextualBandit(
+                    DEFAULT_COLD_START_ARMS,
+                    len(DEFAULT_CONTEXT_FEATURES),
+                    alpha=0.5,
+                )
+            ),
+            tmp_path,
+            state_name="prior_state",
+        )
+        journal = tmp_path / "feedback.json"
+        append_bandit_feedback(
+            {
+                "context": [1.0, 0.5, 0.2],
+                "arm": "popular",
+                "reward": 0.7,
+            },
+            journal,
+        )
+        args = [
+            "bandit-update",
+            "--state-path",
+            str(state_path),
+            "--journal-path",
+            str(journal),
+        ]
+
+        first = runner.invoke(cli.app, args)
+        second = runner.invoke(cli.app, args)
+
+        assert first.exit_code == 0
+        assert second.exit_code == 0
+        assert "Folded 0 pending journal record(s)" in second.output
+        updated = load_bandit_state(state_path)
+        assert updated["arms"]["popular"]["selections"] == 1
+
+
+class TestCLIBanditStatus:
+    def test_cli_bandit_status_without_files(self, tmp_path: Path) -> None:
+        result = runner.invoke(
+            cli.app,
+            [
+                "bandit-status",
+                "--state-path",
+                str(tmp_path / "missing_state.json"),
+                "--journal-path",
+                str(tmp_path / "missing_journal.json"),
+                "--policy-path",
+                str(tmp_path / "missing_policy.json"),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "State: none" in result.output
+        assert "Policy: none" in result.output
+        assert "Journal: 0 record(s), 0 pending" in result.output
+
+    def test_cli_bandit_status_reports_lifecycle(self, tmp_path: Path) -> None:
+        state_path = tmp_path / "bandit_state.json"
+        write_bandit_state(
+            snapshot_bandit_state(
+                LinUCBContextualBandit(
+                    DEFAULT_COLD_START_ARMS,
+                    len(DEFAULT_CONTEXT_FEATURES),
+                    alpha=0.5,
+                )
+            ),
+            tmp_path,
+            state_name="bandit_state",
+        )
+        journal = tmp_path / "feedback.json"
+        append_bandit_feedback(
+            {
+                "context": [1.0, 0.5, 0.2],
+                "arm": "popular",
+                "reward": 0.7,
+            },
+            journal,
+        )
+        write_cold_start_policy(
+            {"popular": 0.7, "long_tail": 0.3},
+            tmp_path,
+            policy_name="policy",
+        )
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "bandit-status",
+                "--state-path",
+                str(state_path),
+                "--journal-path",
+                str(journal),
+                "--policy-path",
+                str(tmp_path / "policy.json"),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Cold-start bandit lifecycle:" in result.output
+        assert "State: available" in result.output
+        assert "popular" in result.output
+        assert "long_tail" in result.output
+        assert "Journal: 1 record(s), 1 pending" in result.output
+        assert "no fold yet" in result.output
+
+    def test_cli_bandit_status_reports_last_fold(self, tmp_path: Path) -> None:
+        state_path = tmp_path / "bandit_state.json"
+        write_bandit_state(
+            snapshot_bandit_state(
+                LinUCBContextualBandit(
+                    DEFAULT_COLD_START_ARMS,
+                    len(DEFAULT_CONTEXT_FEATURES),
+                    alpha=0.5,
+                )
+            ),
+            tmp_path,
+            state_name="bandit_state",
+        )
+        journal = tmp_path / "feedback.json"
+        append_bandit_feedback(
+            {
+                "context": [1.0, 0.5, 0.2],
+                "arm": "popular",
+                "reward": 0.7,
+            },
+            journal,
+        )
+        runner.invoke(
+            cli.app,
+            [
+                "bandit-update",
+                "--state-path",
+                str(state_path),
+                "--journal-path",
+                str(journal),
+            ],
+        )
+        append_bandit_feedback(
+            {
+                "context": [1.0, 0.5, 0.2],
+                "arm": "long_tail",
+                "reward": 0.4,
+            },
+            journal,
+        )
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "bandit-status",
+                "--state-path",
+                str(state_path),
+                "--journal-path",
+                str(journal),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Journal: 2 record(s), 1 pending" in result.output
+        assert "last fold" in result.output
+
+    def test_cli_bandit_status_corrupt_state(self, tmp_path: Path) -> None:
+        corrupt = tmp_path / "corrupt_state.json"
+        corrupt.write_text("{nope", encoding="utf-8")
+        result = runner.invoke(
+            cli.app,
+            [
+                "bandit-status",
+                "--state-path",
+                str(corrupt),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "Error:" in result.output
+
 
 class TestCLIRecordBanditFeedback:
     def test_cli_record_feedback(self, tmp_path: Path) -> None:

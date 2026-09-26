@@ -21,8 +21,11 @@ from music_recommender.bandit import (
     load_bandit_feedback,
     load_bandit_report,
     load_bandit_state,
+    load_cold_start_policy,
     simulate_cold_start_exploration,
     snapshot_bandit_state,
+    summarize_bandit_lifecycle,
+    sweep_bandit_journal,
     write_bandit_report,
     write_bandit_state,
     write_cold_start_policy,
@@ -2221,23 +2224,38 @@ def bandit_update(
         help="Path to write the updated state (defaults to --state-path).",
     ),
 ) -> None:
-    """Fold observed feedback into a bandit state as its new prior."""
+    """Fold observed feedback into a bandit state as its new prior.
+
+    Offline observations come from --report-path; served observations are
+    folded from the feedback journal through an idempotent sweep, so reruns
+    (or a scheduled maintenance loop) never double-count already-folded
+    records.
+    """
     try:
         state = load_bandit_state(state_path)
         report = load_bandit_report(report_path) if report_path else None
-        feedback = feedback_from_report(report) if report is not None else []
 
         journal = (
             Path(journal_path) if journal_path is not None else BANDIT_FEEDBACK_PATH
         )
-        if journal.exists():
-            feedback = feedback + load_bandit_feedback(journal)
-        if not feedback:
+        if report is None and not journal.exists():
             raise ValueError(
                 "No feedback to fold: provide --report-path or a journal file."
             )
 
-        updated = fold_bandit_state(state, feedback)
+        updated = state
+        if report is not None:
+            updated = fold_bandit_state(updated, feedback_from_report(report))
+
+        if journal.exists():
+            updated, sweep = sweep_bandit_journal(
+                updated, load_bandit_feedback(journal)
+            )
+            typer.echo(
+                f"Folded {sweep['folded_count']} pending journal record(s); "
+                f"{sweep['journal_length'] - sweep['offset']} remain pending."
+            )
+
         target = Path(output_state) if output_state is not None else Path(state_path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(
@@ -2259,6 +2277,76 @@ def bandit_update(
             f"{arm:<12} {selections:>9} {total_reward:>12.4f} {mean_reward:>12.4f}"
         )
     typer.echo(f"Updated bandit state written to: {target}")
+
+
+@app.command()
+def bandit_status(
+    state_path: str = typer.Option(
+        BANDIT_STATE_PATH,
+        "--state-path",
+        help="Path to the persisted bandit state to inspect.",
+    ),
+    journal_path: str = typer.Option(
+        BANDIT_FEEDBACK_PATH,
+        "--journal-path",
+        help="Feedback journal to account for in the summary.",
+    ),
+    policy_path: str = typer.Option(
+        COLD_START_POLICY_PATH,
+        "--policy-path",
+        help="Cold-start policy file to report as active.",
+    ),
+) -> None:
+    """Report the cold-start bandit lifecycle (state, policy, journal, folds)."""
+    state_path_obj, journal_path_obj = Path(state_path), Path(journal_path)
+    try:
+        state = load_bandit_state(state_path) if state_path_obj.exists() else None
+        journal = (
+            load_bandit_feedback(journal_path) if journal_path_obj.exists() else []
+        )
+        policy = (
+            load_cold_start_policy(policy_path) if Path(policy_path).exists() else None
+        )
+        summary = summarize_bandit_lifecycle(
+            state=state, policy=policy, feedback=journal
+        )
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo("Cold-start bandit lifecycle:")
+    if summary["available"]:
+        typer.echo(f"State: available ({state_path_obj})")
+    else:
+        typer.echo("State: none (run simulate-bandit --write-state or bandit-update)")
+    typer.echo(f"{'Arm':<12} {'Selected':>9} {'Cum. Reward':>12} {'Mean Reward':>12}")
+    typer.echo("-" * 48)
+    arms = summary["state"]["arms"] if summary["available"] else {}
+    for arm, stats in arms.items():
+        typer.echo(
+            f"{arm:<12} {stats['selections']:>9} {stats['total_reward']:>12.4f} "
+            f"{stats['mean_reward']:>12.4f}"
+        )
+    if summary["policy"]:
+        typer.echo(
+            "Policy: "
+            + " | ".join(
+                f"{arm} {weight:.4f}" for arm, weight in summary["policy"].items()
+            )
+        )
+    else:
+        typer.echo("Policy: none (cold start serves popular items)")
+    last_fold = summary["last_fold"]
+    if last_fold:
+        typer.echo(
+            f"Journal: {summary['journal']['length']} record(s), "
+            f"{summary['journal']['pending']} pending (last fold {last_fold['at']})"
+        )
+    else:
+        typer.echo(
+            f"Journal: {summary['journal']['length']} record(s), "
+            f"{summary['journal']['pending']} pending (no fold yet)"
+        )
 
 
 @app.command()
