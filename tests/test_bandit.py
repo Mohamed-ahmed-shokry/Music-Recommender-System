@@ -29,10 +29,13 @@ from music_recommender.bandit import (
     load_bandit_state,
     load_cold_start_policy,
     neutral_serve_context,
+    pending_feedback_count,
     rank_cold_start_arm,
     rank_cold_start_bandit,
     simulate_cold_start_exploration,
     snapshot_bandit_state,
+    summarize_bandit_lifecycle,
+    sweep_bandit_journal,
     validate_serve_context,
     write_bandit_report,
     write_bandit_state,
@@ -739,6 +742,129 @@ class TestFoldBanditState:
             fold_bandit_state(
                 prior, [{"context": [1.0], "arm": "popular", "reward": 0.5}]
             )
+
+
+def _fresh_bandit_state() -> dict[str, object]:
+    return snapshot_bandit_state(
+        LinUCBContextualBandit(
+            DEFAULT_COLD_START_ARMS,
+            len(DEFAULT_CONTEXT_FEATURES),
+            alpha=0.5,
+        )
+    )
+
+
+def _feedback_records(n: int) -> list[dict[str, object]]:
+    return [
+        {"context": [1.0, 0.5, 0.2], "arm": "popular", "reward": 0.7} for _ in range(n)
+    ]
+
+
+class TestSweepBanditJournal:
+    def test_sweep_folds_pending_then_nothing(self) -> None:
+        state = _fresh_bandit_state()
+        updated, summary = sweep_bandit_journal(state, _feedback_records(3))
+        assert summary["folded_count"] == 3
+        assert summary["journal_length"] == 3
+        assert updated["arms"]["popular"]["selections"] == 3
+        assert updated["config"]["journal_fold_offset"] == 3
+        assert updated["config"]["journal_folded_at"]
+
+        again, second = sweep_bandit_journal(updated, _feedback_records(3))
+        assert second["folded_count"] == 0
+        assert again["arms"]["popular"]["selections"] == 3
+        assert again["config"]["journal_fold_offset"] == 3
+
+    def test_sweep_folds_only_new_records(self) -> None:
+        state = _fresh_bandit_state()
+        updated, _ = sweep_bandit_journal(state, _feedback_records(2))
+        again, summary = sweep_bandit_journal(updated, _feedback_records(5))
+        assert summary["folded_count"] == 3
+        assert again["arms"]["popular"]["selections"] == 5
+
+    def test_sweep_is_accumulative_over_prior_state(self) -> None:
+        prior = fold_bandit_state(
+            _fresh_bandit_state(),
+            [{"context": [1.0, 0.5, 0.2], "arm": "long_tail", "reward": 1.0}],
+        )
+        updated, summary = sweep_bandit_journal(prior, _feedback_records(2))
+        assert summary["folded_count"] == 2
+        assert (
+            updated["arms"]["long_tail"]["selections"]
+            == (prior["arms"]["long_tail"]["selections"])
+        )
+        assert updated["arms"]["popular"]["selections"] == (
+            prior["arms"]["popular"]["selections"] + 2
+        )
+
+    def test_sweep_resets_offset_when_journal_shrinks(self) -> None:
+        state = _fresh_bandit_state()
+        updated, _ = sweep_bandit_journal(state, _feedback_records(4))
+        assert updated["config"]["journal_fold_offset"] == 4
+        shrunken = _feedback_records(2)
+        again, summary = sweep_bandit_journal(updated, shrunken)
+        assert summary["folded_count"] == 2
+        assert again["config"]["journal_fold_offset"] == 2
+        assert again["arms"]["popular"]["selections"] == 6
+
+    def test_sweep_rejects_invalid_watermark(self) -> None:
+        state = _fresh_bandit_state()
+        state["config"]["journal_fold_offset"] = -1
+        with pytest.raises(ValueError, match="non-negative int"):
+            sweep_bandit_journal(state, _feedback_records(1))
+
+
+class TestSummarizeBanditLifecycle:
+    def test_summary_with_no_files(self) -> None:
+        summary = summarize_bandit_lifecycle(
+            state=None,
+            policy=None,
+            feedback=[],
+        )
+        assert summary["available"] is False
+        assert summary["state"] is None
+        assert summary["policy"] is None
+        assert summary["journal"] == {"length": 0, "pending": 0}
+        assert summary["last_fold"] is None
+
+    def test_summary_reports_state_policy_and_journal(self) -> None:
+        bandit = _trained_bandit()
+        state = snapshot_bandit_state(bandit)
+        feedback = [{"context": [1.0, 0.5], "arm": "popular", "reward": 0.8}]
+        summary = summarize_bandit_lifecycle(
+            state=state,
+            policy={"popular": 0.5, "long_tail": 0.5},
+            feedback=feedback,
+        )
+        assert summary["available"] is True
+        assert summary["policy"] == {"popular": 0.5, "long_tail": 0.5}
+        assert summary["journal"] == {"length": 1, "pending": 1}
+        assert summary["state"]["total_selections"] == sum(
+            state["arms"][arm]["selections"] for arm in state["arms"]
+        )
+        for arm, stats in state["arms"].items():
+            assert summary["state"]["arms"][arm]["selections"] == stats["selections"]
+            assert summary["state"]["arms"][arm]["total_reward"] == pytest.approx(
+                stats["rewards"], abs=1e-6
+            )
+        assert summary["last_fold"] is None
+
+    def test_summary_pending_uses_fold_watermark(self) -> None:
+        state = _fresh_bandit_state()
+        swept, _ = sweep_bandit_journal(state, _feedback_records(2))
+        appended = _feedback_records(3)
+        summary = summarize_bandit_lifecycle(
+            state=swept,
+            policy={"popular": 1.0},
+            feedback=appended,
+        )
+        assert summary["journal"] == {"length": 3, "pending": 1}
+        assert summary["last_fold"]["offset"] == 2
+        assert summary["last_fold"]["at"]
+
+    def test_pending_feedback_count_without_state(self) -> None:
+        assert pending_feedback_count(None, [{"arm": "popular"}]) == 1
+        assert pending_feedback_count(None, []) == 0
 
 
 class TestFeedbackFromReport:

@@ -408,6 +408,122 @@ def fold_bandit_state(
     return snapshot_bandit_state(bandit)
 
 
+def _journal_fold_offset(state: dict[str, Any]) -> int:
+    """Read the fold watermark (folded journal record count) off a state."""
+    config = state.get("config")
+    if not isinstance(config, dict):
+        return 0
+    value = config.get("journal_fold_offset", 0)
+    if type(value) is not int or value < 0:
+        raise ValueError(
+            "Bandit state 'config.journal_fold_offset' must be a non-negative int."
+        )
+    return value
+
+
+def sweep_bandit_journal(
+    state: dict[str, Any],
+    feedback: Sequence[dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Fold only the pending records of a feedback journal into a bandit state.
+
+    The state's config records the journal fold watermark
+    (``journal_fold_offset`` and ``journal_folded_at``), so a repeated sweep
+    folds only the records appended since the last one instead of double
+    counting the whole journal. A journal that shrank below the recorded
+    offset (e.g. it was reset) starts over from the top. Returns the updated
+    state together with a ``{"folded_count", "journal_length", "offset"}``
+    summary.
+    """
+    records = list(feedback)
+    offset = _journal_fold_offset(state)
+    if len(records) < offset:
+        offset = 0
+    pending = records[offset:]
+    updated = fold_bandit_state(state, pending)
+    updated["config"]["journal_fold_offset"] = len(records)
+    updated["config"]["journal_folded_at"] = datetime.now(UTC).isoformat()
+    return updated, {
+        "folded_count": len(pending),
+        "journal_length": len(records),
+        "offset": len(records),
+    }
+
+
+def pending_feedback_count(
+    state: dict[str, Any] | None,
+    feedback: Sequence[dict[str, Any]],
+) -> int:
+    """Return how many journal records are not yet folded into the state.
+
+    Uses the state's fold watermark; a journal that shrank below the recorded
+    offset counts the whole journal as pending, mirroring the sweep semantics.
+    """
+    records = list(feedback)
+    if state is None:
+        return len(records)
+    offset = _journal_fold_offset(state)
+    if len(records) < offset:
+        return len(records)
+    return len(records) - offset
+
+
+def summarize_bandit_lifecycle(
+    *,
+    state: dict[str, Any] | None,
+    policy: dict[str, float] | None,
+    feedback: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a readable summary of the cold-start bandit lifecycle.
+
+    Consumes the optional persisted state, active policy, and feedback journal
+    and reports per-arm statistics, policy weights, journal length and pending
+    count (via the state's fold watermark), and the last fold time. Any
+    component may be absent (e.g. no state file yet), reported cleanly so the
+    summary stays useful while the loop is still warming up.
+    """
+    state_summary: dict[str, Any] | None = None
+    last_fold: dict[str, Any] | None = None
+    if state is not None:
+        arms_summary: dict[str, Any] = {}
+        for arm, stats in state["arms"].items():
+            selections = int(stats["selections"])
+            total_reward = float(stats["rewards"])
+            arms_summary[str(arm)] = {
+                "selections": selections,
+                "total_reward": round(total_reward, 6),
+                "mean_reward": round(
+                    total_reward / selections if selections else 0.0, 6
+                ),
+            }
+        config = state.get("config", {})
+        state_summary = {
+            "generated_at": str(state.get("generated_at", "")),
+            "context_dim": int(config["context_dim"]),
+            "alpha": float(config["alpha"]),
+            "total_selections": sum(
+                item["selections"] for item in arms_summary.values()
+            ),
+            "arms": arms_summary,
+        }
+        if isinstance(config, dict) and "journal_folded_at" in config:
+            last_fold = {
+                "offset": int(config["journal_fold_offset"]),
+                "at": str(config["journal_folded_at"]),
+            }
+    records = list(feedback)
+    return {
+        "available": state is not None or policy is not None,
+        "state": state_summary,
+        "policy": dict(policy) if policy is not None else None,
+        "journal": {
+            "length": len(records),
+            "pending": pending_feedback_count(state, records),
+        },
+        "last_fold": last_fold,
+    }
+
+
 def feedback_from_report(report: dict[str, Any]) -> list[dict[str, Any]]:
     """Extract per-round served observations from a bandit report.
 
