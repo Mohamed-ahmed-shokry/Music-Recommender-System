@@ -24,6 +24,7 @@ from music_recommender.bandit import (
     load_bandit_state,
     load_cold_start_policy,
     resolve_context_features,
+    save_bandit_context_features,
     simulate_cold_start_exploration,
     snapshot_bandit_state,
     summarize_bandit_lifecycle,
@@ -2374,6 +2375,20 @@ def bandit_status(
         typer.echo(f"State: available ({state_path_obj})")
     else:
         typer.echo("State: none (run simulate-bandit --write-state or bandit-update)")
+    recorded_features = None
+    if summary["available"] and summary["state"]:
+        recorded_features = summary["state"].get("context_features")
+    active_features = (
+        tuple(recorded_features)
+        if recorded_features
+        else resolve_context_features(
+            env=os.getenv(CONTEXT_FEATURES_ENV_VAR),
+            config_path=BANDIT_CONTEXT_FEATURES_PATH,
+        )
+    )
+    typer.echo(
+        f"Context features ({len(active_features)}): {', '.join(active_features)}"
+    )
     typer.echo(f"{'Arm':<12} {'Selected':>9} {'Cum. Reward':>12} {'Mean Reward':>12}")
     typer.echo("-" * 48)
     arms = summary["state"]["arms"] if summary["available"] else {}
@@ -2402,6 +2417,53 @@ def bandit_status(
             f"Journal: {summary['journal']['length']} record(s), "
             f"{summary['journal']['pending']} pending (no fold yet)"
         )
+
+
+@app.command()
+def bandit_context(
+    features: str | None = typer.Option(
+        None,
+        "--set",
+        help="Comma-separated feature names to persist as the active set.",
+    ),
+    config_path: str = typer.Option(
+        BANDIT_CONTEXT_FEATURES_PATH,
+        "--config-path",
+        help="Path to the bandit context feature config to inspect or update.",
+    ),
+) -> None:
+    """Show or update the active bandit context feature set.
+
+    Without --set, prints the effective feature set by precedence (env var,
+    then the persisted config, then the project default) together with its
+    source. With --set, validates and persists the feature names as the
+    project's active config.
+    """
+    config = Path(config_path)
+    try:
+        if features is not None:
+            names = tuple(part.strip() for part in features.split(",") if part.strip())
+            save_bandit_context_features(names, config)
+            typer.echo(
+                f"Bandit context features saved to: {config} ({', '.join(names)})."
+            )
+            return
+        resolved = resolve_context_features(
+            env=os.getenv(CONTEXT_FEATURES_ENV_VAR),
+            config_path=config,
+        )
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    if os.getenv(CONTEXT_FEATURES_ENV_VAR):
+        source = "environment variable MUSIC_RECOMMENDER_CONTEXT_FEATURES"
+    elif config.exists():
+        source = f"persisted config ({config})"
+    else:
+        source = "project default"
+    typer.echo(f"Bandit context features ({len(resolved)}): {', '.join(resolved)}")
+    typer.echo(f"Source: {source}.")
 
 
 @app.command()

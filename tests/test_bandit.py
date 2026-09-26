@@ -48,6 +48,7 @@ from music_recommender.bandit import (
     write_cold_start_policy,
 )
 from music_recommender.baselines import popular_artists
+from music_recommender.config import CONTEXT_FEATURES_ENV_VAR
 
 runner = CliRunner()
 
@@ -1527,6 +1528,37 @@ class TestCLIBanditStatus:
         assert "State: none" in result.output
         assert "Policy: none" in result.output
         assert "Journal: 0 record(s), 0 pending" in result.output
+        assert (
+            "Context features (3): log_plays, log_unique_artists, mean_popularity_rank"
+            in result.output
+        )
+
+    def test_cli_bandit_status_reports_recorded_features(self, tmp_path: Path) -> None:
+        state_path = tmp_path / "bandit_state.json"
+        write_bandit_state(
+            snapshot_bandit_state(
+                LinUCBContextualBandit(
+                    ("popular",),
+                    2,
+                    alpha=0.5,
+                    context_features=("log_plays", "mean_popularity_rank"),
+                )
+            ),
+            tmp_path,
+            state_name="bandit_state",
+        )
+        result = runner.invoke(
+            cli.app,
+            [
+                "bandit-status",
+                "--state-path",
+                str(state_path),
+                "--journal-path",
+                str(tmp_path / "missing_journal.json"),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Context features (2): log_plays, mean_popularity_rank" in result.output
 
     def test_cli_bandit_status_reports_lifecycle(self, tmp_path: Path) -> None:
         state_path = tmp_path / "bandit_state.json"
@@ -1644,6 +1676,62 @@ class TestCLIBanditStatus:
         )
         assert result.exit_code == 1
         assert "Error:" in result.output
+
+
+class TestCLIBanditContext:
+    def test_cli_bandit_context_shows_default(self, tmp_path: Path) -> None:
+        result = runner.invoke(
+            cli.app,
+            ["bandit-context", "--config-path", str(tmp_path / "missing.json")],
+        )
+        assert result.exit_code == 0
+        assert "Bandit context features (3): log_plays, log_unique_artists" in (
+            result.output
+        )
+        assert "Source: project default." in result.output
+
+    def test_cli_bandit_context_set_and_reload(self, tmp_path: Path) -> None:
+        config = tmp_path / "features.json"
+        set_result = runner.invoke(
+            cli.app,
+            [
+                "bandit-context",
+                "--set",
+                "log_plays,mean_popularity_rank",
+                "--config-path",
+                str(config),
+            ],
+        )
+        assert set_result.exit_code == 0
+        assert "Bandit context features saved to:" in set_result.output
+        reloaded = runner.invoke(
+            cli.app,
+            ["bandit-context", "--config-path", str(config)],
+        )
+        assert reloaded.exit_code == 0
+        assert "Bandit context features (2): log_plays, mean_popularity_rank" in (
+            reloaded.output
+        )
+        assert "Source: persisted config" in reloaded.output
+
+    def test_cli_bandit_context_unknown_feature_fails(self, tmp_path: Path) -> None:
+        result = runner.invoke(
+            cli.app,
+            ["bandit-context", "--set", "log_plays,magic"],
+        )
+        assert result.exit_code == 1
+        assert "Error:" in result.output
+        assert "Unknown context feature" in result.output
+
+    def test_cli_bandit_context_env_override(self, tmp_path: Path) -> None:
+        result = runner.invoke(
+            cli.app,
+            ["bandit-context"],
+            env={CONTEXT_FEATURES_ENV_VAR: "log_plays"},
+        )
+        assert result.exit_code == 0
+        assert "Bandit context features (1): log_plays" in result.output
+        assert "Source: environment variable" in result.output
 
 
 class TestCLIRecordBanditFeedback:
