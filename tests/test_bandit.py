@@ -26,6 +26,7 @@ from music_recommender.bandit import (
     feedback_from_report,
     feedback_records_from_bandit_serve,
     fold_bandit_state,
+    load_bandit_context_features,
     load_bandit_feedback,
     load_bandit_report,
     load_bandit_state,
@@ -35,6 +36,7 @@ from music_recommender.bandit import (
     rank_cold_start_arm,
     rank_cold_start_bandit,
     resolve_context_features,
+    save_bandit_context_features,
     simulate_cold_start_exploration,
     snapshot_bandit_state,
     summarize_bandit_lifecycle,
@@ -229,6 +231,76 @@ class TestContextFeatureRegistry:
         assert resolve_context_features(("log_plays",)) == ("log_plays",)
         with pytest.raises(ValueError, match="Unknown context feature"):
             resolve_context_features(("nope",))
+
+
+class TestBanditContextFeaturesConfig:
+    def test_save_and_load_roundtrip(self, tmp_path: Path) -> None:
+        path = tmp_path / "features.json"
+        save_bandit_context_features(("log_plays", "mean_popularity_rank"), path)
+        assert load_bandit_context_features(path) == (
+            "log_plays",
+            "mean_popularity_rank",
+        )
+
+    def test_load_missing_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError, match="not found"):
+            load_bandit_context_features(tmp_path / "missing.json")
+
+    def test_load_invalid_json_raises(self, tmp_path: Path) -> None:
+        path = tmp_path / "features.json"
+        path.write_text("not json", encoding="utf-8")
+        with pytest.raises(ValueError, match="Failed to parse"):
+            load_bandit_context_features(path)
+
+    def test_load_rejects_non_list(self, tmp_path: Path) -> None:
+        path = tmp_path / "features.json"
+        path.write_text(json.dumps("log_plays"), encoding="utf-8")
+        with pytest.raises(ValueError, match="must be a JSON list"):
+            load_bandit_context_features(path)
+
+    def test_load_rejects_non_string_entries(self, tmp_path: Path) -> None:
+        path = tmp_path / "features.json"
+        path.write_text(json.dumps(["log_plays", 3]), encoding="utf-8")
+        with pytest.raises(ValueError, match="only feature names"):
+            load_bandit_context_features(path)
+
+    def test_load_rejects_unknown_feature(self, tmp_path: Path) -> None:
+        path = tmp_path / "features.json"
+        save_bandit_context_features(("log_plays",), path)
+        path.write_text(json.dumps(["log_plays", "magic"]), encoding="utf-8")
+        with pytest.raises(ValueError, match="Unknown context feature"):
+            load_bandit_context_features(path)
+
+    def test_resolve_prefers_explicit_over_env(self, tmp_path: Path) -> None:
+        path = tmp_path / "features.json"
+        save_bandit_context_features(("mean_popularity_rank",), path)
+        assert resolve_context_features(
+            ("log_plays",), env="log_unique_artists", config_path=path
+        ) == ("log_plays",)
+
+    def test_resolve_uses_env_when_explicit_absent(self, tmp_path: Path) -> None:
+        path = tmp_path / "features.json"
+        save_bandit_context_features(("mean_popularity_rank",), path)
+        assert resolve_context_features(
+            env="log_plays,log_unique_artists", config_path=path
+        ) == ("log_plays", "log_unique_artists")
+
+    def test_resolve_uses_persisted_config_when_present(self, tmp_path: Path) -> None:
+        path = tmp_path / "features.json"
+        save_bandit_context_features(("log_plays",), path)
+        assert resolve_context_features(config_path=path) == ("log_plays",)
+
+    def test_resolve_falls_back_to_default(self, tmp_path: Path) -> None:
+        assert resolve_context_features(config_path=tmp_path / "missing.json") == (
+            DEFAULT_CONTEXT_FEATURES
+        )
+
+    def test_resolve_env_empty_string_ignored(self) -> None:
+        assert resolve_context_features(env="   ") == DEFAULT_CONTEXT_FEATURES
+
+    def test_resolve_env_unknown_feature_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unknown context feature"):
+            resolve_context_features(env="log_plays,meme")
 
 
 def _run_simulation(**overrides: object) -> dict[str, object]:

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 PROJECT_ROOT_ENV_VAR = "MUSIC_RECOMMENDER_ROOT"
+CONTEXT_FEATURES_ENV_VAR = "MUSIC_RECOMMENDER_CONTEXT_FEATURES"
 
 
 def resolve_project_root() -> Path:
@@ -35,6 +36,7 @@ REPORTS_DIR = PROJECT_ROOT / "reports"
 COLD_START_POLICY_PATH = REPORTS_DIR / "cold_start_policy.json"
 BANDIT_STATE_PATH = REPORTS_DIR / "bandit_state.json"
 BANDIT_FEEDBACK_PATH = REPORTS_DIR / "bandit_feedback.json"
+BANDIT_CONTEXT_FEATURES_PATH = REPORTS_DIR / "bandit_context_features.json"
 
 DEFAULT_MIN_USER_INTERACTIONS = 2
 DEFAULT_MIN_ARTIST_INTERACTIONS = 2

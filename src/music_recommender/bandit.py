@@ -32,6 +32,7 @@ import pandas as pd
 
 from music_recommender.artifacts import build_artist_stats
 from music_recommender.baselines import popular_artists
+from music_recommender.config import BANDIT_CONTEXT_FEATURES_PATH
 from music_recommender.data import normalize_interactions
 from music_recommender.evaluate import precision_at_k
 from music_recommender.ranking import validate_ranking_parameters
@@ -115,17 +116,69 @@ def validate_context_features(features: Sequence[str]) -> tuple[str, ...]:
 
 def resolve_context_features(
     features: Sequence[str] | None = None,
+    *,
+    env: str | None = None,
+    config_path: Path | str | None = None,
 ) -> tuple[str, ...]:
-    """Resolve the active context feature set from an explicit override.
+    """Resolve the active bandit context feature set by precedence.
 
-    ``None`` (unset) returns the project default
-    (``DEFAULT_CONTEXT_FEATURES``); any supplied sequence is validated and
-    returned as the canonical feature tuple. Persisted-config and environment
-    resolution build on this and live in the CLI/service wiring.
+    Order: an explicit ``features`` argument, else a comma-separated ``env``
+    override, else a persisted JSON ``config_path`` (consulted only when the
+    file exists), else the project default (``DEFAULT_CONTEXT_FEATURES``).
+    Invalid feature names fail fast regardless of which source supplies them.
     """
-    if features is None:
-        return DEFAULT_CONTEXT_FEATURES
-    return validate_context_features(features)
+    if features is not None:
+        return validate_context_features(features)
+    if env is not None and env.strip():
+        names = [part.strip() for part in env.split(",") if part.strip()]
+        return validate_context_features(names)
+    if config_path is not None:
+        config = Path(config_path)
+        if config.exists():
+            return load_bandit_context_features(config)
+    return DEFAULT_CONTEXT_FEATURES
+
+
+def save_bandit_context_features(
+    features: Sequence[str],
+    path: Path | str = BANDIT_CONTEXT_FEATURES_PATH,
+) -> Path:
+    """Persist a validated context feature set as a JSON list and return its path."""
+    resolved = validate_context_features(features)
+    config_path = Path(path)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(list(resolved)), encoding="utf-8")
+    return config_path
+
+
+def load_bandit_context_features(path: Path | str) -> tuple[str, ...]:
+    """Load and validate a persisted bandit context feature config.
+
+    A missing file raises ``FileNotFoundError``; malformed content or unknown
+    feature names raise ``ValueError`` with a description of the problem, so a
+    broken persisted config is impossible to silently ignore.
+    """
+    config_path = Path(path)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Bandit context features not found: {config_path}")
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except ValueError as error:
+        raise ValueError(
+            f"Failed to parse bandit context features '{config_path}': {error}"
+        ) from error
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"Bandit context features '{config_path}' must be a JSON list of "
+            "feature names."
+        )
+    non_string = [item for item in raw if not isinstance(item, str)]
+    if non_string:
+        raise ValueError(
+            f"Bandit context features '{config_path}' must contain only "
+            "feature names."
+        )
+    return validate_context_features(raw)
 
 
 def _validate_arms(arms: Sequence[str]) -> None:
