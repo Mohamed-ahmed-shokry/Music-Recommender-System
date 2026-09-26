@@ -598,6 +598,67 @@ class TestBanditStateSnapshotRestore:
             LinUCBContextualBandit.from_state(bad_shape)
 
 
+class TestBanditStateContextFeatures:
+    def test_engine_context_features_dimension_mismatch(self) -> None:
+        with pytest.raises(ValueError, match="must match the number of"):
+            LinUCBContextualBandit(
+                ("popular",),
+                2,
+                context_features=(
+                    "log_plays",
+                    "mean_popularity_rank",
+                    "log_unique_artists",
+                ),
+            )
+
+    def test_snapshot_records_context_features(self) -> None:
+        bandit = LinUCBContextualBandit(
+            ("popular",),
+            2,
+            context_features=("log_plays", "mean_popularity_rank"),
+        )
+        state = snapshot_bandit_state(bandit)
+        assert state["config"]["context_features"] == [
+            "log_plays",
+            "mean_popularity_rank",
+        ]
+
+    def test_snapshot_without_features_omits_key(self) -> None:
+        state = snapshot_bandit_state(LinUCBContextualBandit(("popular",), 2))
+        assert "context_features" not in state["config"]
+
+    def test_from_state_restores_recorded_features(self) -> None:
+        bandit = LinUCBContextualBandit(
+            ("popular",),
+            2,
+            context_features=("log_plays", "mean_popularity_rank"),
+        )
+        restored = LinUCBContextualBandit.from_state(snapshot_bandit_state(bandit))
+        assert restored.context_features == ("log_plays", "mean_popularity_rank")
+
+    def test_from_state_rejects_feature_dimension_mismatch(self) -> None:
+        state = snapshot_bandit_state(LinUCBContextualBandit(("popular",), 2))
+        state["config"]["context_features"] = [
+            "log_plays",
+            "mean_popularity_rank",
+            "log_unique_artists",
+        ]
+        with pytest.raises(ValueError, match="length must match"):
+            LinUCBContextualBandit.from_state(state)
+
+    def test_from_state_rejects_bad_feature_types(self) -> None:
+        state = snapshot_bandit_state(LinUCBContextualBandit(("popular",), 2))
+        state["config"]["context_features"] = ["log_plays", 3]
+        with pytest.raises(ValueError, match="list of feature names"):
+            LinUCBContextualBandit.from_state(state)
+
+    def test_from_state_unknown_feature_rejected(self) -> None:
+        state = snapshot_bandit_state(LinUCBContextualBandit(("popular",), 2))
+        state["config"]["context_features"] = ["log_plays", "magic"]
+        with pytest.raises(ValueError, match="Unknown context feature"):
+            LinUCBContextualBandit.from_state(state)
+
+
 class TestBanditStateIO:
     def test_state_roundtrip(self, tmp_path: Path) -> None:
         bandit = _trained_bandit()
@@ -928,6 +989,35 @@ class TestFoldBanditState:
                 prior, [{"context": [1.0], "arm": "popular", "reward": 0.5}]
             )
 
+    def test_fold_preserves_recorded_context_features(self) -> None:
+        prior = snapshot_bandit_state(
+            LinUCBContextualBandit(
+                ("popular",),
+                2,
+                context_features=("log_plays", "mean_popularity_rank"),
+            )
+        )
+        folded = fold_bandit_state(
+            prior, [{"context": [1.0, 0.5], "arm": "popular", "reward": 0.5}]
+        )
+        assert folded["config"]["context_features"] == [
+            "log_plays",
+            "mean_popularity_rank",
+        ]
+
+    def test_fold_dimension_mismatch_names_recorded_features(self) -> None:
+        prior = snapshot_bandit_state(
+            LinUCBContextualBandit(
+                ("popular",),
+                2,
+                context_features=("log_plays", "mean_popularity_rank"),
+            )
+        )
+        with pytest.raises(ValueError, match="mean_popularity_rank"):
+            fold_bandit_state(
+                prior, [{"context": [1.0, 0.5, 0.2], "arm": "popular", "reward": 0.5}]
+            )
+
 
 def _fresh_bandit_state() -> dict[str, object]:
     return snapshot_bandit_state(
@@ -1139,7 +1229,7 @@ class TestSimulateFromPrior:
 
 class TestCLISimulateBanditState:
     def test_cli_simulate_bandit_write_state(self, tmp_path: Path) -> None:
-        state_path = tmp_path / "engine_state.json"
+        state_out = tmp_path / "sim_state.json"
         result = runner.invoke(
             cli.app,
             [
@@ -1147,22 +1237,23 @@ class TestCLISimulateBanditState:
                 "--top-k",
                 "5",
                 "--rounds",
-                "20",
-                "--seed",
-                "1",
+                "10",
+                "--context-features",
+                "log_plays,mean_popularity_rank",
                 "--report-dir",
                 str(tmp_path),
                 "--write-state",
-                str(state_path),
+                str(state_out),
             ],
         )
         assert result.exit_code == 0
-        assert (tmp_path / "bandit_simulation.json").exists()
-        assert state_path.exists()
         assert "Bandit state written to:" in result.output
-
-        loaded = load_bandit_state(state_path)
-        assert loaded["config"]["arms"] == list(DEFAULT_COLD_START_ARMS)
+        state = load_bandit_state(state_out)
+        assert state["config"]["context_features"] == [
+            "log_plays",
+            "mean_popularity_rank",
+        ]
+        assert state["config"]["context_dim"] == 2
 
     def test_cli_simulate_bandit_from_state_resumes(self, tmp_path: Path) -> None:
         state_path = tmp_path / "prior_state.json"
@@ -1300,6 +1391,83 @@ class TestCLIBanditUpdate:
         )
         assert result.exit_code == 1
         assert "Error:" in result.output
+
+    def test_cli_bandit_update_context_features_mismatch(self, tmp_path: Path) -> None:
+        state_path = tmp_path / "prior_state.json"
+        write_bandit_state(
+            snapshot_bandit_state(
+                LinUCBContextualBandit(
+                    DEFAULT_COLD_START_ARMS,
+                    len(DEFAULT_CONTEXT_FEATURES),
+                    alpha=0.5,
+                    context_features=DEFAULT_CONTEXT_FEATURES,
+                )
+            ),
+            tmp_path,
+            state_name="prior_state",
+        )
+        journal = tmp_path / "feedback.json"
+        append_bandit_feedback(
+            {
+                "context": [1.0, 0.5, 0.2],
+                "arm": "popular",
+                "reward": 0.7,
+            },
+            journal,
+        )
+        result = runner.invoke(
+            cli.app,
+            [
+                "bandit-update",
+                "--state-path",
+                str(state_path),
+                "--journal-path",
+                str(journal),
+                "--context-features",
+                "log_plays,mean_popularity_rank",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "Error:" in result.output
+        assert "do not match the state's recorded feature set" in result.output
+
+    def test_cli_bandit_update_context_features_match(self, tmp_path: Path) -> None:
+        state_path = tmp_path / "prior_state.json"
+        write_bandit_state(
+            snapshot_bandit_state(
+                LinUCBContextualBandit(
+                    DEFAULT_COLD_START_ARMS,
+                    len(DEFAULT_CONTEXT_FEATURES),
+                    alpha=0.5,
+                    context_features=DEFAULT_CONTEXT_FEATURES,
+                )
+            ),
+            tmp_path,
+            state_name="prior_state",
+        )
+        journal = tmp_path / "feedback.json"
+        append_bandit_feedback(
+            {
+                "context": [1.0, 0.5, 0.2],
+                "arm": "popular",
+                "reward": 0.7,
+            },
+            journal,
+        )
+        result = runner.invoke(
+            cli.app,
+            [
+                "bandit-update",
+                "--state-path",
+                str(state_path),
+                "--journal-path",
+                str(journal),
+                "--context-features",
+                ",".join(DEFAULT_CONTEXT_FEATURES),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Bandit state after folding feedback:" in result.output
 
     def test_cli_bandit_update_from_journal_is_idempotent(self, tmp_path: Path) -> None:
         state_path = tmp_path / "prior_state.json"

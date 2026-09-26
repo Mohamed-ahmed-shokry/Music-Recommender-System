@@ -2168,6 +2168,7 @@ def simulate_bandit(
                     selected_arms,
                     len(report["config"]["context_features"]),
                     alpha=report["config"]["alpha"],
+                    context_features=report["config"]["context_features"],
                 )
             )
         )
@@ -2253,6 +2254,15 @@ def bandit_update(
         "--output-state",
         help="Path to write the updated state (defaults to --state-path).",
     ),
+    context_features: str | None = typer.Option(
+        None,
+        "--context-features",
+        help=(
+            "Comma-separated feature names expected by the state. Verified "
+            "against the state's recorded feature set when present, so folding "
+            "with the wrong context dimension fails fast."
+        ),
+    ),
 ) -> None:
     """Fold observed feedback into a bandit state as its new prior.
 
@@ -2264,6 +2274,21 @@ def bandit_update(
     try:
         state = load_bandit_state(state_path)
         report = load_bandit_report(report_path) if report_path else None
+
+        if context_features is not None:
+            requested_features = tuple(
+                feature.strip()
+                for feature in context_features.split(",")
+                if feature.strip()
+            )
+            recorded = state["config"].get("context_features")
+            if recorded is not None and list(requested_features) != recorded:
+                raise ValueError(
+                    "--context-features "
+                    f"{list(requested_features)} do not match the state's "
+                    f"recorded feature set {recorded}; either fold with the "
+                    "state's context dimension or retrain the state."
+                )
 
         journal = (
             Path(journal_path) if journal_path is not None else BANDIT_FEEDBACK_PATH

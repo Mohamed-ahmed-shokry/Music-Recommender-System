@@ -233,16 +233,27 @@ class LinUCBContextualBandit:
         context_dim: int,
         *,
         alpha: float = 1.0,
+        context_features: Sequence[str] | None = None,
     ) -> None:
         _validate_arms(arms)
         if type(context_dim) is not int or context_dim < 1:
             raise ValueError("context_dim must be a positive integer.")
         if not np.isfinite(alpha) or alpha <= 0:
             raise ValueError("alpha must be a finite positive number.")
+        if context_features is not None:
+            resolved_features = validate_context_features(context_features)
+            if len(resolved_features) != context_dim:
+                raise ValueError(
+                    f"context_dim ({context_dim}) must match the number of "
+                    f"context features ({len(resolved_features)})."
+                )
+        else:
+            resolved_features = None
 
         self.arms = list(arms)
         self.context_dim = context_dim
         self.alpha = float(alpha)
+        self.context_features = resolved_features
         self._a = {arm: np.eye(context_dim) for arm in self.arms}
         self._b = {arm: np.zeros(context_dim) for arm in self.arms}
         self.selections = dict.fromkeys(self.arms, 0)
@@ -313,11 +324,32 @@ class LinUCBContextualBandit:
             )
         alpha_value = float(alpha)
 
+        recorded_features = config.get("context_features")
+        if recorded_features is not None:
+            if (
+                not isinstance(recorded_features, list)
+                or not recorded_features
+                or not all(isinstance(name, str) for name in recorded_features)
+            ):
+                raise ValueError(
+                    "Bandit state 'config.context_features' must be a "
+                    "non-empty list of feature names."
+                )
+            features = validate_context_features(recorded_features)
+            if len(features) != context_dim:
+                raise ValueError(
+                    "Bandit state 'config.context_features' length must match "
+                    "'config.context_dim'."
+                )
+        else:
+            features = None
+
         _validate_arms([str(arm) for arm in arms])
         bandit = cls(
             [str(arm) for arm in arms],
             context_dim,
             alpha=alpha_value,
+            context_features=features,
         )
 
         recorded = state["arms"]
@@ -369,13 +401,16 @@ class LinUCBContextualBandit:
 
 def snapshot_bandit_state(bandit: LinUCBContextualBandit) -> dict[str, Any]:
     """Serialize a bandit engine's learned state for persistence."""
+    config: dict[str, Any] = {
+        "arms": list(bandit.arms),
+        "context_dim": bandit.context_dim,
+        "alpha": bandit.alpha,
+    }
+    if bandit.context_features is not None:
+        config["context_features"] = list(bandit.context_features)
     return {
         "generated_at": datetime.now(UTC).isoformat(),
-        "config": {
-            "arms": list(bandit.arms),
-            "context_dim": bandit.context_dim,
-            "alpha": bandit.alpha,
-        },
+        "config": config,
         "arms": {
             arm: {
                 "a": [[float(value) for value in row] for row in bandit._a[arm]],
@@ -539,7 +574,15 @@ def fold_bandit_state(
             raise ValueError(
                 f"Feedback names arm '{record['arm']}' which is not in the state."
             )
-        context = _feedback_record_context(record, dim=bandit.context_dim)
+        try:
+            context = _feedback_record_context(record, dim=bandit.context_dim)
+        except ValueError as error:
+            if bandit.context_features is not None:
+                raise ValueError(
+                    f"{error} The state's context features are "
+                    f"{list(bandit.context_features)}."
+                ) from error
+            raise
         bandit.update(
             str(record["arm"]),
             [float(value) for value in context],
@@ -646,6 +689,8 @@ def summarize_bandit_lifecycle(
             ),
             "arms": arms_summary,
         }
+        if isinstance(config, dict) and "context_features" in config:
+            state_summary["context_features"] = list(config["context_features"])
         if isinstance(config, dict) and "journal_folded_at" in config:
             last_fold = {
                 "offset": int(config["journal_fold_offset"]),
@@ -978,7 +1023,10 @@ def simulate_cold_start_exploration(
         prior_rewards = sum(bandit.rewards.values())
     else:
         bandit = LinUCBContextualBandit(
-            arms, len(resolved_context_features), alpha=alpha
+            arms,
+            len(resolved_context_features),
+            alpha=alpha,
+            context_features=resolved_context_features,
         )
         prior_selections = 0
         prior_rewards = 0.0
