@@ -5,7 +5,44 @@ It is updated incrementally as phases land.
 
 ## Current milestone (0.25.0) — in progress
 
-TBD.
+Configurable bandit context features. The cold-start bandit's context
+feature set is a hard-coded tuple (`DEFAULT_CONTEXT_FEATURES`) threaded through
+default arguments across simulation, serving, feedback recording, folding, and
+observability. A team cannot choose or reorder the observation-window features
+without editing source, unknown feature names fail with a raw `KeyError`, and
+dimension mismatches surface only as scattered runtime checks that derive from
+the default tuple. This milestone makes the active feature set a single
+validated source of truth — explicit argument, environment variable, or
+persisted JSON config — and derives every context dimension from it, so custom
+feature sets work end to end and mismatches fail fast with actionable errors.
+
+- Phase 102 — Feature registry: `CONTEXT_FEATURE_REGISTRY` maps feature names
+  to value extractors; `resolve_context_features` validates a requested set
+  (non-empty, known names, no duplicates) with a clear error listing the
+  supported features.
+- Phase 103 — Persisted config: `save_bandit_context_features` /
+  `load_bandit_context_features` (default `reports/bandit_context_features.json`)
+  plus a `MUSIC_RECOMMENDER_CONTEXT_FEATURES` environment override.
+- Phase 104 — Registry-driven context building: `build_cold_start_context`
+  resolves feature values through the registry (subsets and reordering
+  supported) instead of a hard-coded dict lookup.
+- Phase 105 — CLI simulation wiring: `simulate-bandit --context-features a,b,c`
+  resolves the feature set and the report records it; validation rejects
+  unknown names up front.
+- Phase 106 — State/fold consistency: snapshots record `context_features`;
+  `fold_bandit_state` and `sweep_bandit_journal` report dimension mismatches
+  with an actionable message; `bandit-update --context-features` checks the
+  state's recorded dimension.
+- Phase 107 — Service integration: `RecommenderService` resolves the active
+  features once, `recommend_user` validate/injects caller contexts against
+  them, and `metadata()` / `bandit_status()` expose the feature set.
+- Phase 108 — CLI observability: new `bandit-context` command to view/save the
+  active set; `bandit-status` prints the resolved features.
+- Phase 109 — API: `/bandit/status` includes the resolved features; optional
+  `context_features` on `/bandit/update` validates against the state.
+- Phase 110 — Dashboard: the Cold-Start Bandit tab shows the resolved feature
+  set alongside the lifecycle.
+- Phase 111 — Docs and release: PLAN, README, CHANGELOG, version bump to 0.25.0.
 
 ## Previous milestone (0.24.0) — shipped
 
@@ -378,18 +415,18 @@ is preserved when no policy file exists.
 - Phase 69 — Docs and release: PLAN, README (evaluation + CLI), CHANGELOG,
   version bump to 0.19.0.
 
-## Next steps (after 0.24.0)
+## Next steps (after 0.25.0)
 
 1. Two-tower neural candidate retrieval (PyTorch / ONNX runtime) — deferred
    until a real-scale catalog is available: the current sample dataset (18
    artists, 36 tracks) cannot meaningfully train or validate a neural
    retrieval model, and the phase would add heavy new dependencies.
-2. Automatic relationship between artist counts and context features when the
-   feature set changes (e.g., re-derive `DEFAULT_CONTEXT_FEATURES` from a
-   persisted configuration instead of the hard-coded tuple).
-3. Scheduled online fold: run the idempotent sweep automatically (cron /
+2. Scheduled online fold: run the idempotent sweep automatically (cron /
    internal scheduler) so live served feedback folds back into the bandit
    prior without manual `bandit-update` (the 0.24.0 watermark makes this safe).
+3. New context feature extractors (beyond the registry's shipped three) —
+   requires a catalog with the corresponding signals; the 0.25.0 registry
+   makes this a config-only change.
 
 ## Quality gates (every change)
 
