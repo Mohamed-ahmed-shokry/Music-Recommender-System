@@ -16,6 +16,31 @@ class FakeService:
     def metadata(self) -> dict[str, object]:
         return {"version": "4.0", "hybrid_config": {"default_content_weight": 0.25}}
 
+    def bandit_status(self) -> dict[str, object]:
+        return {
+            "available": True,
+            "state": {
+                "generated_at": "2026-01-01T00:00:00+00:00",
+                "context_dim": 3,
+                "alpha": 0.5,
+                "total_selections": 2,
+                "arms": {
+                    "popular": {
+                        "selections": 2,
+                        "total_reward": 1.4,
+                        "mean_reward": 0.7,
+                    },
+                },
+            },
+            "policy": {"popular": 1.0},
+            "journal": {"length": 2, "pending": 0},
+            "last_fold": {"offset": 2, "at": "2026-01-01T00:00:00+00:00"},
+        }
+
+    def sweep_bandit_feedback(self) -> dict[str, object]:
+        self.last_sweep_called = True
+        return self.bandit_status()
+
     def popular_artists(self, top_k: int) -> dict[str, object]:
         return {
             "strategy": "popular_baseline",
@@ -695,6 +720,62 @@ def test_recommend_user_route_forwards_context_to_service() -> None:
     assert response.status_code == 200
     assert api_main.service.last_context == [0.1, 0.2, 0.3]
     assert response.json()["feedback"]["context"] == [0.1, 0.2, 0.3]
+
+
+def test_bandit_status_route_reports_lifecycle() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/bandit/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["available"] is True
+    assert body["journal"] == {"length": 2, "pending": 0}
+    assert body["state"]["arms"]["popular"]["selections"] == 2
+
+
+def test_bandit_update_route_folds_pending_feedback() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.post("/bandit/update")
+
+    assert response.status_code == 200
+    assert api_main.service.last_sweep_called is True
+    assert response.json()["available"] is True
+
+
+def test_bandit_update_route_missing_state_is_not_found() -> None:
+    class NoStateService(FakeService):
+        def sweep_bandit_feedback(self) -> dict[str, object]:
+            raise FileNotFoundError("bandit_state.json")
+
+    with TestClient(api_main.app) as client:
+        api_main.service = NoStateService()
+        api_main.service_load_error = None
+
+        response = client.post("/bandit/update")
+
+    assert response.status_code == 404
+    assert "Bandit state not found" in response.json()["detail"]
+
+
+def test_bandit_update_route_corrupt_state_is_unprocessable() -> None:
+    class CorruptStateService(FakeService):
+        def sweep_bandit_feedback(self) -> dict[str, object]:
+            raise ValueError("Failed to parse bandit state")
+
+    with TestClient(api_main.app) as client:
+        api_main.service = CorruptStateService()
+        api_main.service_load_error = None
+
+        response = client.post("/bandit/update")
+
+    assert response.status_code == 422
+    assert "Failed to parse bandit state" in response.json()["detail"]
 
 
 def test_recommend_user_route_rejects_malformed_context() -> None:

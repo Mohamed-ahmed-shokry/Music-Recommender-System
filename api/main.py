@@ -479,3 +479,23 @@ def browse_tracks(
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/bandit/status")
+def bandit_status() -> dict[str, object]:
+    """Return the cold-start bandit lifecycle snapshot."""
+    return get_service().bandit_status()
+
+
+@app.post("/bandit/update")
+def bandit_update() -> dict[str, object]:
+    """Fold pending served feedback into the persisted bandit state."""
+    try:
+        return get_service().sweep_bandit_feedback()
+    except FileNotFoundError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Bandit state not found: {error}",
+        ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
