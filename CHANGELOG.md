@@ -7,6 +7,53 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-09-26
+
+### Added
+
+- Configurable bandit context features: the cold-start bandit's per-user
+  context vector is now built from a named feature registry instead of a fixed
+  tuple, and the active feature set is resolved from one place everywhere.
+  - `CONTEXT_FEATURE_EXTRACTORS` registry (`feature registry.py`) with
+    validated `log_plays`, `log_unique_artists`, `mean_popularity_rank`
+    extractors; `validate_context_features` rejects empty, unknown, or
+    duplicate sets with a clear error; `resolve_context_features` applies a
+    fixed precedence: explicit value > `MUSIC_RECOMMENDER_CONTEXT_FEATURES`
+    env var (comma-separated) > `reports/bandit_context_features.json`
+    (`save_bandit_context_features` / `load_bandit_context_features`) >
+    default registry set.
+  - `LinUCBContextualBandit` accepts an optional `context_features` set that
+    must match the context dimension; the served/simulated set is recorded in
+    bandit state, and `from_state` / folds validate recorded sets against
+    requested ones (mismatched features are named in the error).
+  - CLI: `simulate-bandit --context-features` overrides the set for one run;
+    `bandit-update --context-features` cross-checks a fold; new `bandit-context`
+    command prints the effective set and its source (and `--set` persists a new
+    set); `bandit-status` reports the state's recorded features.
+  - Service: `RecommenderService` resolves the set once, exposes it in
+    `metadata()` and `bandit_status()`, validates serve-time contexts against
+    it, and thread-safe `sweep_bandit_feedback(context_features=...)`.
+  - API: `GET /bandit/status` includes the resolved `context_features`;
+    `POST /bandit/update` accepts an optional `{"context_features": [...]}`
+    body cross-checked against the state's recorded set (mismatch → 422,
+    sharing the CLI's validation path).
+  - Dashboard: "Cold-Start Bandit" tab shows the active context feature set
+    (state-recorded names preferred over the resolved default).
+
+### Tests
+
+- 909 tests; added coverage for the feature registry and validation, persisted
+  config round-trips and precedence/env overrides, subset/reordered/unknown
+  cold-start contexts, state round-trips and fold mismatch diagnostics, service
+  resolution and serve-context validation, CLI flag/command/status reporting,
+  API status/update payload validation, and the dashboard feature caption.
+
+### Documentation
+
+- README documents the feature registry, resolution precedence,
+  `bandit-context`, the new CLI/API surfaces, and the dashboard caption; PLAN
+  moved to the shipped 0.25.0 milestone; CHANGELOG updated.
+
 ## [0.24.0] - 2026-09-26
 
 ### Added

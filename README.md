@@ -668,6 +668,39 @@ active policy, journal length/pending count, and last fold — read-only with:
 uv run python -m music_recommender.cli bandit-status
 ```
 
+### Configuring the bandit context features
+
+The cold-start bandit learns on a per-user context vector whose components are
+the **context features** in the engine's feature registry (built-in:
+`log_plays`, `log_unique_artists`, `mean_popularity_rank`). The active set is
+resolved in one place — engine, service, CLI, API, and dashboard all agree —
+via a fixed precedence, and every consumer validates the vector it receives
+against that set:
+
+1. an explicit `--context-features` value (CLI) / `context_features` argument
+   (service) wins over everything else;
+2. otherwise a comma-separated `MUSIC_RECOMMENDER_CONTEXT_FEATURES` env var;
+3. otherwise `reports/bandit_context_features.json` if it exists (a JSON list
+   of supported names);
+4. otherwise the full registry default.
+
+`bandit-context` prints the effective set and its source, and `--set` persists
+a new set to the config file so all later runs share it:
+
+```bash
+uv run python -m music_recommender.cli bandit-context
+uv run python -m music_recommender.cli bandit-context \
+  --set log_plays,mean_popularity_rank
+```
+
+`simulate-bandit --context-features log_plays,mean_popularity_rank` overrides
+the set for one run; the chosen set is recorded in the generated report and in
+any persisted state, so `bandit-status`, the API, and the dashboard report the
+exact features the state learned on. `bandit-update --context-features ...`,
+the API's `POST /bandit/update` body, and serve-time user contexts are all
+cross-checked against the state's recorded feature set (a mismatch is an
+error). The serve examples below assume the full default set.
+
 ### Serving the learned bandit policy with online feedback
 
 `recommend-user` serves unknown users through the learned cold-start policy
@@ -737,8 +770,8 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/tracks/similar/{track_id}?top_k=10` | Tracks similar to a selected track by audio features |
 | `GET` | `/tracks/popular?top_k=10` | Popular track recommendations |
 | `GET` | `/tracks/catalog?query=hit&artist=Drake&limit=25` | Search and page through the track catalog |
-| `GET` | `/bandit/status` | Cold-start bandit lifecycle snapshot (state, policy, journal) |
-| `POST` | `/bandit/update` | Fold pending served feedback into the persisted bandit state |
+| `GET` | `/bandit/status` | Cold-start bandit lifecycle snapshot (state, policy, journal, context features) |
+| `POST` | `/bandit/update` | Fold pending served feedback into the persisted bandit state (optional `{"context_features": [...]}` body cross-checked against the state) |
 | `POST` | `/recommend/profile` | Onboarding recommendations from artists, genres, and moods |
 | `POST` | `/recommend/session` | Short-term session recommendations from seeds, exclusions, and optional user taste |
 | `GET` | `/similar-artists/{artist_id}?method=hybrid&top_k=10` | ALS, content, or hybrid similar artists |
@@ -1457,6 +1490,13 @@ See [PLAN.md](PLAN.md) for the full phased plan.
   `record_feedback=true`) journals the served context, dominant policy arm, and
   a serve-fidelity reward for the cold-start bandit branch, so live traffic
   folds back into the next prior — closing the loop from serving. ✓ (0.22.0)
+- Configurable bandit context features: a single feature registry and a fixed
+  precedence (flag > `MUSIC_RECOMMENDER_CONTEXT_FEATURES` env var >
+  `reports/bandit_context_features.json` > default) resolve the engine's
+  context feature set everywhere; `simulate-bandit --context-features` and
+  `bandit-context --set` control it, and the chosen set is recorded in reports,
+  state, and service metadata, cross-checked on fold and serve, and shown in
+  the CLI, API, and dashboard. ✓ (0.25.0)
 - Next: two-tower neural candidate retrieval (deferred until a real-scale
   catalog exists), per-request context capture, and a scheduled snapshot of the
   online bandit state.

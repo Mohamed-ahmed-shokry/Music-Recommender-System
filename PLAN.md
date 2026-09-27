@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.25.0) — in progress
+## Current milestone (0.25.0) — shipped
 
 Configurable bandit context features. The cold-start bandit's context
 feature set is a hard-coded tuple (`DEFAULT_CONTEXT_FEATURES`) threaded through
