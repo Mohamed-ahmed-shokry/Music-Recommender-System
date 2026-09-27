@@ -2404,3 +2404,158 @@ def test_recommend_user_forwards_parsed_context(monkeypatch) -> None:
     assert fake.captured_kwargs is not None
     assert fake.captured_kwargs["context"] == [1.0, 0.5, 2.0]
     assert "credited arms: popular" in result.output
+
+
+def test_bandit_snapshot_cli(tmp_path: Path) -> None:
+    from music_recommender.bandit import (
+        LinUCBContextualBandit,
+        snapshot_bandit_state,
+        write_bandit_state,
+    )
+
+    bandit = LinUCBContextualBandit(["popular", "balanced", "long_tail"], context_dim=3)
+    state = snapshot_bandit_state(bandit)
+    state_file = write_bandit_state(state, tmp_path, state_name="bandit_state")
+    sn_dir = tmp_path / "snapshots"
+
+    # 1. create snapshot
+    res_create = runner.invoke(
+        cli.app,
+        [
+            "bandit-snapshot",
+            "--create",
+            "--label",
+            "first_snap",
+            "--state-path",
+            str(state_file),
+            "--snapshot-dir",
+            str(sn_dir),
+        ],
+    )
+    assert res_create.exit_code == 0
+    assert "Bandit state snapshot saved to:" in res_create.output
+
+    # 2. list snapshots
+    res_list = runner.invoke(
+        cli.app,
+        ["bandit-snapshot", "--list", "--snapshot-dir", str(sn_dir)],
+    )
+    assert res_list.exit_code == 0
+    assert "first_snap" in res_list.output
+
+    # 3. restore snapshot
+    snap_files = list(sn_dir.glob("*.json"))
+    assert len(snap_files) == 1
+    res_restore = runner.invoke(
+        cli.app,
+        [
+            "bandit-snapshot",
+            "--restore",
+            str(snap_files[0]),
+            "--state-path",
+            str(state_file),
+        ],
+    )
+    assert res_restore.exit_code == 0
+    assert "Restored snapshot" in res_restore.output
+
+    # 4. prune snapshots
+    res_prune = runner.invoke(
+        cli.app,
+        ["bandit-snapshot", "--prune", "1", "--snapshot-dir", str(sn_dir)],
+    )
+    assert res_prune.exit_code == 0
+    assert "Pruned 0 snapshot(s)" in res_prune.output
+
+
+def test_bandit_drift_cli(tmp_path: Path) -> None:
+    from music_recommender.bandit import (
+        LinUCBContextualBandit,
+        save_bandit_snapshot,
+        snapshot_bandit_state,
+        write_bandit_state,
+    )
+
+    bandit = LinUCBContextualBandit(["popular", "balanced", "long_tail"], context_dim=3)
+    prior_state = snapshot_bandit_state(bandit)
+    sn_dir = tmp_path / "snapshots"
+    snap_path = save_bandit_snapshot(prior_state, snapshot_dir=sn_dir, label="baseline")
+
+    bandit.update("popular", [1.0, 0.5, 0.0], 1.0)
+    current_state = snapshot_bandit_state(bandit)
+    state_file = write_bandit_state(current_state, tmp_path, state_name="current_state")
+
+    res = runner.invoke(
+        cli.app,
+        [
+            "bandit-drift",
+            "--state-path",
+            str(state_file),
+            "--reference",
+            str(snap_path),
+        ],
+    )
+    assert res.exit_code == 0
+    assert "Bandit state drift" in res.output
+    assert "L2 Drift" in res.output
+    assert "Summary: max L2 drift=" in res.output
+    assert "drift detected=yes" in res.output
+
+
+def test_bandit_sweep_cli(tmp_path: Path) -> None:
+    from music_recommender.bandit import (
+        LinUCBContextualBandit,
+        append_bandit_feedback,
+        snapshot_bandit_state,
+        write_bandit_state,
+    )
+
+    bandit = LinUCBContextualBandit(["popular", "balanced", "long_tail"], context_dim=3)
+    state = snapshot_bandit_state(bandit)
+    state_file = write_bandit_state(state, tmp_path, state_name="bandit_state")
+    journal = tmp_path / "feedback.json"
+    append_bandit_feedback(
+        {"arm": "popular", "context": [0.0, 0.0, 0.0], "reward": 1.0},
+        journal,
+    )
+
+    # 1. sweep once
+    res_sweep = runner.invoke(
+        cli.app,
+        [
+            "bandit-sweep",
+            "--state-path",
+            str(state_file),
+            "--journal-path",
+            str(journal),
+            "--threshold",
+            "1",
+        ],
+    )
+    assert res_sweep.exit_code == 0
+    assert "Folded 1 pending feedback record(s)" in res_sweep.output
+
+    # 2. sweep again (already folded, pending = 0 < 1)
+    res_sweep_again = runner.invoke(
+        cli.app,
+        [
+            "bandit-sweep",
+            "--state-path",
+            str(state_file),
+            "--journal-path",
+            str(journal),
+            "--threshold",
+            "1",
+        ],
+    )
+    assert res_sweep_again.exit_code == 0
+    assert "Pending records (0) below threshold (1)" in res_sweep_again.output
+
+    # 3. invalid threshold
+    res_invalid = runner.invoke(
+        cli.app,
+        ["bandit-sweep", "--threshold", "0"],
+    )
+    assert res_invalid.exit_code == 1
+    assert "must be a positive integer" in res_invalid.output
+

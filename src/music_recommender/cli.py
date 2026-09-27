@@ -16,15 +16,22 @@ from music_recommender.bandit import (
     DEFAULT_COLD_START_ARMS,
     LinUCBContextualBandit,
     append_bandit_feedback,
+    compute_bandit_drift,
     derive_cold_start_policy,
     feedback_from_report,
     fold_bandit_state,
+    list_bandit_snapshots,
     load_bandit_feedback,
     load_bandit_report,
+    load_bandit_snapshot,
     load_bandit_state,
     load_cold_start_policy,
+    pending_feedback_count,
+    prune_bandit_snapshots,
     resolve_context_features,
+    restore_bandit_snapshot,
     save_bandit_context_features,
+    save_bandit_snapshot,
     simulate_cold_start_exploration,
     snapshot_bandit_state,
     summarize_bandit_lifecycle,
@@ -38,6 +45,7 @@ from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
     BANDIT_CONTEXT_FEATURES_PATH,
     BANDIT_FEEDBACK_PATH,
+    BANDIT_SNAPSHOTS_DIR,
     BANDIT_STATE_PATH,
     COLD_START_POLICY_PATH,
     CONTEXT_FEATURES_ENV_VAR,
@@ -2502,6 +2510,280 @@ def record_bandit_feedback(
     typer.echo(
         f"Recorded reward {reward:.4f} for arm '{arm}' into feedback journal: {journal}"
     )
+
+
+@app.command()
+def bandit_snapshot(
+    create: bool = typer.Option(
+        False,
+        "--create",
+        help="Create a new timestamped snapshot of the bandit state.",
+    ),
+    label: str | None = typer.Option(
+        None,
+        "--label",
+        help="Optional label to attach to the created snapshot.",
+    ),
+    list_snapshots: bool = typer.Option(
+        False,
+        "--list",
+        help="List existing bandit state snapshots.",
+    ),
+    restore: str | None = typer.Option(
+        None,
+        "--restore",
+        help="Path to snapshot file to restore into the active bandit state.",
+    ),
+    prune: int | None = typer.Option(
+        None,
+        "--prune",
+        help="Prune older snapshots keeping the specified number of newest snapshots.",
+    ),
+    state_path: str = typer.Option(
+        str(BANDIT_STATE_PATH),
+        "--state-path",
+        help="Path to the active bandit state file.",
+    ),
+    snapshot_dir: str = typer.Option(
+        str(BANDIT_SNAPSHOTS_DIR),
+        "--snapshot-dir",
+        help="Directory where snapshots are saved and listed.",
+    ),
+) -> None:
+    """Manage cold-start bandit state snapshots (create, list, restore, prune)."""
+    sn_dir = Path(snapshot_dir)
+    st_path = Path(state_path)
+
+    try:
+        if create:
+            state = load_bandit_state(st_path)
+            created = save_bandit_snapshot(state, snapshot_dir=sn_dir, label=label)
+            typer.echo(f"Bandit state snapshot saved to: {created}")
+            return
+
+        if restore is not None:
+            restored = restore_bandit_snapshot(
+                Path(restore), target_state_path=st_path
+            )
+            typer.echo(
+                f"Restored snapshot '{restore}' into active state: {restored}"
+            )
+            return
+
+        if prune is not None:
+            deleted = prune_bandit_snapshots(sn_dir, max_keep=prune)
+            typer.echo(
+                f"Pruned {len(deleted)} snapshot(s), keeping {prune} newest in: "
+                f"{sn_dir}"
+            )
+            return
+
+        # default or explicit --list
+        snapshots = list_bandit_snapshots(sn_dir)
+        if not snapshots:
+            typer.echo(f"No bandit state snapshots found in: {sn_dir}")
+            return
+
+        typer.echo(f"Bandit state snapshots ({len(snapshots)}) in {sn_dir}:")
+        typer.echo(
+            f"{'Filename':<36} {'Created At':<22} {'Label':<15} {'Selections':>10}"
+        )
+        typer.echo("-" * 87)
+        for s in snapshots:
+            fn = s["filename"]
+            ca = s["created_at"] or "-"
+            lbl = s["label"] or "-"
+            sel = s["total_selections"]
+            typer.echo(f"{fn:<36} {ca:<22} {lbl:<15} {sel:>10}")
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+
+@app.command()
+def bandit_drift(
+    reference: str | None = typer.Option(
+        None,
+        "--reference",
+        help="Path to reference snapshot or prior state (defaults to newest snapshot).",
+    ),
+    state_path: str = typer.Option(
+        str(BANDIT_STATE_PATH),
+        "--state-path",
+        help="Path to the current bandit state to evaluate.",
+    ),
+    snapshot_dir: str = typer.Option(
+        str(BANDIT_SNAPSHOTS_DIR),
+        "--snapshot-dir",
+        help="Directory to look up snapshots when --reference is omitted.",
+    ),
+) -> None:
+    """Compute and display parameter and metric drift between bandit states."""
+    st_path = Path(state_path)
+    try:
+        current_state = load_bandit_state(st_path)
+        if reference is not None:
+            ref_path = Path(reference)
+        else:
+            snapshots = list_bandit_snapshots(snapshot_dir)
+            if snapshots:
+                ref_path = Path(snapshots[0]["path"])
+            else:
+                raise FileNotFoundError(
+                    "No reference state provided and no snapshots found in "
+                    f"'{snapshot_dir}' to compare against."
+                )
+        ref_state = load_bandit_snapshot(ref_path)
+        drift = compute_bandit_drift(ref_state, current_state)
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    summary = drift["summary"]
+    typer.echo(f"Bandit state drift (reference: {ref_path.name}):")
+    typer.echo(
+        f"{'Arm':<12} {'L2 Drift':>10} {'Cosine Sim':>11} {'Delta Sel':>10} "
+        f"{'Delta Rew':>11} {'Delta Mean':>11}"
+    )
+    typer.echo("-" * 70)
+    for arm, d in drift["arms"].items():
+        typer.echo(
+            f"{arm:<12} {d['l2_drift']:>10.4f} {d['cosine_similarity']:>11.4f} "
+            f"{d['delta_selections']:>10} {d['delta_rewards']:>11.4f} "
+            f"{d['delta_mean_reward']:>11.4f}"
+        )
+    typer.echo("-" * 70)
+    typer.echo(
+        f"Summary: max L2 drift={summary['max_l2_drift']:.4f}, "
+        f"mean L2 drift={summary['mean_l2_drift']:.4f}, "
+        f"dominant arm={summary['dominant_arm_a']} -> {summary['dominant_arm_b']} "
+        f"(changed={'yes' if summary['dominant_arm_changed'] else 'no'}), "
+        f"drift detected={'yes' if summary['has_drift'] else 'no'}"
+    )
+
+
+@app.command()
+def bandit_sweep(
+    state_path: str = typer.Option(
+        str(BANDIT_STATE_PATH),
+        "--state-path",
+        help="Path to the active bandit state file.",
+    ),
+    journal_path: str = typer.Option(
+        str(BANDIT_FEEDBACK_PATH),
+        "--journal-path",
+        help="Path to the feedback journal.",
+    ),
+    threshold: int = typer.Option(
+        1,
+        "--threshold",
+        help="Minimum pending feedback records required to execute a fold.",
+    ),
+    interval: float = typer.Option(
+        5.0,
+        "--interval",
+        help="Poll interval in seconds when running in --loop mode.",
+    ),
+    loop: bool = typer.Option(
+        False,
+        "--loop",
+        help="Run continuously as a daemon, sweeping pending feedback periodically.",
+    ),
+    snapshot_on_sweep: bool = typer.Option(
+        False,
+        "--snapshot-on-sweep",
+        help="Automatically create a state snapshot when new records are folded.",
+    ),
+    snapshot_dir: str = typer.Option(
+        str(BANDIT_SNAPSHOTS_DIR),
+        "--snapshot-dir",
+        help="Directory where snapshots are saved if --snapshot-on-sweep is active.",
+    ),
+) -> None:
+    """Automate online bandit journal sweeps (one-off or recurring loop)."""
+    import time
+
+    if threshold < 1:
+        typer.secho(
+            "Error: --threshold must be a positive integer.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if interval <= 0:
+        typer.secho(
+            "Error: --interval must be a positive number.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    st_p = Path(state_path)
+    j_p = Path(journal_path)
+    sn_dir = Path(snapshot_dir)
+
+    def _execute_sweep_step() -> int:
+        if not st_p.exists() or not j_p.exists():
+            return 0
+        state = load_bandit_state(st_p)
+        feedback = load_bandit_feedback(j_p)
+        pending = pending_feedback_count(state, feedback)
+        if pending < threshold:
+            return 0
+        updated, sweep = sweep_bandit_journal(state, feedback)
+        st_p.write_text(
+            json.dumps(updated, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        typer.echo(
+            f"Folded {sweep['folded_count']} pending feedback record(s) into: {st_p}"
+        )
+        if snapshot_on_sweep:
+            snap = save_bandit_snapshot(
+                updated, snapshot_dir=sn_dir, label="auto_sweep"
+            )
+            typer.echo(f"Created automatic snapshot: {snap}")
+        return int(sweep["folded_count"])
+
+    try:
+        if not loop:
+            if not st_p.exists():
+                raise FileNotFoundError(f"Bandit state not found: {st_p}")
+            if not j_p.exists():
+                typer.echo(
+                    f"Feedback journal not found: {j_p}. No records to sweep."
+                )
+                return
+            state = load_bandit_state(st_p)
+            feedback = load_bandit_feedback(j_p)
+            pending = pending_feedback_count(state, feedback)
+            if pending < threshold:
+                typer.echo(
+                    f"Pending records ({pending}) below threshold ({threshold}). "
+                    "No sweep executed."
+                )
+                return
+            _execute_sweep_step()
+            return
+
+        typer.echo(
+            f"Starting bandit sweep daemon (interval={interval}s, "
+            f"threshold={threshold})... Press Ctrl+C to stop."
+        )
+        while True:
+            try:
+                _execute_sweep_step()
+            except Exception as loop_err:
+                typer.secho(
+                    f"Warning during sweep iteration: {loop_err}",
+                    fg=typer.colors.YELLOW,
+                )
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        typer.echo("\nBandit sweep daemon stopped.")
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
 
 
 if __name__ == "__main__":
