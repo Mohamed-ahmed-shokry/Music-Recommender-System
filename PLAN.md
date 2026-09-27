@@ -3,12 +3,35 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.26.0) — in progress
+## Current milestone (0.27.0) — planned
+
+Bandit Exponential Reward Discounting and Thompson Sampling Arm Policies.
+Over time, user tastes and song popularity shift, causing early cold-start
+feedback to dominate ridge regression estimates without adapting to seasonal or
+trend changes. In addition, LinUCB with fixed $\alpha$ can over-explore suboptimal
+arms once estimates stabilize. This milestone introduces:
+1. Exponential reward discounting / recency weighting: customizable decay factor
+   $\gamma \in (0, 1]$ applied during feedback folding ($A \leftarrow \gamma A + x x^T$,
+   $b \leftarrow \gamma b + r x$) so that recent impressions carry higher weight.
+2. Thompson Sampling bandit policy: Bayesian posterior sampling for contextual
+   bandit arm selection alongside LinUCB.
+3. Exploration schedule / decay: dynamic $\alpha(t) = \alpha_0 / (1 + \lambda t)$
+   cooling for stable production exploitation.
+4. Comprehensive CLI, service, API, and dashboard policy controls.
+
+- Phase 118 — Discounted fold engine & Thompson Sampling implementation.
+- Phase 119 — Service policy configuration and dynamic exploration scheduling.
+- Phase 120 — CLI tooling for decay tuning and policy evaluation.
+- Phase 121 — API endpoints and request-level policy selection.
+- Phase 122 — Dashboard policy switching and recency-weighted reward visualization.
+- Phase 123 — Documentation, testing, and 0.27.0 release.
+
+## Previous milestone (0.26.0) — shipped
 
 Automated online bandit sweeping, state snapshotting, and policy drift
-tracking. Live serving appends feedback to the journal, but folding still
-requires manual operator intervention via `bandit-update` or `POST /bandit/update`.
-Furthermore, `bandit_state.json` is updated in place with no historical audit
+tracking. Live serving appends feedback to the journal, but folding previously
+required manual operator intervention via `bandit-update` or `POST /bandit/update`.
+Furthermore, `bandit_state.json` was updated in place with no historical audit
 trail, snapshot retention, or parameter drift tracking. This milestone delivers:
 1. Automated online sweeping: configurable auto-sweep threshold in the service
    (`auto_sweep_threshold`) that folds pending feedback automatically during serving

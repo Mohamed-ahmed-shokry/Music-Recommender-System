@@ -737,6 +737,43 @@ and the plain `popular_fallback` branch never record. The same lifecycle is
 exposed over the API (`GET /bandit/status`, `POST /bandit/update`) and as a
 "Cold-Start Bandit" tab in the dashboard with a one-click fold action.
 
+### Automated Online Sweeping, State Snapshots, and Policy Drift
+
+To operationalize the cold-start bandit in production environments:
+
+1. **Automated Online Sweeping**: Configure `auto_sweep_threshold` (or `MUSIC_RECOMMENDER_BANDIT_AUTO_SWEEP_THRESHOLD` environment variable). When serving requests with `--record-feedback`, the service tracks pending feedback impressions and automatically folds them into `reports/bandit_state.json` when the threshold is reached. Alternatively, run the background worker CLI:
+   ```bash
+   # One-shot sweep if pending feedback reaches threshold (default: 50)
+   uv run python -m music_recommender.cli bandit-sweep --threshold 50 --snapshot-on-sweep
+
+   # Daemon worker checking every 30s
+   uv run python -m music_recommender.cli bandit-sweep --loop --interval 30 --snapshot-on-sweep
+   ```
+
+2. **State Snapshot Management**: Create and manage timestamped copies of `reports/bandit_state.json` in `reports/bandit_snapshots/`:
+   ```bash
+   # Create a snapshot with an optional label
+   uv run python -m music_recommender.cli bandit-snapshot --create --label baseline
+
+   # List all persisted snapshots
+   uv run python -m music_recommender.cli bandit-snapshot --list
+
+   # Restore a snapshot to active state
+   uv run python -m music_recommender.cli bandit-snapshot --restore bandit_state_20260927T000000Z_baseline.json
+
+   # Prune older snapshots, keeping only the 5 newest
+   uv run python -m music_recommender.cli bandit-snapshot --prune 5
+   ```
+
+3. **Policy Parameter Drift Tracking**: Compute Ridge regression weight deltas ($\Delta\theta = A^{-1}b$), $L_2$ drift norms, cosine similarity, selection growth, and dominant arm changes between states or snapshots:
+   ```bash
+   # Compare current state against the latest snapshot
+   uv run python -m music_recommender.cli bandit-drift
+
+   # Compare against a specific reference snapshot
+   uv run python -m music_recommender.cli bandit-drift --reference bandit_state_20260927T000000Z_baseline.json
+   ```
+
 Track evaluation reports land in `reports/` as JSON (`track_evaluation.json`
 by default), recording the run configuration and per-arm metrics. Specify
 `--report-dir` to customize the output directory.
@@ -770,8 +807,11 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/tracks/similar/{track_id}?top_k=10` | Tracks similar to a selected track by audio features |
 | `GET` | `/tracks/popular?top_k=10` | Popular track recommendations |
 | `GET` | `/tracks/catalog?query=hit&artist=Drake&limit=25` | Search and page through the track catalog |
-| `GET` | `/bandit/status` | Cold-start bandit lifecycle snapshot (state, policy, journal, context features) |
+| `GET` | `/bandit/status` | Cold-start bandit lifecycle snapshot (state, policy, journal, context features, auto-sweep threshold, snapshots count) |
 | `POST` | `/bandit/update` | Fold pending served feedback into the persisted bandit state (optional `{"context_features": [...]}` body cross-checked against the state) |
+| `GET` | `/bandit/snapshots` | List persisted bandit state snapshots sorted newest first |
+| `POST` | `/bandit/snapshots` | Create a timestamped bandit state snapshot (optional `{"label": "..."}` body) |
+| `GET` | `/bandit/drift` | Parameter and reward drift between current state and reference snapshot (optional `?reference=...`) |
 | `POST` | `/recommend/profile` | Onboarding recommendations from artists, genres, and moods |
 | `POST` | `/recommend/session` | Short-term session recommendations from seeds, exclusions, and optional user taste |
 | `GET` | `/similar-artists/{artist_id}?method=hybrid&top_k=10` | ALS, content, or hybrid similar artists |
@@ -1497,9 +1537,13 @@ See [PLAN.md](PLAN.md) for the full phased plan.
   `bandit-context --set` control it, and the chosen set is recorded in reports,
   state, and service metadata, cross-checked on fold and serve, and shown in
   the CLI, API, and dashboard. ✓ (0.25.0)
-- Next: two-tower neural candidate retrieval (deferred until a real-scale
-  catalog exists), per-request context capture, and a scheduled snapshot of the
-  online bandit state.
+- Automated online bandit sweeping, state snapshotting, and policy drift
+  tracking: automated background sweeping in service serving and via `bandit-sweep`
+  worker; timestamped snapshot management (`bandit-snapshot`, `reports/bandit_snapshots/`,
+  `GET/POST /bandit/snapshots`); and Ridge regression parameter drift tracking
+  (`bandit-drift`, `GET /bandit/drift`, dashboard drift view). ✓ (0.26.0)
+- Next: exponential reward discounting / recency weighting, Thompson Sampling
+  contextual bandit exploration policy, and dynamic temperature annealing.
 - Deferred: two-tower neural candidate retrieval (PyTorch / ONNX runtime) until
   a real-scale catalog is available; the sample dataset cannot validate a
   neural retrieval model.

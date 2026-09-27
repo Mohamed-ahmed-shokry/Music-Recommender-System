@@ -7,6 +7,34 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-09-27
+
+### Added
+
+- Automated online bandit sweeping, state snapshotting, and policy drift tracking:
+  - Online auto-sweep: `RecommenderService` supports a configurable `auto_sweep_threshold` (or `MUSIC_RECOMMENDER_BANDIT_AUTO_SWEEP_THRESHOLD` environment variable, defaulting to 50); when serving cold-start impressions with `--record-feedback`, the service automatically folds pending observations when the threshold is reached.
+  - Background worker CLI: new `bandit-sweep` command with `--threshold`, `--snapshot-on-sweep`, `--loop`, and `--interval` flags for standalone scheduled or continuous daemon execution.
+  - State snapshotting: timestamped snapshots in `reports/bandit_snapshots/` via `save_bandit_snapshot`, `list_bandit_snapshots`, `load_bandit_snapshot`, `restore_bandit_snapshot`, and `prune_bandit_snapshots`.
+  - Snapshot CLI: `bandit-snapshot` command supporting `--create [--label LABEL]`, `--list`, `--restore SNAPSHOT_NAME`, and `--prune KEEP_N`.
+  - Policy drift computation: `compute_arm_thetas` and `compute_bandit_drift` measuring ridge regression coefficient drift ($\Delta\theta = A^{-1}b$, $L_2$ norm, cosine similarity), per-arm selection growth, reward changes, and dominant arm shifts.
+  - Drift CLI: `bandit-drift` command with formatted comparison table against the latest or specified reference snapshot.
+  - API endpoints: `GET /bandit/snapshots` (list snapshots), `POST /bandit/snapshots` (create snapshot with optional label), and `GET /bandit/drift` (parameter and reward drift analysis); `GET /bandit/status` reports `auto_sweep_threshold` and `snapshots_count`.
+  - Dashboard integration: Cold-Start Bandit tab now features auto-sweep threshold indicator, interactive Snapshot Management (label input, create button, snapshot table), and Policy Drift View (reference snapshot selector, summary metrics, and per-arm weight delta table).
+
+### Tests
+
+- Comprehensive unit and integration test coverage across all new components:
+  - `tests/test_bandit_snapshots.py`: snapshot saving, listing, loading, restoring, pruning, corrupted state handling, ridge coefficient computation, and drift tracking with dominant arm changes.
+  - `tests/test_service.py`: auto-sweep validation, threshold triggers on live serving, snapshot creation, listing, restoration, pruning, and drift computation.
+  - `tests/test_cli.py`: snapshot management (`bandit-snapshot`), drift comparison (`bandit-drift`), and automated sweeping (`bandit-sweep` with threshold and loop modes).
+  - `tests/test_api.py`: FastAPI routes for snapshot listing, creation, and drift analysis, error handling (404/422), and lifecycle status attributes.
+  - `tests/test_dashboard.py`: Streamlit dashboard testing for snapshot creation, snapshot table rendering, drift metrics, and error surfacing.
+
+### Documentation
+
+- README documents automated sweeping, state snapshot management, drift tracking CLI commands, API endpoints, and dashboard features.
+- PLAN marks Milestone 0.26.0 complete and outlines the 0.27.0 milestone.
+
 ## [0.25.0] - 2026-09-26
 
 ### Added
