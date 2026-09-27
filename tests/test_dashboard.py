@@ -24,6 +24,7 @@ class FakeDashboardService:
             "log_unique_artists",
             "mean_popularity_rank",
         )
+        self.snapshots: list[dict[str, object]] = []
         metadata = pd.DataFrame(
             {
                 "artist_id": ["artist_1", "artist_2", "artist_3"],
@@ -89,6 +90,8 @@ class FakeDashboardService:
     def bandit_status(self) -> dict[str, object]:
         return {
             "available": True,
+            "auto_sweep_threshold": 50,
+            "snapshots_count": len(self.snapshots),
             "state": {
                 "generated_at": "2026-01-01T00:00:00+00:00",
                 "context_dim": 3,
@@ -110,6 +113,56 @@ class FakeDashboardService:
             "policy": {"popular": 0.7, "long_tail": 0.3},
             "journal": {"length": 3, "pending": 1},
             "last_fold": {"offset": 2, "at": "2026-01-01T00:00:00+00:00"},
+        }
+
+    def list_bandit_snapshots(self) -> list[dict[str, object]]:
+        return list(self.snapshots)
+
+    def create_bandit_snapshot(self, label: str | None = None) -> Path:
+        suffix = f"_{label}" if label else ""
+        filename = f"bandit_state_20260927T000000Z{suffix}.json"
+        path = f"reports/bandit_snapshots/{filename}"
+        self.snapshots.append(
+            {
+                "filename": filename,
+                "path": path,
+                "timestamp": "20260927T000000Z",
+                "label": label,
+                "size_bytes": 1024,
+            }
+        )
+        return Path(path)
+
+    def compute_bandit_drift(
+        self, reference_path: Path | str | None = None
+    ) -> dict[str, object]:
+        return {
+            "current_state_path": "reports/bandit_state.json",
+            "reference_state_path": str(
+                reference_path or "reports/bandit_snapshots/ref.json"
+            ),
+            "has_drift": False,
+            "max_l2_drift": 0.05,
+            "mean_l2_drift": 0.025,
+            "arms": {
+                "popular": {
+                    "theta_l2_drift": 0.05,
+                    "theta_cosine_similarity": 0.99,
+                    "selections_growth": 5,
+                    "total_reward_diff": 3.5,
+                    "mean_reward_diff": 0.1,
+                },
+                "long_tail": {
+                    "theta_l2_drift": 0.0,
+                    "theta_cosine_similarity": 1.0,
+                    "selections_growth": 0,
+                    "total_reward_diff": 0.0,
+                    "mean_reward_diff": 0.0,
+                },
+            },
+            "dominant_arm_a": "popular",
+            "dominant_arm_b": "popular",
+            "dominant_arm_changed": False,
         }
 
     def sweep_bandit_feedback(self) -> dict[str, object]:
@@ -479,7 +532,11 @@ def test_dashboard_bandit_tab_renders_lifecycle_and_folds() -> None:
     fold_button.click().run()
 
     assert service.last_sweep_called is True
-    assert not app.exception
+    assert any(
+        "Online auto-sweep threshold: **50**" in caption.value
+        for caption in app.caption
+    )
+    assert any(info.value.startswith("No snapshots found") for info in app.info)
 
 
 class SubsetFeatureStateService(FakeDashboardService):
@@ -539,6 +596,69 @@ def test_dashboard_bandit_tab_surfaces_fold_errors() -> None:
 
     assert not app.exception
     assert any(error.value.startswith("Fold failed:") for error in app.error)
+
+
+def test_dashboard_bandit_tab_creates_snapshot() -> None:
+    service = FakeDashboardService()
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    snap_button = next(
+        button for button in app.button if button.label == "Create Snapshot"
+    )
+    snap_button.click().run()
+
+    assert not app.exception
+    assert len(service.snapshots) == 1
+    assert any("Created snapshot" in success.value for success in app.success)
+
+
+def test_dashboard_bandit_tab_displays_snapshots_and_drift() -> None:
+    service = FakeDashboardService()
+    snap_filename = "bandit_state_20260927T000000Z_baseline.json"
+    service.snapshots.append(
+        {
+            "filename": snap_filename,
+            "path": f"reports/bandit_snapshots/{snap_filename}",
+            "timestamp": "20260927T000000Z",
+            "label": "baseline",
+            "size_bytes": 1024,
+        }
+    )
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("Persisted snapshots (1)" in caption.value for caption in app.caption)
+    assert any(metric.label == "Dominant Arm (Current)" for metric in app.metric)
+    assert any(metric.label == "Max L2 Drift" for metric in app.metric)
+
+
+def test_dashboard_bandit_tab_surfaces_snapshot_errors() -> None:
+    class FailingSnapshotService(FakeDashboardService):
+        def create_bandit_snapshot(self, label: str | None = None) -> Path:
+            raise ValueError("Corrupt bandit state")
+
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(FailingSnapshotService(),),
+        default_timeout=10,
+    ).run()
+    snap_button = next(
+        button for button in app.button if button.label == "Create Snapshot"
+    )
+    snap_button.click().run()
+
+    assert not app.exception
+    assert any(
+        error.value.startswith("Snapshot creation failed:") for error in app.error
+    )
 
 
 def test_ablation_ranking_rows_shapes_summary_data() -> None:

@@ -750,6 +750,11 @@ def _render_bandit_tab(service: RecommenderService) -> None:
         + ", ".join(f"`{feature}`" for feature in active_features)
         + "."
     )
+    threshold = status.get("auto_sweep_threshold")
+    if threshold:
+        st.caption(
+            f"Online auto-sweep threshold: **{threshold}** cold-start impressions."
+        )
 
     if not status["available"]:
         st.info(
@@ -808,6 +813,127 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                 f"Folded pending feedback. Journal now "
                 f"{updated['journal']['pending']} pending."
             )
+
+    st.divider()
+    st.subheader("Bandit Snapshots & Drift Tracking")
+    st.caption(
+        "Persist timestamped state snapshots to monitor policy drift and track "
+        "parameter evolution over time."
+    )
+
+    snap_col1, snap_col2 = st.columns([3, 1])
+    with snap_col1:
+        snapshot_label = st.text_input(
+            "Snapshot label (optional)",
+            placeholder="e.g. baseline, pre-campaign, audit",
+            key="bandit_snapshot_label",
+        )
+    with snap_col2:
+        st.write("")
+        st.write("")
+        create_snap_clicked = st.button(
+            "Create Snapshot", key="create_bandit_snapshot"
+        )
+
+    if create_snap_clicked:
+        try:
+            created_path = service.create_bandit_snapshot(
+                label=snapshot_label.strip() if snapshot_label else None
+            )
+            st.success(f"Created snapshot `{created_path.name}`.")
+        except (FileNotFoundError, ValueError) as error:
+            st.error(f"Snapshot creation failed: {error}")
+
+    try:
+        snapshots = service.list_bandit_snapshots()
+    except Exception as error:
+        st.error(f"Failed to list snapshots: {error}")
+        snapshots = []
+
+    if snapshots:
+        st.caption(f"Persisted snapshots ({len(snapshots)}):")
+        snap_df = pd.DataFrame(
+            [
+                {
+                    "Filename": s["filename"],
+                    "Timestamp": s.get("timestamp", "-"),
+                    "Label": s.get("label") or "-",
+                    "Size (bytes)": s.get("size_bytes", 0),
+                }
+                for s in snapshots
+            ]
+        )
+        st.dataframe(snap_df, hide_index=True, width="stretch")
+
+        st.markdown("#### Policy Drift Analysis")
+        st.caption(
+            "Compare current bandit parameters against a reference snapshot to "
+            "inspect ridge coefficient drift (L2 norm, cosine similarity) and arm "
+            "dominance."
+        )
+        snapshot_options = [str(s["filename"]) for s in snapshots]
+        selected_ref = st.selectbox(
+            "Reference snapshot",
+            options=snapshot_options,
+            index=0,
+            key="bandit_drift_reference",
+        )
+        if selected_ref:
+            try:
+                drift = service.compute_bandit_drift(reference_path=selected_ref)
+            except (FileNotFoundError, ValueError) as error:
+                st.error(f"Drift computation failed: {error}")
+            else:
+                drift_cols = st.columns(4)
+                dominant_b = str(drift["dominant_arm_b"] or "none")
+                dominant_a = str(drift["dominant_arm_a"] or "none")
+                drift_cols[0].metric("Dominant Arm (Current)", dominant_b)
+                drift_cols[1].metric("Dominant Arm (Ref)", dominant_a)
+                drift_cols[2].metric(
+                    "Dominant Arm Changed",
+                    "Yes" if drift["dominant_arm_changed"] else "No",
+                )
+                drift_cols[3].metric(
+                    "Max L2 Drift",
+                    f"{float(str(drift['max_l2_drift'])):.4f}",
+                )
+
+                arm_drift_rows = []
+                drift_arms = drift.get("arms", {})
+                if isinstance(drift_arms, dict):
+                    for arm, arm_data in drift_arms.items():
+                        cos_sim = arm_data.get("theta_cosine_similarity")
+                        arm_drift_rows.append(
+                            {
+                                "Arm": arm,
+                                "L2 Drift": round(
+                                    float(arm_data["theta_l2_drift"]), 4
+                                ),
+                                "Cosine Sim": (
+                                    round(float(cos_sim), 4)
+                                    if cos_sim is not None
+                                    else "-"
+                                ),
+                                "Selections Δ": arm_data["selections_growth"],
+                                "Reward Δ": round(
+                                    float(arm_data["total_reward_diff"]), 4
+                                ),
+                                "Mean Reward Δ": round(
+                                    float(arm_data["mean_reward_diff"]), 4
+                                ),
+                            }
+                        )
+                if arm_drift_rows:
+                    st.dataframe(
+                        pd.DataFrame(arm_drift_rows),
+                        hide_index=True,
+                        width="stretch",
+                    )
+    else:
+        st.info(
+            "No snapshots found in `reports/bandit_snapshots/`. "
+            "Create a snapshot above to begin tracking policy drift."
+        )
 
 
 def render_dashboard(service: RecommenderService) -> None:
