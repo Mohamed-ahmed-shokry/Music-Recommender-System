@@ -64,6 +64,7 @@ def create_service(
     tmp_path: Path,
     ranking_config: dict[str, object] | None = None,
     ltr_model: object | None = None,
+    auto_sweep_threshold: int | None = None,
 ) -> RecommenderService:
     df = service_dataframe()
     mappings = create_id_mappings(df)
@@ -108,7 +109,11 @@ def create_service(
     )
     artifact_path = tmp_path / "artifact.joblib"
     save_artifact(artifact, artifact_path)
-    return RecommenderService.from_artifacts(artifact_path, cold_start_policy_path=None)
+    return RecommenderService.from_artifacts(
+        artifact_path,
+        cold_start_policy_path=None,
+        auto_sweep_threshold=auto_sweep_threshold,
+    )
 
 
 def test_known_user_returns_hybrid_strategy(tmp_path: Path) -> None:
@@ -1390,3 +1395,97 @@ def test_metadata_tolerates_corrupt_bandit_state(
     metadata = service.metadata()
     assert "error" in metadata["bandit"]
     assert metadata["bandit"]["available"] is False
+
+
+def test_service_auto_sweep_threshold_init(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = create_service(tmp_path)
+    assert service.auto_sweep_threshold == 0
+
+    custom = create_service(tmp_path, auto_sweep_threshold=5)
+    assert custom.auto_sweep_threshold == 5
+
+    with pytest.raises(
+        ValueError, match="auto_sweep_threshold must be a non-negative integer"
+    ):
+        create_service(tmp_path, auto_sweep_threshold=-1)
+
+    monkeypatch.setenv("MUSIC_RECOMMENDER_BANDIT_AUTO_SWEEP_THRESHOLD", "10")
+    env_service = create_service(tmp_path)
+    assert env_service.auto_sweep_threshold == 10
+
+    monkeypatch.setenv("MUSIC_RECOMMENDER_BANDIT_AUTO_SWEEP_THRESHOLD", "invalid")
+    with pytest.raises(ValueError, match="must be a non-negative integer"):
+        create_service(tmp_path)
+
+
+def test_service_auto_sweep_on_recommend_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state_path = _write_test_state(tmp_path)
+    journal_path = tmp_path / "bandit_feedback.json"
+    monkeypatch.setattr("music_recommender.service.BANDIT_STATE_PATH", state_path)
+    monkeypatch.setattr("music_recommender.service.BANDIT_FEEDBACK_PATH", journal_path)
+
+    service = create_service(tmp_path, auto_sweep_threshold=2)
+    service.cold_start_policy = {"popular": 0.5, "balanced": 0.5}
+
+    result = service.recommend_user(
+        user_id="unknown_auto_sweep",
+        top_k=2,
+        record_feedback=True,
+        feedback_journal_path=journal_path,
+    )
+
+    assert result["strategy"] == "bandit_fallback"
+    assert "feedback" in result
+    assert result["feedback"]["recorded"] is True
+    assert result["feedback"]["auto_swept"] is True
+
+    status = service.bandit_status(
+        state_path=state_path,
+        feedback_journal_path=journal_path,
+    )
+    assert status["journal"]["pending"] == 0
+    assert status["auto_sweep_threshold"] == 2
+
+
+def test_service_bandit_snapshots_and_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state_path = _write_test_state(tmp_path)
+    snapshots_dir = tmp_path / "snapshots"
+    monkeypatch.setattr("music_recommender.service.BANDIT_STATE_PATH", state_path)
+    monkeypatch.setattr("music_recommender.service.BANDIT_SNAPSHOTS_DIR", snapshots_dir)
+
+    service = create_service(tmp_path)
+    snapshot_path = service.create_bandit_snapshot(
+        label="v1", snapshot_dir=snapshots_dir
+    )
+    assert snapshot_path.exists()
+
+    snapshots = service.list_bandit_snapshots(snapshot_dir=snapshots_dir)
+    assert len(snapshots) == 1
+    assert snapshots[0]["label"] == "v1"
+
+    # sweep some feedback into state to introduce drift
+    journal = tmp_path / "feedback.json"
+    _append_test_feedback(journal, count=3)
+    service.sweep_bandit_feedback(
+        state_path=state_path,
+        feedback_journal_path=journal,
+    )
+
+    # compute drift against snapshot
+    drift = service.compute_bandit_drift(
+        reference_path=snapshot_path,
+        state_path=state_path,
+    )
+    assert drift["summary"]["has_drift"] is True
+    assert drift["arms"]["popular"]["delta_selections"] == 3
+
+    # prune snapshots
+    pruned = service.prune_bandit_snapshots(max_keep=1, snapshot_dir=snapshots_dir)
+    assert len(pruned) == 0  # only 1 snapshot existed, none pruned
+

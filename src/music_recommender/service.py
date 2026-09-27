@@ -13,13 +13,20 @@ import numpy as np
 from music_recommender.artifacts import RecommenderArtifact, load_artifact
 from music_recommender.bandit import (
     append_bandit_feedback,
+    compute_bandit_drift,
     dominant_policy_arm,
     feedback_records_from_bandit_serve,
+    list_bandit_snapshots,
     load_bandit_feedback,
+    load_bandit_snapshot,
     load_bandit_state,
     load_cold_start_policy,
+    pending_feedback_count,
+    prune_bandit_snapshots,
     rank_cold_start_bandit,
     resolve_context_features,
+    restore_bandit_snapshot,
+    save_bandit_snapshot,
     summarize_bandit_lifecycle,
     sweep_bandit_journal,
     validate_serve_context,
@@ -28,11 +35,14 @@ from music_recommender.bandit import (
 from music_recommender.baselines import popular_artists
 from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
+    BANDIT_AUTO_SWEEP_THRESHOLD_ENV_VAR,
     BANDIT_CONTEXT_FEATURES_PATH,
     BANDIT_FEEDBACK_PATH,
+    BANDIT_SNAPSHOTS_DIR,
     BANDIT_STATE_PATH,
     COLD_START_POLICY_PATH,
     CONTEXT_FEATURES_ENV_VAR,
+    DEFAULT_BANDIT_AUTO_SWEEP_THRESHOLD,
     DEFAULT_CONTENT_WEIGHT,
     RAW_TRACK_DATA_PATH,
     RAW_TRACK_METADATA_PATH,
@@ -78,6 +88,7 @@ class RecommenderService:
         artifact: RecommenderArtifact,
         cold_start_policy: dict[str, float] | None = None,
         context_features: Sequence[str] | None = None,
+        auto_sweep_threshold: int | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -86,12 +97,32 @@ class RecommenderService:
             env=os.getenv(CONTEXT_FEATURES_ENV_VAR),
             config_path=BANDIT_CONTEXT_FEATURES_PATH,
         )
+        if auto_sweep_threshold is not None:
+            if type(auto_sweep_threshold) is not int or auto_sweep_threshold < 0:
+                raise ValueError("auto_sweep_threshold must be a non-negative integer.")
+            self.auto_sweep_threshold = auto_sweep_threshold
+        else:
+            env_val = os.getenv(BANDIT_AUTO_SWEEP_THRESHOLD_ENV_VAR)
+            if env_val is not None and env_val.strip():
+                try:
+                    parsed = int(env_val.strip())
+                    if parsed < 0:
+                        raise ValueError
+                    self.auto_sweep_threshold = parsed
+                except ValueError as error:
+                    raise ValueError(
+                        f"Environment variable {BANDIT_AUTO_SWEEP_THRESHOLD_ENV_VAR} "
+                        f"must be a non-negative integer, got '{env_val}'."
+                    ) from error
+            else:
+                self.auto_sweep_threshold = DEFAULT_BANDIT_AUTO_SWEEP_THRESHOLD
 
     @classmethod
     def from_artifacts(
         cls,
         artifact_path: str | Path = ARTIFACT_BUNDLE_PATH,
         cold_start_policy_path: str | Path | None = COLD_START_POLICY_PATH,
+        auto_sweep_threshold: int | None = None,
     ) -> RecommenderService:
         """Load a service from a saved artifact bundle.
 
@@ -99,7 +130,10 @@ class RecommenderService:
         policy JSON (default: the project report path), it is loaded so unknown
         users are served by the learned bandit blend instead of pure popularity.
         """
-        service = cls(load_artifact(artifact_path))
+        service = cls(
+            load_artifact(artifact_path),
+            auto_sweep_threshold=auto_sweep_threshold,
+        )
         if cold_start_policy_path is not None and Path(cold_start_policy_path).exists():
             service.cold_start_policy = load_cold_start_policy(cold_start_policy_path)
         return service
@@ -161,11 +195,14 @@ class RecommenderService:
         )
         state = load_bandit_state(state_path) if state_path.exists() else None
         feedback = load_bandit_feedback(journal_path) if journal_path.exists() else []
-        return summarize_bandit_lifecycle(
+        status = summarize_bandit_lifecycle(
             state=state,
             policy=self.cold_start_policy,
             feedback=feedback,
         )
+        status["auto_sweep_threshold"] = self.auto_sweep_threshold
+        status["snapshots_count"] = len(self.list_bandit_snapshots())
+        return status
 
     def sweep_bandit_feedback(
         self,
@@ -203,6 +240,78 @@ class RecommenderService:
             state_path=state_path,
             feedback_journal_path=journal_path,
         )
+
+    def create_bandit_snapshot(
+        self,
+        *,
+        label: str | None = None,
+        state_path: str | Path | None = None,
+        snapshot_dir: str | Path | None = None,
+    ) -> Path:
+        """Create a timestamped snapshot of the current bandit state."""
+        st_path = Path(state_path) if state_path is not None else BANDIT_STATE_PATH
+        sn_dir = (
+            Path(snapshot_dir) if snapshot_dir is not None else BANDIT_SNAPSHOTS_DIR
+        )
+        state = load_bandit_state(st_path)
+        return save_bandit_snapshot(state, snapshot_dir=sn_dir, label=label)
+
+    def list_bandit_snapshots(
+        self,
+        snapshot_dir: str | Path | None = None,
+    ) -> list[dict[str, Any]]:
+        """List existing bandit state snapshots sorted newest first."""
+        sn_dir = (
+            Path(snapshot_dir) if snapshot_dir is not None else BANDIT_SNAPSHOTS_DIR
+        )
+        return list_bandit_snapshots(snapshot_dir=sn_dir)
+
+    def restore_bandit_snapshot(
+        self,
+        snapshot_path: str | Path,
+        target_state_path: str | Path | None = None,
+    ) -> Path:
+        """Restore a snapshot into the active bandit state."""
+        target = (
+            Path(target_state_path)
+            if target_state_path is not None
+            else BANDIT_STATE_PATH
+        )
+        return restore_bandit_snapshot(snapshot_path, target_state_path=target)
+
+    def prune_bandit_snapshots(
+        self,
+        max_keep: int = 10,
+        snapshot_dir: str | Path | None = None,
+    ) -> list[Path]:
+        """Prune older snapshots keeping the max_keep newest."""
+        sn_dir = (
+            Path(snapshot_dir) if snapshot_dir is not None else BANDIT_SNAPSHOTS_DIR
+        )
+        return prune_bandit_snapshots(snapshot_dir=sn_dir, max_keep=max_keep)
+
+    def compute_bandit_drift(
+        self,
+        *,
+        reference_path: str | Path | None = None,
+        state_path: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Compute drift between a reference state/snapshot and current state."""
+        st_path = Path(state_path) if state_path is not None else BANDIT_STATE_PATH
+        state_b = load_bandit_state(st_path)
+        if reference_path is not None:
+            ref_p = Path(reference_path)
+        else:
+            snapshots = self.list_bandit_snapshots()
+            if snapshots:
+                ref_p = Path(snapshots[0]["path"])
+            else:
+                raise FileNotFoundError(
+                    "No reference_path provided and no snapshots found to "
+                    "compare against."
+                )
+        state_a = load_bandit_snapshot(ref_p)
+        return compute_bandit_drift(state_a, state_b)
 
     def health(self) -> dict[str, Any]:
         """Return lightweight service health details."""
@@ -322,6 +431,24 @@ class RecommenderService:
                         record,
                         Path(feedback_journal_path),
                     )
+                auto_swept = False
+                if self.auto_sweep_threshold > 0:
+                    journal_p = Path(feedback_journal_path)
+                    st_p = BANDIT_STATE_PATH
+                    if st_p.exists() and journal_p.exists():
+                        current_feedback = load_bandit_feedback(journal_p)
+                        current_state = load_bandit_state(st_p)
+                        pending = pending_feedback_count(
+                            current_state, current_feedback
+                        )
+                        if pending >= self.auto_sweep_threshold:
+                            self.sweep_bandit_feedback(
+                                state_path=st_p,
+                                feedback_journal_path=journal_p,
+                                context_features=self.context_features,
+                            )
+                            auto_swept = True
+
                 dominant_arm = dominant_policy_arm(self.cold_start_policy)
                 dominant = next(
                     record for record in feedback if record["arm"] == dominant_arm
@@ -333,6 +460,7 @@ class RecommenderService:
                     "reward": float(dominant["reward"]),
                     "arms": [str(record["arm"]) for record in feedback],
                     "context": list(feedback[0]["context"]),
+                    "auto_swept": auto_swept,
                 }
             return response
 
