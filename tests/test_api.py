@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,6 +27,8 @@ class FakeService:
     def bandit_status(self) -> dict[str, object]:
         return {
             "available": True,
+            "auto_sweep_threshold": 50,
+            "snapshots_count": 1,
             "state": {
                 "generated_at": "2026-01-01T00:00:00+00:00",
                 "context_dim": 3,
@@ -42,6 +45,48 @@ class FakeService:
             "policy": {"popular": 1.0},
             "journal": {"length": 2, "pending": 0},
             "last_fold": {"offset": 2, "at": "2026-01-01T00:00:00+00:00"},
+        }
+
+    def list_bandit_snapshots(self) -> list[dict[str, object]]:
+        return [
+            {
+                "filename": "bandit_state_20260927T000000Z.json",
+                "path": "reports/bandit_snapshots/bandit_state_20260927T000000Z.json",
+                "timestamp": "20260927T000000Z",
+                "label": "baseline",
+                "size_bytes": 1024,
+            }
+        ]
+
+    def create_bandit_snapshot(self, label: str | None = None) -> Path:
+        suffix = f"_{label}" if label else ""
+        filename = f"bandit_state_20260927T000000Z{suffix}.json"
+        return Path(f"reports/bandit_snapshots/{filename}")
+
+    def compute_bandit_drift(
+        self, reference_path: Path | str | None = None
+    ) -> dict[str, object]:
+        return {
+            "current_state_path": "reports/bandit_state.json",
+            "reference_state_path": str(
+                reference_path
+                or "reports/bandit_snapshots/bandit_state_20260927T000000Z.json"
+            ),
+            "has_drift": False,
+            "max_l2_drift": 0.0,
+            "mean_l2_drift": 0.0,
+            "arms": {
+                "popular": {
+                    "theta_l2_drift": 0.0,
+                    "theta_cosine_similarity": 1.0,
+                    "selections_growth": 0,
+                    "total_reward_diff": 0.0,
+                    "mean_reward_diff": 0.0,
+                }
+            },
+            "dominant_arm_a": "popular",
+            "dominant_arm_b": "popular",
+            "dominant_arm_changed": False,
         }
 
     def sweep_bandit_feedback(
@@ -746,6 +791,8 @@ def test_bandit_status_route_reports_lifecycle() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["available"] is True
+    assert body["auto_sweep_threshold"] == 50
+    assert body["snapshots_count"] == 1
     assert body["journal"] == {"length": 2, "pending": 0}
     assert body["state"]["arms"]["popular"]["selections"] == 2
     assert body["context_features"] == [
@@ -833,6 +880,136 @@ def test_bandit_update_route_corrupt_state_is_unprocessable() -> None:
 
     assert response.status_code == 422
     assert "Failed to parse bandit state" in response.json()["detail"]
+
+
+def test_bandit_snapshots_list_route() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/bandit/snapshots")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 1
+    assert len(body["snapshots"]) == 1
+    assert body["snapshots"][0]["label"] == "baseline"
+
+
+def test_bandit_snapshots_create_route() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.post("/bandit/snapshots", json={"label": "baseline"})
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["created"] is True
+    assert "baseline" in body["filename"]
+
+
+def test_bandit_snapshots_create_route_without_body() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.post("/bandit/snapshots")
+
+    assert response.status_code == 201
+    assert response.json()["created"] is True
+
+
+def test_bandit_snapshots_create_route_missing_state_is_not_found() -> None:
+    class NoStateSnapshotService(FakeService):
+        def create_bandit_snapshot(self, label: str | None = None) -> Path:
+            raise FileNotFoundError("reports/bandit_state.json not found")
+
+    with TestClient(api_main.app) as client:
+        api_main.service = NoStateSnapshotService()
+        api_main.service_load_error = None
+
+        response = client.post("/bandit/snapshots")
+
+    assert response.status_code == 404
+    assert "Bandit state not found" in response.json()["detail"]
+
+
+def test_bandit_snapshots_create_route_corrupt_state_is_unprocessable() -> None:
+    class CorruptSnapshotService(FakeService):
+        def create_bandit_snapshot(self, label: str | None = None) -> Path:
+            raise ValueError("Corrupt bandit state")
+
+    with TestClient(api_main.app) as client:
+        api_main.service = CorruptSnapshotService()
+        api_main.service_load_error = None
+
+        response = client.post("/bandit/snapshots")
+
+    assert response.status_code == 422
+    assert "Corrupt bandit state" in response.json()["detail"]
+
+
+def test_bandit_drift_route_defaults_to_latest() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/bandit/drift")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["has_drift"] is False
+    assert body["dominant_arm_a"] == "popular"
+    assert "popular" in body["arms"]
+
+
+def test_bandit_drift_route_with_reference() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get(
+            "/bandit/drift",
+            params={"reference": "bandit_state_20260927T000000Z.json"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["has_drift"] is False
+
+
+def test_bandit_drift_route_missing_state_or_reference_is_not_found() -> None:
+    class MissingReferenceService(FakeService):
+        def compute_bandit_drift(
+            self, reference_path: Path | str | None = None
+        ) -> dict[str, object]:
+            raise FileNotFoundError("Snapshot not found")
+
+    with TestClient(api_main.app) as client:
+        api_main.service = MissingReferenceService()
+        api_main.service_load_error = None
+
+        response = client.get("/bandit/drift?reference=nonexistent.json")
+
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"]
+
+
+def test_bandit_drift_route_corrupt_reference_is_unprocessable() -> None:
+    class CorruptReferenceService(FakeService):
+        def compute_bandit_drift(
+            self, reference_path: Path | str | None = None
+        ) -> dict[str, object]:
+            raise ValueError("Invalid snapshot format")
+
+    with TestClient(api_main.app) as client:
+        api_main.service = CorruptReferenceService()
+        api_main.service_load_error = None
+
+        response = client.get("/bandit/drift")
+
+    assert response.status_code == 422
+    assert "Invalid snapshot format" in response.json()["detail"]
 
 
 def test_recommend_user_route_rejects_malformed_context() -> None:

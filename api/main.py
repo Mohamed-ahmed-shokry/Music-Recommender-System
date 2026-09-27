@@ -4,6 +4,7 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query
@@ -12,7 +13,11 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from api.middleware import RequestSafetyMiddleware
 from music_recommender import __version__
-from music_recommender.config import DEFAULT_CONTENT_WEIGHT, REPORTS_DIR
+from music_recommender.config import (
+    BANDIT_SNAPSHOTS_DIR,
+    DEFAULT_CONTENT_WEIGHT,
+    REPORTS_DIR,
+)
 from music_recommender.evaluate import load_ablation_summary_report
 from music_recommender.logging_setup import configure_logging
 from music_recommender.service import RecommenderService
@@ -518,6 +523,82 @@ def bandit_update(
         raise HTTPException(
             status_code=404,
             detail=f"Bandit state not found: {error}",
+        ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+class BanditSnapshotRequest(BaseModel):
+    """Optional payload for creating a bandit state snapshot."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    label: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Optional human-readable label for the snapshot.",
+    )
+
+
+@app.get("/bandit/snapshots")
+def list_bandit_snapshots() -> dict[str, object]:
+    """List persisted bandit state snapshots sorted newest first."""
+    snapshots = get_service().list_bandit_snapshots()
+    return {
+        "snapshots": snapshots,
+        "count": len(snapshots),
+    }
+
+
+@app.post("/bandit/snapshots", status_code=201)
+def create_bandit_snapshot(
+    payload: BanditSnapshotRequest | None = None,
+) -> dict[str, object]:
+    """Create a new timestamped snapshot of the active bandit state."""
+    try:
+        path = get_service().create_bandit_snapshot(
+            label=payload.label if payload is not None else None
+        )
+        return {
+            "created": True,
+            "filename": path.name,
+            "path": str(path),
+        }
+    except FileNotFoundError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Bandit state not found: {error}",
+        ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/bandit/drift")
+def get_bandit_drift(
+    reference: str | None = Query(
+        default=None,
+        description=(
+            "Optional snapshot path or filename to compare against; "
+            "defaults to latest snapshot."
+        ),
+    ),
+) -> dict[str, object]:
+    """Compute drift between reference snapshot and current state."""
+    try:
+        service = get_service()
+        ref_path = None
+        if reference is not None:
+            ref_candidate = Path(reference)
+            if not ref_candidate.is_file():
+                candidate = BANDIT_SNAPSHOTS_DIR / reference
+                if candidate.is_file():
+                    ref_candidate = candidate
+            ref_path = ref_candidate
+        return service.compute_bandit_drift(reference_path=ref_path)
+    except FileNotFoundError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=f"State or reference snapshot not found: {error}",
         ) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
