@@ -32,7 +32,11 @@ import pandas as pd
 
 from music_recommender.artifacts import build_artist_stats
 from music_recommender.baselines import popular_artists
-from music_recommender.config import BANDIT_CONTEXT_FEATURES_PATH
+from music_recommender.config import (
+    BANDIT_CONTEXT_FEATURES_PATH,
+    BANDIT_SNAPSHOTS_DIR,
+    BANDIT_STATE_PATH,
+)
 from music_recommender.data import normalize_interactions
 from music_recommender.evaluate import precision_at_k
 from music_recommender.ranking import validate_ranking_parameters
@@ -455,6 +459,239 @@ def load_bandit_state(state_path: Path | str) -> dict[str, Any]:
         )
     LinUCBContextualBandit.from_state(state)
     return state
+
+
+def compute_arm_thetas(state: dict[str, Any]) -> dict[str, list[float]]:
+    """Compute ridge regression coefficients theta = A^{-1} b for each arm in state."""
+    LinUCBContextualBandit.from_state(state)
+    thetas: dict[str, list[float]] = {}
+    for arm, arm_data in state["arms"].items():
+        matrix_a = np.asarray(arm_data["a"], dtype=float)
+        vector_b = np.asarray(arm_data["b"], dtype=float)
+        theta = np.linalg.inv(matrix_a) @ vector_b
+        thetas[str(arm)] = [round(float(value), 6) for value in theta]
+    return thetas
+
+
+def compute_bandit_drift(
+    state_a: dict[str, Any],
+    state_b: dict[str, Any],
+) -> dict[str, Any]:
+    """Compute parameter and reward drift between two bandit states.
+
+    Compares the ridge regression coefficients (theta = A^{-1} b), selections,
+    and cumulative rewards per arm between state_a (baseline/prior) and state_b
+    (comparison/current), quantifying parameter drift via L2 norm and cosine
+    similarity.
+    """
+    bandit_a = LinUCBContextualBandit.from_state(state_a)
+    bandit_b = LinUCBContextualBandit.from_state(state_b)
+    if set(bandit_a.arms) != set(bandit_b.arms):
+        raise ValueError(
+            f"Cannot compute drift: state arms do not match ({bandit_a.arms} vs "
+            f"{bandit_b.arms})."
+        )
+    if bandit_a.context_dim != bandit_b.context_dim:
+        raise ValueError(
+            f"Cannot compute drift: context dimensions do not match "
+            f"({bandit_a.context_dim} vs {bandit_b.context_dim})."
+        )
+
+    thetas_a = compute_arm_thetas(state_a)
+    thetas_b = compute_arm_thetas(state_b)
+    arms_drift: dict[str, Any] = {}
+    for arm in bandit_a.arms:
+        vec_a = np.asarray(thetas_a[arm], dtype=float)
+        vec_b = np.asarray(thetas_b[arm], dtype=float)
+        delta_theta = vec_b - vec_a
+        l2_drift = float(np.linalg.norm(delta_theta))
+        norm_a = float(np.linalg.norm(vec_a))
+        norm_b = float(np.linalg.norm(vec_b))
+        if norm_a > 1e-9 and norm_b > 1e-9:
+            cosine_similarity = float(
+                np.clip(np.dot(vec_a, vec_b) / (norm_a * norm_b), -1.0, 1.0)
+            )
+        elif norm_a <= 1e-9 and norm_b <= 1e-9:
+            cosine_similarity = 1.0
+        else:
+            cosine_similarity = 0.0
+
+        sel_a = int(state_a["arms"][arm]["selections"])
+        sel_b = int(state_b["arms"][arm]["selections"])
+        rew_a = float(state_a["arms"][arm]["rewards"])
+        rew_b = float(state_b["arms"][arm]["rewards"])
+        mean_rew_a = rew_a / sel_a if sel_a > 0 else 0.0
+        mean_rew_b = rew_b / sel_b if sel_b > 0 else 0.0
+
+        arms_drift[arm] = {
+            "theta_a": thetas_a[arm],
+            "theta_b": thetas_b[arm],
+            "delta_theta": [round(float(v), 6) for v in delta_theta],
+            "l2_drift": round(l2_drift, 6),
+            "cosine_similarity": round(cosine_similarity, 6),
+            "selections_a": sel_a,
+            "selections_b": sel_b,
+            "delta_selections": sel_b - sel_a,
+            "rewards_a": round(rew_a, 6),
+            "rewards_b": round(rew_b, 6),
+            "delta_rewards": round(rew_b - rew_a, 6),
+            "mean_reward_a": round(mean_rew_a, 6),
+            "mean_reward_b": round(mean_rew_b, 6),
+            "delta_mean_reward": round(mean_rew_b - mean_rew_a, 6),
+        }
+
+    l2_drifts = [data["l2_drift"] for data in arms_drift.values()]
+    max_l2_drift = max(l2_drifts) if l2_drifts else 0.0
+    mean_l2_drift = float(np.mean(l2_drifts)) if l2_drifts else 0.0
+
+    dom_a = max(
+        bandit_a.arms, key=lambda a: (int(state_a["arms"][a]["selections"]), a)
+    )
+    dom_b = max(
+        bandit_b.arms, key=lambda a: (int(state_b["arms"][a]["selections"]), a)
+    )
+
+    has_drift = max_l2_drift > 1e-6 or any(
+        data["delta_selections"] != 0 for data in arms_drift.values()
+    )
+
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "summary": {
+            "max_l2_drift": round(max_l2_drift, 6),
+            "mean_l2_drift": round(mean_l2_drift, 6),
+            "dominant_arm_a": dom_a,
+            "dominant_arm_b": dom_b,
+            "dominant_arm_changed": dom_a != dom_b,
+            "has_drift": bool(has_drift),
+        },
+        "arms": arms_drift,
+    }
+
+
+def save_bandit_snapshot(
+    state: dict[str, Any],
+    snapshot_dir: Path | str = BANDIT_SNAPSHOTS_DIR,
+    *,
+    label: str | None = None,
+) -> Path:
+    """Save a timestamped snapshot of a bandit engine state."""
+    LinUCBContextualBandit.from_state(state)
+    target_dir = Path(snapshot_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    if label and label.strip():
+        clean_label = "".join(
+            c if c.isalnum() or c in ("-", "_") else "_" for c in label.strip()
+        )
+        filename = f"bandit_state_{timestamp}_{clean_label}.json"
+    else:
+        clean_label = None
+        filename = f"bandit_state_{timestamp}.json"
+
+    snapshot_path = target_dir / filename
+    state_to_write = json.loads(json.dumps(state))
+    state_to_write["snapshot"] = {
+        "created_at": datetime.now(UTC).isoformat(),
+        "label": clean_label,
+        "filename": filename,
+    }
+    snapshot_path.write_text(
+        json.dumps(state_to_write, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return snapshot_path
+
+
+def list_bandit_snapshots(
+    snapshot_dir: Path | str = BANDIT_SNAPSHOTS_DIR,
+) -> list[dict[str, Any]]:
+    """List persisted bandit state snapshots sorted newest first."""
+    target_dir = Path(snapshot_dir)
+    if not target_dir.exists():
+        return []
+    snapshots: list[dict[str, Any]] = []
+    for path in sorted(target_dir.glob("bandit_state_*.json")):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+            if (
+                not isinstance(state, dict)
+                or "arms" not in state
+                or "config" not in state
+            ):
+                continue
+            snapshot_meta = state.get("snapshot", {})
+            total_selections = sum(
+                int(arm_data.get("selections", 0))
+                for arm_data in state["arms"].values()
+                if isinstance(arm_data, dict)
+            )
+            created_at = (
+                snapshot_meta.get("created_at") or state.get("generated_at") or ""
+            )
+            label = snapshot_meta.get("label")
+            snapshots.append(
+                {
+                    "filename": path.name,
+                    "path": str(path.resolve()),
+                    "created_at": created_at,
+                    "label": label,
+                    "arms": list(state["config"].get("arms", [])),
+                    "context_dim": state["config"].get("context_dim"),
+                    "total_selections": total_selections,
+                }
+            )
+        except (OSError, ValueError):
+            continue
+    snapshots.sort(key=lambda s: s["filename"], reverse=True)
+    return snapshots
+
+
+def load_bandit_snapshot(snapshot_path: Path | str) -> dict[str, Any]:
+    """Load and validate a persisted bandit state snapshot."""
+    return load_bandit_state(snapshot_path)
+
+
+def restore_bandit_snapshot(
+    snapshot_path: Path | str,
+    target_state_path: Path | str = BANDIT_STATE_PATH,
+) -> Path:
+    """Restore a saved snapshot into the active bandit state path."""
+    state = load_bandit_snapshot(snapshot_path)
+    target = Path(target_state_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(state, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return target
+
+
+def prune_bandit_snapshots(
+    snapshot_dir: Path | str = BANDIT_SNAPSHOTS_DIR,
+    max_keep: int = 10,
+) -> list[Path]:
+    """Prune older snapshots in snapshot_dir, keeping the max_keep newest.
+
+    Returns the list of deleted snapshot paths.
+    """
+    if type(max_keep) is not int or max_keep < 1:
+        raise ValueError("max_keep must be a positive integer.")
+    target_dir = Path(snapshot_dir)
+    if not target_dir.exists():
+        return []
+    existing = sorted(target_dir.glob("bandit_state_*.json"))
+    if len(existing) <= max_keep:
+        return []
+    excess = existing[:-max_keep]
+    deleted: list[Path] = []
+    for path in excess:
+        try:
+            path.unlink()
+            deleted.append(path)
+        except OSError:
+            continue
+    return deleted
 
 
 def validate_state_context_features(
