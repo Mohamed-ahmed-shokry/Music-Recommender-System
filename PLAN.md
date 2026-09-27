@@ -3,7 +3,43 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.25.0) — shipped
+## Current milestone (0.26.0) — in progress
+
+Automated online bandit sweeping, state snapshotting, and policy drift
+tracking. Live serving appends feedback to the journal, but folding still
+requires manual operator intervention via `bandit-update` or `POST /bandit/update`.
+Furthermore, `bandit_state.json` is updated in place with no historical audit
+trail, snapshot retention, or parameter drift tracking. This milestone delivers:
+1. Automated online sweeping: configurable auto-sweep threshold in the service
+   (`auto_sweep_threshold`) that folds pending feedback automatically during serving
+   when pending count reaches the threshold, plus a daemon/worker CLI command
+   (`bandit-sweep --loop --interval`).
+2. Bandit state snapshotting: timestamped snapshots (`save_bandit_snapshot`,
+   `list_bandit_snapshots`, `load_bandit_snapshot`, `restore_bandit_snapshot`,
+   `prune_bandit_snapshots`) stored in `reports/bandit_snapshots/`.
+3. Policy parameter drift tracking: `compute_bandit_drift` measuring ridge
+   coefficient drift ($\Delta \theta$, $L_2$ norm, cosine similarity), selection
+   growth, reward changes, and dominant arm shifts between any two states or snapshots.
+4. End-to-end integration: CLI commands (`bandit-snapshot`, `bandit-drift`,
+   `bandit-sweep`), API endpoints (`GET /bandit/snapshots`, `POST /bandit/snapshots`,
+   `GET /bandit/drift`), and Streamlit dashboard controls on the Cold-Start Bandit tab.
+
+- Phase 112 — Bandit state snapshotting & drift engine: `compute_arm_thetas`,
+  `compute_bandit_drift`, `save_bandit_snapshot`, `list_bandit_snapshots`,
+  `load_bandit_snapshot`, `restore_bandit_snapshot`, `prune_bandit_snapshots`
+  in `bandit.py`.
+- Phase 113 — Service auto-sweep & snapshot integration: `auto_sweep_threshold`
+  in `RecommenderService`, automatic sweep execution in `recommend_user`,
+  snapshot/drift methods, and metadata/status exposure.
+- Phase 114 — CLI commands: `bandit-snapshot` (create/list/restore/prune),
+  `bandit-drift` (formatted drift table), and `bandit-sweep` (interval loop or threshold).
+- Phase 115 — API endpoints: `GET/POST /bandit/snapshots`, `GET /bandit/drift`,
+  and auto-sweep threshold reporting in `/bandit/status`.
+- Phase 116 — Dashboard: snapshot management and drift comparison view on the
+  Cold-Start Bandit tab.
+- Phase 117 — Docs and release: PLAN, README, CHANGELOG, version bump to 0.26.0.
+
+## Previous milestone (0.25.0) — shipped
 
 Configurable bandit context features. The cold-start bandit's context
 feature set is a hard-coded tuple (`DEFAULT_CONTEXT_FEATURES`) threaded through
