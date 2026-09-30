@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.27.0) — in progress
+## Previous milestone (0.27.0) — shipped
 
 Bandit Exponential Reward Discounting and Thompson Sampling Arm Policies.
 Over time, user tastes and song popularity shift, causing early cold-start
@@ -20,34 +20,22 @@ arms once estimates stabilize. This milestone introduces:
 4. Comprehensive CLI, service, API, and dashboard policy controls.
 
 - Phase 118 — Discounted fold engine & Thompson Sampling implementation:
-  - Add `ThompsonSamplingContextualBandit` alongside `LinUCBContextualBandit` with shared interface.
-  - Add recency discounting factor $\gamma \in (0, 1]$ to bandit updates, `fold_bandit_state`, and `sweep_bandit_journal`.
-  - Add exploration cooling schedule $\alpha(t) = \alpha_0 / (1 + \lambda t)$ with parameter $\lambda \ge 0$.
-  - Update `simulate_cold_start_exploration` with policy type, discount factor, and decay schedule options.
-  - Acceptance criteria: unit tests verifying sampling variance, discount decay mathematics, dynamic alpha cooling, and state serialization.
+  `ThompsonSamplingContextualBandit` alongside `LinUCBContextualBandit`,
+  exponential recency discounting factor $\gamma \in (0, 1]$, dynamic alpha cooling schedule.
 - Phase 119 — Service policy configuration and dynamic exploration scheduling:
-  - Add `bandit_policy_type`, `bandit_alpha_decay`, and `bandit_gamma` to `RecommenderService` and `config.py`.
-  - Support recency-weighted sweeps via `sweep_bandit_feedback(gamma=...)`.
-  - Expose policy parameters and schedule status in `bandit_status()` and `metadata()`.
-  - Acceptance criteria: service lifecycle correctly tracks and surfaces policy parameters, handles environment overrides, and applies gamma during feedback folding.
+  `bandit_policy_type`, `bandit_alpha_decay`, `bandit_gamma` in `RecommenderService`,
+  recency-weighted feedback sweeps, and policy parameter exposure in `bandit_status()`.
 - Phase 120 — CLI tooling for decay tuning and policy evaluation:
-  - Add `--policy-type`, `--alpha-decay`, and `--gamma` flags to `simulate-bandit`.
-  - Add `--gamma` flag to `bandit-update` and `bandit-sweep`.
-  - Display policy type and decay parameters in `bandit-status`.
-  - Acceptance criteria: CLI commands accept and validate new parameters, render updated status outputs, and fail cleanly on invalid arguments.
+  `--policy-type`, `--alpha-decay`, and `--gamma` in `simulate-bandit`, `--gamma` in
+  `bandit-update` and `bandit-sweep`, policy model display in `bandit-status`.
 - Phase 121 — API endpoints and request-level policy selection:
-  - Expose `policy_type`, `alpha_decay`, and `gamma` in `GET /bandit/status`.
-  - Accept optional `gamma` in `POST /bandit/update` payload.
-  - Support optional bandit policy selection in cold-start serving.
-  - Acceptance criteria: FastAPI schemas validate parameters, endpoints return correct policy metadata, and rejection of invalid values returns 422.
+  `policy_type`, `alpha_decay`, and `gamma` exposed in `GET /bandit/status`,
+  `POST /bandit/update` payload accepts optional `gamma`.
 - Phase 122 — Dashboard policy switching and recency-weighted reward visualization:
-  - Add policy selection, exploration decay, and gamma discount controls to Cold-Start Bandit tab.
-  - Display active policy model and dynamic alpha schedule in dashboard metrics.
-  - Acceptance criteria: Streamlit components render without errors and dispatch fold actions with configured gamma.
+  Cold-Start Bandit tab displays policy model and dynamic alpha schedule with interactive
+  `gamma` discount slider when folding.
 - Phase 123 — Documentation, testing, and 0.27.0 release:
-  - Full end-to-end test suite passes with zero regressions.
-  - Documentation updated across README.md, CHANGELOG.md, and pyproject.toml version bump to 0.27.0.
-  - Acceptance criteria: 100% test pass rate, clean lint and type checks, all acceptance criteria satisfied.
+  Full test suite pass, version bump to 0.27.0 in `pyproject.toml`, updated `README.md`, `CHANGELOG.md`, `PLAN.md`.
 
 ## Previous milestone (0.26.0) — shipped
 

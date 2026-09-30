@@ -7,6 +7,20 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-09-30
+
+### Added
+
+- Discounted fold engine & Thompson Sampling arm policies:
+  - Thompson Sampling contextual bandit policy (`ThompsonSamplingContextualBandit` extending `BaseContextualBandit`) alongside `LinUCBContextualBandit` with Bayesian posterior sampling and seed reproducibility.
+  - Recency reward discounting factor $\gamma \in (0, 1]$ for exponential recency weighting ($A \leftarrow \gamma A + x x^T$, $b \leftarrow \gamma b + r x$) in bandit updates, `fold_bandit_state`, and `sweep_bandit_journal`.
+  - Dynamic exploration cooling schedule $\alpha(t) = \alpha_0 / (1 + \lambda t)$ with decay parameter $\lambda \ge 0$.
+  - Service configuration: `RecommenderService` supports `bandit_policy_type`, `bandit_alpha_decay`, and `bandit_gamma` settings via constructor parameters and environment variables (`MUSIC_RECOMMENDER_BANDIT_POLICY_TYPE`, `MUSIC_RECOMMENDER_BANDIT_ALPHA_DECAY`, `MUSIC_RECOMMENDER_BANDIT_GAMMA`).
+  - Recency-weighted sweeps: `sweep_bandit_feedback` and auto-sweeps pass configured $\gamma$ to feedback folding.
+  - CLI tooling: `simulate-bandit` supports `--policy-type`, `--alpha-decay`, and `--gamma`; `bandit-update` and `bandit-sweep` accept `--gamma`; `bandit-status` displays policy model and decay schedule metrics.
+  - API endpoints: `GET /bandit/status` exposes `policy_type`, `alpha_decay`, and `gamma`; `POST /bandit/update` accepts optional `gamma` parameter.
+  - Dashboard integration: Cold-Start Bandit tab displays policy model, dynamic alpha schedule, and includes interactive gamma discount control for feedback folding.
+
 ## [0.26.0] - 2026-09-27
 
 ### Added

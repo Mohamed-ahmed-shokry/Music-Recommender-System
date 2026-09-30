@@ -582,7 +582,9 @@ def test_dashboard_bandit_tab_handles_missing_state() -> None:
 
 def test_dashboard_bandit_tab_surfaces_fold_errors() -> None:
     class FailingSweepService(FakeDashboardService):
-        def sweep_bandit_feedback(self, gamma: float | None = None) -> dict[str, object]:
+        def sweep_bandit_feedback(
+            self, gamma: float | None = None
+        ) -> dict[str, object]:
             raise ValueError("Failed to parse bandit state")
 
     app = AppTest.from_function(

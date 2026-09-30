@@ -1676,4 +1676,3 @@ def test_bandit_update_route_rejects_out_of_range_gamma() -> None:
         response = client.post("/bandit/update", json={"gamma": 1.5})
 
     assert response.status_code == 422
-

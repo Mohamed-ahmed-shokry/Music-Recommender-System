@@ -2561,7 +2561,6 @@ def test_bandit_sweep_cli(tmp_path: Path) -> None:
 
 
 def test_simulate_bandit_cli_with_policy_and_decay(tmp_path: Path) -> None:
-    report_file = tmp_path / "report.json"
     state_file = tmp_path / "bandit_state.json"
     result = runner.invoke(
         cli.app,
@@ -2584,7 +2583,10 @@ def test_simulate_bandit_cli_with_policy_and_decay(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0
-    assert "Cold-start exploration bandit simulation (policy=thompson_sampling" in result.output
+    assert (
+        "Cold-start exploration bandit simulation (policy=thompson_sampling"
+        in result.output
+    )
 
     res_status = runner.invoke(
         cli.app,
@@ -2661,5 +2663,3 @@ def test_bandit_sweep_cli_with_gamma(tmp_path: Path) -> None:
     )
     assert res.exit_code == 0
     assert "gamma=0.85" in res.output
-
-

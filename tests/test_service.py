@@ -1558,5 +1558,3 @@ def test_service_sweep_bandit_feedback_with_gamma(tmp_path: Path) -> None:
         feedback_journal_path=journal,
     )
     assert status["journal"]["pending"] == 0
-
-

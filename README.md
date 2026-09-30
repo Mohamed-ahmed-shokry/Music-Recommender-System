@@ -601,16 +601,17 @@ strategy should serve new users (LinUCB contextual multi-armed bandit):
 ```bash
 uv run python -m music_recommender.cli simulate-bandit --top-k 10 --rounds 100
 uv run python -m music_recommender.cli simulate-bandit --top-k 10 --rounds 100 \
-  --arms popular,balanced,long_tail --holdout-ratio 0.25 --alpha 1.0
+  --policy-type thompson_sampling --alpha 1.0 --alpha-decay 0.01 --gamma 0.95 \
+  --arms popular,balanced,long_tail --holdout-ratio 0.25
 ```
 
 `simulate-bandit` splits users into warm/cold pools, learns catalog popularity from
 the warm pool, and per round serves top-k artists to a cold-start user using the
-bandit's chosen strategy, rewarded by precision@k against the user's held-out
-engagements. It prints per-arm selection and reward tables alongside cumulative
-reward, regret, and the always-popular control (the current production fallback),
-persisting results to `reports/bandit_simulation.json` (override with `--report-dir`
-or `--report-name`).
+bandit's chosen strategy (LinUCB or Thompson Sampling with dynamic exploration cooling),
+rewarded by precision@k against the user's held-out engagements. It prints per-arm selection
+and reward tables alongside cumulative reward, regret, and the always-popular control (the
+current production fallback), persisting results to `reports/bandit_simulation.json` (override
+with `--report-dir` or `--report-name`).
 
 Turn a bandit simulation into a live serving policy and serve unknown users by it:
 
@@ -629,25 +630,25 @@ preserved. Pass `--cold-start-policy-path` to serve with an explicit policy file
 
 ### Online bandit feedback loop
 
-The LinUCB engine's learned state is a persisted, mergeable prior, so live
-feedback keeps accumulating across runs:
+The contextual bandit engine's learned state is a persisted, mergeable prior, so live
+feedback keeps accumulating across runs with customizable recency discounting ($\gamma$):
 
 ```bash
 # persist the trained engine state alongside the report
 uv run python -m music_recommender.cli simulate-bandit --top-k 10 --rounds 100 \
-  --alpha 0.5 --write-state reports/bandit_state.json
+  --policy-type thompson_sampling --alpha 0.5 --write-state reports/bandit_state.json
 
 # resume a later simulation from accumulated experience
 uv run python -m music_recommender.cli simulate-bandit --top-k 10 --rounds 100 \
-  --alpha 0.5 --from-state reports/bandit_state.json
+  --policy-type thompson_sampling --alpha 0.5 --from-state reports/bandit_state.json
 
 # record the reward observed for a served request that used the bandit
 uv run python -m music_recommender.cli record-bandit-feedback \
   --context 0.72,0.10,0.18 --arm popular --reward 0.5 --user-id new_user
 
-# fold live feedback (or an offline report) into the prior for the next run
+# fold live feedback into the prior with gamma discount factor (e.g. gamma=0.9)
 uv run python -m music_recommender.cli bandit-update \
-  --state-path reports/bandit_state.json --journal-path reports/bandit_feedback.json
+  --state-path reports/bandit_state.json --journal-path reports/bandit_feedback.json --gamma 0.9
 ```
 
 `simulate-bandit --write-state` writes `reports/bandit_state.json` by default and
@@ -1542,6 +1543,11 @@ See [PLAN.md](PLAN.md) for the full phased plan.
   worker; timestamped snapshot management (`bandit-snapshot`, `reports/bandit_snapshots/`,
   `GET/POST /bandit/snapshots`); and Ridge regression parameter drift tracking
   (`bandit-drift`, `GET /bandit/drift`, dashboard drift view). ✓ (0.26.0)
+- Bandit Exponential Reward Discounting and Thompson Sampling Arm Policies:
+  `ThompsonSamplingContextualBandit` alongside `LinUCBContextualBandit`,
+  exponential recency reward discounting ($\gamma \in (0, 1]$), dynamic exploration cooling
+  schedules ($\alpha(t) = \alpha_0 / (1 + \lambda t)$), and comprehensive CLI, service, API,
+  and dashboard policy controls. ✓ (0.27.0)
 - Next: exponential reward discounting / recency weighting, Thompson Sampling
   contextual bandit exploration policy, and dynamic temperature annealing.
 - Deferred: two-tower neural candidate retrieval (PyTorch / ONNX runtime) until

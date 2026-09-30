@@ -703,7 +703,10 @@ class TestCLISimulateBandit:
         )
 
         assert result.exit_code == 0
-        assert "Cold-start exploration bandit simulation (top_k=5):" in result.output
+        assert (
+            "Cold-start exploration bandit simulation (policy=linucb, top_k=5):"
+            in result.output
+        )
         assert "Selected" in result.output
         assert "Mean Reward" in result.output
         assert "Bandit simulation report written to:" in result.output
@@ -2014,23 +2017,25 @@ class TestThompsonSamplingContextualBandit:
 
 class TestExponentialDiscountAndCooling:
     def test_alpha_decay_cooling(self) -> None:
-        bandit = LinUCBContextualBandit(("popular", "balanced"), 2, alpha=2.0, alpha_decay=0.1)
+        bandit = LinUCBContextualBandit(
+            ("popular", "balanced"), 2, alpha=2.0, alpha_decay=0.1
+        )
         assert bandit.effective_alpha == pytest.approx(2.0)
         bandit.update("popular", [1.0, 0.0], 1.0)
         bandit.update("balanced", [0.0, 1.0], 0.5)
-        # total_selections = 2 => effective_alpha = 2.0 / (1.0 + 0.1 * 2) = 2.0 / 1.2 = 1.6666...
+        # total_selections = 2 => effective_alpha = 2.0 / (1.0 + 0.1 * 2) = 1.6666...
         assert bandit.effective_alpha == pytest.approx(2.0 / 1.2)
 
     def test_gamma_recency_discount_math(self) -> None:
         bandit = LinUCBContextualBandit(("popular", "balanced"), 2)
         context = [1.0, 0.0]
         bandit.update("popular", context, 1.0, gamma=0.5)
-        # Initially: A = I, b = 0 -> after 1st update with gamma=0.5: A = 0.5*I + [[1, 0], [0, 0]] = [[1.5, 0], [0, 0.5]], b = 0.5*0 + [1, 0] = [1.0, 0.0]
+        # 1st update with gamma=0.5: A = 0.5*I + xx^T = [[1.5, 0], [0, 0.5]]
         np.testing.assert_allclose(bandit._a["popular"], [[1.5, 0.0], [0.0, 0.5]])
         np.testing.assert_allclose(bandit._b["popular"], [1.0, 0.0])
 
         bandit.update("popular", context, 2.0, gamma=0.5)
-        # 2nd update: A = 0.5*[[1.5, 0], [0, 0.5]] + [[1, 0], [0, 0]] = [[1.75, 0], [0, 0.25]]
+        # 2nd update: A = 0.5*[[1.5, 0], [0, 0.5]] + xx^T = [[1.75, 0], [0, 0.25]]
         # b = 0.5*[1, 0] + 2*[1, 0] = [2.5, 0.0]
         np.testing.assert_allclose(bandit._a["popular"], [[1.75, 0.0], [0.0, 0.25]])
         np.testing.assert_allclose(bandit._b["popular"], [2.5, 0.0])
@@ -2049,7 +2054,9 @@ class TestExponentialDiscountAndCooling:
             {"arm": "popular", "context": [1.0, 0.0], "reward": 1.0},
         ]
         folded = fold_bandit_state(state, records, gamma=0.8)
-        np.testing.assert_allclose(folded["arms"]["popular"]["a"], [[1.8, 0.0], [0.0, 0.8]])
+        np.testing.assert_allclose(
+            folded["arms"]["popular"]["a"], [[1.8, 0.0], [0.0, 0.8]]
+        )
 
     def test_sweep_journal_with_gamma(self) -> None:
         bandit = LinUCBContextualBandit(("popular", "balanced"), 2)
@@ -2078,4 +2085,3 @@ class TestPhase118Simulation:
         assert res["config"]["alpha_decay"] == 0.05
         assert res["config"]["gamma"] == 0.9
         assert "regret" in res["summary"]
-

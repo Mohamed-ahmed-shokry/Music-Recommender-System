@@ -818,12 +818,14 @@ def _render_bandit_tab(service: RecommenderService) -> None:
             value=float(status.get("gamma", 1.0)),
             step=0.05,
             key="bandit_gamma_slider",
-            help="Weight given to previous statistics during fold (A -> gamma*A + x x^T).",
+            help="Weight given to prior statistics during fold (gamma * A + x x^T).",
         )
     with fold_col2:
         st.write("")
         st.write("")
-        fold_clicked = st.button("Fold pending feedback", type="primary", key="fold_bandit_feedback_btn")
+        fold_clicked = st.button(
+            "Fold pending feedback", type="primary", key="fold_bandit_feedback_btn"
+        )
 
     if fold_clicked:
         try:
@@ -853,9 +855,7 @@ def _render_bandit_tab(service: RecommenderService) -> None:
     with snap_col2:
         st.write("")
         st.write("")
-        create_snap_clicked = st.button(
-            "Create Snapshot", key="create_bandit_snapshot"
-        )
+        create_snap_clicked = st.button("Create Snapshot", key="create_bandit_snapshot")
 
     if create_snap_clicked:
         try:
@@ -928,9 +928,7 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                         arm_drift_rows.append(
                             {
                                 "Arm": arm,
-                                "L2 Drift": round(
-                                    float(arm_data["theta_l2_drift"]), 4
-                                ),
+                                "L2 Drift": round(float(arm_data["theta_l2_drift"]), 4),
                                 "Cosine Sim": (
                                     round(float(cos_sim), 4)
                                     if cos_sim is not None

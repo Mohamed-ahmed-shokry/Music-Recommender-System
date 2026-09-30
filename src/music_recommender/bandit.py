@@ -294,7 +294,7 @@ class BaseContextualBandit:
         *,
         gamma: float = 1.0,
     ) -> None:
-        """Update the selected arm's ridge statistics with an observed reward and decay."""
+        """Update selected arm ridge statistics with reward and decay."""
         _validate_arms([arm])
         if not np.isfinite(reward):
             raise ValueError("reward must be finite.")
@@ -317,7 +317,7 @@ class BaseContextualBandit:
         raise NotImplementedError
 
     @classmethod
-    def from_state(cls: type[T], state: dict[str, Any]) -> T:
+    def from_state(cls, state: dict[str, Any]) -> BaseContextualBandit:
         """Build an engine from a persisted bandit state snapshot."""
         if not isinstance(state, dict) or "config" not in state or "arms" not in state:
             raise ValueError("Bandit state must contain 'config' and 'arms' sections.")
@@ -351,7 +351,7 @@ class BaseContextualBandit:
             or float(alpha_decay_raw) < 0
         ):
             raise ValueError(
-                "Bandit state 'config.alpha_decay' must be a non-negative finite number."
+                "Bandit state 'config.alpha_decay' must be non-negative finite."
             )
         alpha_decay_value = float(alpha_decay_raw)
 
@@ -385,7 +385,7 @@ class BaseContextualBandit:
         _validate_arms([str(arm) for arm in arms])
 
         if cls is BaseContextualBandit:
-            target_cls: Any = (
+            target_cls: type[BaseContextualBandit] = (
                 ThompsonSamplingContextualBandit
                 if policy_type_raw == "thompson_sampling"
                 else LinUCBContextualBandit
@@ -464,7 +464,9 @@ class LinUCBContextualBandit(BaseContextualBandit):
         inv_matrix = np.linalg.inv(matrix)
         theta = inv_matrix @ self._b[arm]
         mean = float(context @ theta)
-        uncertainty = self.effective_alpha * float(np.sqrt(context @ inv_matrix @ context))
+        uncertainty = self.effective_alpha * float(
+            np.sqrt(context @ inv_matrix @ context)
+        )
         return float(np.clip(mean + uncertainty, -1e9, 1e9))
 
     def select_arm(self, context: Sequence[float]) -> str:
@@ -661,12 +663,8 @@ def compute_bandit_drift(
     max_l2_drift = max(l2_drifts) if l2_drifts else 0.0
     mean_l2_drift = float(np.mean(l2_drifts)) if l2_drifts else 0.0
 
-    dom_a = max(
-        bandit_a.arms, key=lambda a: (int(state_a["arms"][a]["selections"]), a)
-    )
-    dom_b = max(
-        bandit_b.arms, key=lambda a: (int(state_b["arms"][a]["selections"]), a)
-    )
+    dom_a = max(bandit_a.arms, key=lambda a: (int(state_a["arms"][a]["selections"]), a))
+    dom_b = max(bandit_b.arms, key=lambda a: (int(state_b["arms"][a]["selections"]), a))
 
     has_drift = max_l2_drift > 1e-6 or any(
         data["delta_selections"] != 0 for data in arms_drift.values()
@@ -1383,7 +1381,8 @@ def simulate_cold_start_exploration(
         raise ValueError("bootstrap_ratio must be between 0 and 1 exclusive.")
     if policy_type not in SUPPORTED_BANDIT_POLICIES:
         raise ValueError(
-            f"Unknown policy_type '{policy_type}'. Expected one of {SUPPORTED_BANDIT_POLICIES}."
+            f"Unknown policy_type '{policy_type}'. Expected one of "
+            f"{SUPPORTED_BANDIT_POLICIES}."
         )
     if not np.isfinite(alpha_decay) or alpha_decay < 0:
         raise ValueError("alpha_decay must be a non-negative finite number.")
