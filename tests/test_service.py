@@ -65,6 +65,9 @@ def create_service(
     ranking_config: dict[str, object] | None = None,
     ltr_model: object | None = None,
     auto_sweep_threshold: int | None = None,
+    bandit_policy_type: str | None = None,
+    bandit_alpha_decay: float | None = None,
+    bandit_gamma: float | None = None,
 ) -> RecommenderService:
     df = service_dataframe()
     mappings = create_id_mappings(df)
@@ -113,6 +116,9 @@ def create_service(
         artifact_path,
         cold_start_policy_path=None,
         auto_sweep_threshold=auto_sweep_threshold,
+        bandit_policy_type=bandit_policy_type,
+        bandit_alpha_decay=bandit_alpha_decay,
+        bandit_gamma=bandit_gamma,
     )
 
 
@@ -1488,4 +1494,69 @@ def test_service_bandit_snapshots_and_drift(
     # prune snapshots
     pruned = service.prune_bandit_snapshots(max_keep=1, snapshot_dir=snapshots_dir)
     assert len(pruned) == 0  # only 1 snapshot existed, none pruned
+
+
+def test_service_bandit_policy_params_init(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = create_service(tmp_path)
+    assert service.bandit_policy_type == "linucb"
+    assert service.bandit_alpha_decay == 0.0
+    assert service.bandit_gamma == 1.0
+
+    custom = create_service(
+        tmp_path,
+        bandit_policy_type="thompson_sampling",
+        bandit_alpha_decay=0.05,
+        bandit_gamma=0.9,
+    )
+    assert custom.bandit_policy_type == "thompson_sampling"
+    assert custom.bandit_alpha_decay == 0.05
+    assert custom.bandit_gamma == 0.9
+
+    with pytest.raises(ValueError, match="Unknown bandit_policy_type"):
+        create_service(tmp_path, bandit_policy_type="unknown")
+
+    with pytest.raises(ValueError, match="bandit_alpha_decay must be a non-negative"):
+        create_service(tmp_path, bandit_alpha_decay=-0.1)
+
+    with pytest.raises(ValueError, match="bandit_gamma must be in the range"):
+        create_service(tmp_path, bandit_gamma=1.5)
+
+    monkeypatch.setenv("MUSIC_RECOMMENDER_BANDIT_POLICY_TYPE", "thompson_sampling")
+    monkeypatch.setenv("MUSIC_RECOMMENDER_BANDIT_ALPHA_DECAY", "0.02")
+    monkeypatch.setenv("MUSIC_RECOMMENDER_BANDIT_GAMMA", "0.95")
+
+    env_service = create_service(tmp_path)
+    assert env_service.bandit_policy_type == "thompson_sampling"
+    assert env_service.bandit_alpha_decay == 0.02
+    assert env_service.bandit_gamma == 0.95
+
+
+def test_service_bandit_status_surfaces_policy_params(tmp_path: Path) -> None:
+    state_path = _write_test_state(tmp_path)
+    service = create_service(
+        tmp_path,
+        bandit_policy_type="thompson_sampling",
+        bandit_alpha_decay=0.01,
+        bandit_gamma=0.9,
+    )
+    status = service.bandit_status(state_path=state_path)
+    assert status["policy_type"] == "thompson_sampling"
+    assert status["alpha_decay"] == 0.01
+    assert status["gamma"] == 0.9
+
+
+def test_service_sweep_bandit_feedback_with_gamma(tmp_path: Path) -> None:
+    state_path = _write_test_state(tmp_path)
+    journal = tmp_path / "feedback.json"
+    _append_test_feedback(journal, count=2)
+
+    service = create_service(tmp_path, bandit_gamma=0.85)
+    status = service.sweep_bandit_feedback(
+        state_path=state_path,
+        feedback_journal_path=journal,
+    )
+    assert status["journal"]["pending"] == 0
+
 

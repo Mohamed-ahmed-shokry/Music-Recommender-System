@@ -27,6 +27,7 @@ from music_recommender.bandit import (
     resolve_context_features,
     restore_bandit_snapshot,
     save_bandit_snapshot,
+    SUPPORTED_BANDIT_POLICIES,
     summarize_bandit_lifecycle,
     sweep_bandit_journal,
     validate_serve_context,
@@ -35,14 +36,20 @@ from music_recommender.bandit import (
 from music_recommender.baselines import popular_artists
 from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
+    BANDIT_ALPHA_DECAY_ENV_VAR,
     BANDIT_AUTO_SWEEP_THRESHOLD_ENV_VAR,
     BANDIT_CONTEXT_FEATURES_PATH,
     BANDIT_FEEDBACK_PATH,
+    BANDIT_GAMMA_ENV_VAR,
+    BANDIT_POLICY_TYPE_ENV_VAR,
     BANDIT_SNAPSHOTS_DIR,
     BANDIT_STATE_PATH,
     COLD_START_POLICY_PATH,
     CONTEXT_FEATURES_ENV_VAR,
+    DEFAULT_BANDIT_ALPHA_DECAY,
     DEFAULT_BANDIT_AUTO_SWEEP_THRESHOLD,
+    DEFAULT_BANDIT_GAMMA,
+    DEFAULT_BANDIT_POLICY_TYPE,
     DEFAULT_CONTENT_WEIGHT,
     RAW_TRACK_DATA_PATH,
     RAW_TRACK_METADATA_PATH,
@@ -89,6 +96,9 @@ class RecommenderService:
         cold_start_policy: dict[str, float] | None = None,
         context_features: Sequence[str] | None = None,
         auto_sweep_threshold: int | None = None,
+        bandit_policy_type: str | None = None,
+        bandit_alpha_decay: float | None = None,
+        bandit_gamma: float | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -117,12 +127,74 @@ class RecommenderService:
             else:
                 self.auto_sweep_threshold = DEFAULT_BANDIT_AUTO_SWEEP_THRESHOLD
 
+        if bandit_policy_type is not None:
+            if bandit_policy_type not in SUPPORTED_BANDIT_POLICIES:
+                raise ValueError(
+                    f"Unknown bandit_policy_type '{bandit_policy_type}'. "
+                    f"Expected one of {SUPPORTED_BANDIT_POLICIES}."
+                )
+            self.bandit_policy_type = bandit_policy_type
+        else:
+            env_policy = os.getenv(BANDIT_POLICY_TYPE_ENV_VAR)
+            if env_policy is not None and env_policy.strip():
+                if env_policy.strip() not in SUPPORTED_BANDIT_POLICIES:
+                    raise ValueError(
+                        f"Environment variable {BANDIT_POLICY_TYPE_ENV_VAR} has "
+                        f"unknown value '{env_policy}'. Expected one of {SUPPORTED_BANDIT_POLICIES}."
+                    )
+                self.bandit_policy_type = env_policy.strip()
+            else:
+                self.bandit_policy_type = DEFAULT_BANDIT_POLICY_TYPE
+
+        if bandit_alpha_decay is not None:
+            if not np.isfinite(bandit_alpha_decay) or bandit_alpha_decay < 0:
+                raise ValueError("bandit_alpha_decay must be a non-negative finite number.")
+            self.bandit_alpha_decay = float(bandit_alpha_decay)
+        else:
+            env_decay = os.getenv(BANDIT_ALPHA_DECAY_ENV_VAR)
+            if env_decay is not None and env_decay.strip():
+                try:
+                    parsed_decay = float(env_decay.strip())
+                    if not np.isfinite(parsed_decay) or parsed_decay < 0:
+                        raise ValueError
+                    self.bandit_alpha_decay = parsed_decay
+                except ValueError as error:
+                    raise ValueError(
+                        f"Environment variable {BANDIT_ALPHA_DECAY_ENV_VAR} "
+                        f"must be a non-negative finite number, got '{env_decay}'."
+                    ) from error
+            else:
+                self.bandit_alpha_decay = DEFAULT_BANDIT_ALPHA_DECAY
+
+        if bandit_gamma is not None:
+            if not np.isfinite(bandit_gamma) or bandit_gamma <= 0.0 or bandit_gamma > 1.0:
+                raise ValueError(f"bandit_gamma must be in the range (0, 1], got {bandit_gamma}.")
+            self.bandit_gamma = float(bandit_gamma)
+        else:
+            env_gamma = os.getenv(BANDIT_GAMMA_ENV_VAR)
+            if env_gamma is not None and env_gamma.strip():
+                try:
+                    parsed_gamma = float(env_gamma.strip())
+                    if not np.isfinite(parsed_gamma) or parsed_gamma <= 0.0 or parsed_gamma > 1.0:
+                        raise ValueError
+                    self.bandit_gamma = parsed_gamma
+                except ValueError as error:
+                    raise ValueError(
+                        f"Environment variable {BANDIT_GAMMA_ENV_VAR} "
+                        f"must be a number in range (0, 1], got '{env_gamma}'."
+                    ) from error
+            else:
+                self.bandit_gamma = DEFAULT_BANDIT_GAMMA
+
     @classmethod
     def from_artifacts(
         cls,
         artifact_path: str | Path = ARTIFACT_BUNDLE_PATH,
         cold_start_policy_path: str | Path | None = COLD_START_POLICY_PATH,
         auto_sweep_threshold: int | None = None,
+        bandit_policy_type: str | None = None,
+        bandit_alpha_decay: float | None = None,
+        bandit_gamma: float | None = None,
     ) -> RecommenderService:
         """Load a service from a saved artifact bundle.
 
@@ -133,6 +205,9 @@ class RecommenderService:
         service = cls(
             load_artifact(artifact_path),
             auto_sweep_threshold=auto_sweep_threshold,
+            bandit_policy_type=bandit_policy_type,
+            bandit_alpha_decay=bandit_alpha_decay,
+            bandit_gamma=bandit_gamma,
         )
         if cold_start_policy_path is not None and Path(cold_start_policy_path).exists():
             service.cold_start_policy = load_cold_start_policy(cold_start_policy_path)
@@ -201,6 +276,9 @@ class RecommenderService:
             feedback=feedback,
         )
         status["auto_sweep_threshold"] = self.auto_sweep_threshold
+        status["policy_type"] = self.bandit_policy_type
+        status["alpha_decay"] = self.bandit_alpha_decay
+        status["gamma"] = self.bandit_gamma
         status["snapshots_count"] = len(self.list_bandit_snapshots())
         return status
 
@@ -210,6 +288,7 @@ class RecommenderService:
         state_path: str | Path | None = None,
         feedback_journal_path: str | Path | None = None,
         context_features: Sequence[str] | None = None,
+        gamma: float | None = None,
     ) -> dict[str, Any]:
         """Fold pending served feedback into the persisted bandit state.
 
@@ -230,7 +309,10 @@ class RecommenderService:
         if context_features is not None:
             validate_state_context_features(state, context_features)
         feedback = load_bandit_feedback(journal_path) if journal_path.exists() else []
-        updated, _ = sweep_bandit_journal(state, feedback)
+        effective_gamma = float(gamma) if gamma is not None else self.bandit_gamma
+        if not np.isfinite(effective_gamma) or effective_gamma <= 0.0 or effective_gamma > 1.0:
+            raise ValueError(f"gamma must be in the range (0, 1], got {effective_gamma}.")
+        updated, _ = sweep_bandit_journal(state, feedback, gamma=effective_gamma)
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(
             json.dumps(updated, indent=2, sort_keys=True) + "\n",
