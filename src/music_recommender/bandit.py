@@ -25,7 +25,7 @@ import json
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import numpy as np
 import pandas as pd
@@ -43,6 +43,8 @@ from music_recommender.ranking import validate_ranking_parameters
 
 DEFAULT_COLD_START_ARMS: tuple[str, ...] = ("popular", "balanced", "long_tail")
 DEFAULT_CONTEXT_FEATURES = ("log_plays", "log_unique_artists", "mean_popularity_rank")
+SUPPORTED_BANDIT_POLICIES: tuple[str, ...] = ("linucb", "thompson_sampling")
+DEFAULT_BANDIT_POLICY: str = "linucb"
 
 
 def _context_feature_log_plays(
@@ -222,14 +224,19 @@ def _arm_full_scores(
     return scores
 
 
-class LinUCBContextualBandit:
-    """Contextual multi-armed bandit using LinUCB (linear upper confidence bound).
+T = TypeVar("T", bound="BaseContextualBandit")
 
-    Each arm maintains a ridge regression over context features; at selection
-    time the arm with the highest upper confidence bound for the context is
-    chosen, balancing exploitation (point estimate) and exploration
-    (uncertainty term scaled by ``alpha``).
+
+class BaseContextualBandit:
+    """Base class for linear contextual multi-armed bandits.
+
+    Each arm maintains a regularized ridge regression over context features
+    (statistics ``A`` and ``b``) along with selection and cumulative reward tallies.
+    Subclasses implement arm selection strategies (e.g. LinUCB upper confidence
+    bounds or Thompson Sampling posterior sampling).
     """
+
+    policy_type: str = "linucb"
 
     def __init__(
         self,
@@ -237,13 +244,17 @@ class LinUCBContextualBandit:
         context_dim: int,
         *,
         alpha: float = 1.0,
+        alpha_decay: float = 0.0,
         context_features: Sequence[str] | None = None,
+        seed: int | None = None,
     ) -> None:
         _validate_arms(arms)
         if type(context_dim) is not int or context_dim < 1:
             raise ValueError("context_dim must be a positive integer.")
         if not np.isfinite(alpha) or alpha <= 0:
             raise ValueError("alpha must be a finite positive number.")
+        if not np.isfinite(alpha_decay) or alpha_decay < 0:
+            raise ValueError("alpha_decay must be a non-negative finite number.")
         if context_features is not None:
             resolved_features = validate_context_features(context_features)
             if len(resolved_features) != context_dim:
@@ -257,51 +268,56 @@ class LinUCBContextualBandit:
         self.arms = list(arms)
         self.context_dim = context_dim
         self.alpha = float(alpha)
+        self.alpha_decay = float(alpha_decay)
         self.context_features = resolved_features
         self._a = {arm: np.eye(context_dim) for arm in self.arms}
         self._b = {arm: np.zeros(context_dim) for arm in self.arms}
         self.selections = dict.fromkeys(self.arms, 0)
         self.rewards = dict.fromkeys(self.arms, 0.0)
+        self._rng = np.random.default_rng(seed)
 
-    def _arm_score(self, arm: str, context: np.ndarray) -> float:
-        matrix = self._a[arm]
-        inv_matrix = np.linalg.inv(matrix)
-        theta = inv_matrix @ self._b[arm]
-        mean = float(context @ theta)
-        uncertainty = self.alpha * float(np.sqrt(context @ inv_matrix @ context))
-        return float(np.clip(mean + uncertainty, -1e9, 1e9))
+    @property
+    def total_selections(self) -> int:
+        """Total number of selections made across all arms."""
+        return sum(self.selections.values())
 
-    def select_arm(self, context: Sequence[float]) -> str:
-        """Return the arm with the highest UCB for the given context."""
-        context_array = np.asarray(context, dtype=float)
-        if context_array.ndim != 1 or context_array.size != self.context_dim:
-            raise ValueError(
-                f"context must be a {self.context_dim}-dimensional vector."
-            )
-        best_arm = max(
-            self.arms,
-            key=lambda arm: (self._arm_score(arm, context_array), arm),
-        )
-        return best_arm
+    @property
+    def effective_alpha(self) -> float:
+        """Dynamic exploration cooling: alpha(t) = alpha / (1 + alpha_decay * t)."""
+        return float(self.alpha / (1.0 + self.alpha_decay * self.total_selections))
 
-    def update(self, arm: str, context: Sequence[float], reward: float) -> None:
-        """Update the selected arm's ridge regression with an observed reward."""
+    def update(
+        self,
+        arm: str,
+        context: Sequence[float],
+        reward: float,
+        *,
+        gamma: float = 1.0,
+    ) -> None:
+        """Update the selected arm's ridge statistics with an observed reward and decay."""
         _validate_arms([arm])
         if not np.isfinite(reward):
             raise ValueError("reward must be finite.")
+        if not np.isfinite(gamma) or gamma <= 0.0 or gamma > 1.0:
+            raise ValueError(f"gamma must be in the range (0, 1], got {gamma}.")
         context_array = np.asarray(context, dtype=float)
         if context_array.ndim != 1 or context_array.size != self.context_dim:
             raise ValueError(
                 f"context must be a {self.context_dim}-dimensional vector."
             )
 
-        self._a[arm] = self._a[arm] + np.outer(context_array, context_array)
-        self._b[arm] = self._b[arm] + reward * context_array
+        decay = float(gamma)
+        self._a[arm] = decay * self._a[arm] + np.outer(context_array, context_array)
+        self._b[arm] = decay * self._b[arm] + reward * context_array
         self.selections[arm] += 1
         self.rewards[arm] += float(reward)
 
+    def select_arm(self, context: Sequence[float]) -> str:
+        """Select an arm for the given context vector."""
+        raise NotImplementedError
+
     @classmethod
-    def from_state(cls, state: dict[str, Any]) -> LinUCBContextualBandit:
+    def from_state(cls: type[T], state: dict[str, Any]) -> T:
         """Build an engine from a persisted bandit state snapshot."""
         if not isinstance(state, dict) or "config" not in state or "arms" not in state:
             raise ValueError("Bandit state must contain 'config' and 'arms' sections.")
@@ -328,6 +344,24 @@ class LinUCBContextualBandit:
             )
         alpha_value = float(alpha)
 
+        alpha_decay_raw = config.get("alpha_decay", 0.0)
+        if (
+            not isinstance(alpha_decay_raw, (int, float))
+            or not np.isfinite(float(alpha_decay_raw))
+            or float(alpha_decay_raw) < 0
+        ):
+            raise ValueError(
+                "Bandit state 'config.alpha_decay' must be a non-negative finite number."
+            )
+        alpha_decay_value = float(alpha_decay_raw)
+
+        policy_type_raw = config.get("policy_type", "linucb")
+        if policy_type_raw not in SUPPORTED_BANDIT_POLICIES:
+            raise ValueError(
+                f"Unknown policy_type '{policy_type_raw}' in state config. "
+                f"Expected one of {SUPPORTED_BANDIT_POLICIES}."
+            )
+
         recorded_features = config.get("context_features")
         if recorded_features is not None:
             if (
@@ -349,10 +383,21 @@ class LinUCBContextualBandit:
             features = None
 
         _validate_arms([str(arm) for arm in arms])
-        bandit = cls(
+
+        if cls is BaseContextualBandit:
+            target_cls: Any = (
+                ThompsonSamplingContextualBandit
+                if policy_type_raw == "thompson_sampling"
+                else LinUCBContextualBandit
+            )
+        else:
+            target_cls = cls
+
+        bandit = target_cls(
             [str(arm) for arm in arms],
             context_dim,
             alpha=alpha_value,
+            alpha_decay=alpha_decay_value,
             context_features=features,
         )
 
@@ -403,12 +448,84 @@ class LinUCBContextualBandit:
         return bandit
 
 
-def snapshot_bandit_state(bandit: LinUCBContextualBandit) -> dict[str, Any]:
+class LinUCBContextualBandit(BaseContextualBandit):
+    """Contextual multi-armed bandit using LinUCB (linear upper confidence bound).
+
+    Each arm maintains a ridge regression over context features; at selection
+    time the arm with the highest upper confidence bound for the context is
+    chosen, balancing exploitation (point estimate) and exploration
+    (uncertainty term scaled by dynamic ``effective_alpha``).
+    """
+
+    policy_type = "linucb"
+
+    def _arm_score(self, arm: str, context: np.ndarray) -> float:
+        matrix = self._a[arm]
+        inv_matrix = np.linalg.inv(matrix)
+        theta = inv_matrix @ self._b[arm]
+        mean = float(context @ theta)
+        uncertainty = self.effective_alpha * float(np.sqrt(context @ inv_matrix @ context))
+        return float(np.clip(mean + uncertainty, -1e9, 1e9))
+
+    def select_arm(self, context: Sequence[float]) -> str:
+        """Return the arm with the highest UCB for the given context."""
+        context_array = np.asarray(context, dtype=float)
+        if context_array.ndim != 1 or context_array.size != self.context_dim:
+            raise ValueError(
+                f"context must be a {self.context_dim}-dimensional vector."
+            )
+        best_arm = max(
+            self.arms,
+            key=lambda arm: (self._arm_score(arm, context_array), arm),
+        )
+        return best_arm
+
+
+class ThompsonSamplingContextualBandit(BaseContextualBandit):
+    """Contextual multi-armed bandit using contextual Thompson Sampling.
+
+    For each arm, parameters are sampled from the posterior distribution
+    theta_a ~ N(A_a^{-1} b_a, v^2 A_a^{-1}), where v is scaled by the
+    effective exploration parameter. The arm with the highest sampled
+    expected reward x^T theta_a is selected.
+    """
+
+    policy_type = "thompson_sampling"
+
+    def select_arm(self, context: Sequence[float]) -> str:
+        """Return the arm with the highest sampled expected reward."""
+        context_array = np.asarray(context, dtype=float)
+        if context_array.ndim != 1 or context_array.size != self.context_dim:
+            raise ValueError(
+                f"context must be a {self.context_dim}-dimensional vector."
+            )
+        v = self.effective_alpha
+        sampled_scores: dict[str, float] = {}
+        for arm in self.arms:
+            matrix = self._a[arm]
+            inv_matrix = np.linalg.inv(matrix)
+            mu = inv_matrix @ self._b[arm]
+            cov = (v**2) * inv_matrix
+            cov = 0.5 * (cov + cov.T)
+            sampled_theta = self._rng.multivariate_normal(mu, cov)
+            score = float(np.clip(context_array @ sampled_theta, -1e9, 1e9))
+            sampled_scores[arm] = score
+
+        best_arm = max(
+            self.arms,
+            key=lambda arm: (sampled_scores[arm], arm),
+        )
+        return best_arm
+
+
+def snapshot_bandit_state(bandit: BaseContextualBandit) -> dict[str, Any]:
     """Serialize a bandit engine's learned state for persistence."""
     config: dict[str, Any] = {
+        "policy_type": bandit.policy_type,
         "arms": list(bandit.arms),
         "context_dim": bandit.context_dim,
         "alpha": bandit.alpha,
+        "alpha_decay": bandit.alpha_decay,
     }
     if bandit.context_features is not None:
         config["context_features"] = list(bandit.context_features)
@@ -457,13 +574,13 @@ def load_bandit_state(state_path: Path | str) -> dict[str, Any]:
         raise ValueError(
             f"'{path}' is not a valid bandit state (missing 'config' or 'arms')."
         )
-    LinUCBContextualBandit.from_state(state)
+    BaseContextualBandit.from_state(state)
     return state
 
 
 def compute_arm_thetas(state: dict[str, Any]) -> dict[str, list[float]]:
     """Compute ridge regression coefficients theta = A^{-1} b for each arm in state."""
-    LinUCBContextualBandit.from_state(state)
+    BaseContextualBandit.from_state(state)
     thetas: dict[str, list[float]] = {}
     for arm, arm_data in state["arms"].items():
         matrix_a = np.asarray(arm_data["a"], dtype=float)
@@ -484,8 +601,8 @@ def compute_bandit_drift(
     (comparison/current), quantifying parameter drift via L2 norm and cosine
     similarity.
     """
-    bandit_a = LinUCBContextualBandit.from_state(state_a)
-    bandit_b = LinUCBContextualBandit.from_state(state_b)
+    bandit_a = BaseContextualBandit.from_state(state_a)
+    bandit_b = BaseContextualBandit.from_state(state_b)
     if set(bandit_a.arms) != set(bandit_b.arms):
         raise ValueError(
             f"Cannot compute drift: state arms do not match ({bandit_a.arms} vs "
@@ -576,7 +693,8 @@ def save_bandit_snapshot(
     label: str | None = None,
 ) -> Path:
     """Save a timestamped snapshot of a bandit engine state."""
-    LinUCBContextualBandit.from_state(state)
+    BaseContextualBandit.from_state(state)
+
     target_dir = Path(snapshot_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -815,16 +933,20 @@ def load_bandit_feedback(path: Path | str) -> list[dict[str, Any]]:
 def fold_bandit_state(
     state: dict[str, Any],
     feedback: Sequence[dict[str, Any]],
+    *,
+    gamma: float = 1.0,
 ) -> dict[str, Any]:
     """Fold served-request observations into a bandit state, returning the update.
 
     Each feedback record is applied to the prior state by replaying the
-    engine's additive ridge-regression update (``A += x x^T``, ``b += r x``,
-    tally increments), exactly as a live run would have learned it. The
+    engine's additive ridge-regression update (``A = gamma * A + x x^T``,
+    ``b = gamma * b + r x``, tally increments), discounted by ``gamma``. The
     returned state reflects the accumulated experience and is ready to act as
     the next simulation's prior.
     """
-    bandit = LinUCBContextualBandit.from_state(state)
+    if not np.isfinite(gamma) or gamma <= 0.0 or gamma > 1.0:
+        raise ValueError(f"gamma must be in the range (0, 1], got {gamma}.")
+    bandit = BaseContextualBandit.from_state(state)
     for record in feedback:
         _validate_feedback_record(record)
         _validate_arms([str(record["arm"])])
@@ -845,6 +967,7 @@ def fold_bandit_state(
             str(record["arm"]),
             [float(value) for value in context],
             float(record["reward"]),
+            gamma=gamma,
         )
     return snapshot_bandit_state(bandit)
 
@@ -865,6 +988,8 @@ def _journal_fold_offset(state: dict[str, Any]) -> int:
 def sweep_bandit_journal(
     state: dict[str, Any],
     feedback: Sequence[dict[str, Any]],
+    *,
+    gamma: float = 1.0,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Fold only the pending records of a feedback journal into a bandit state.
 
@@ -873,7 +998,7 @@ def sweep_bandit_journal(
     folds only the records appended since the last one instead of double
     counting the whole journal. A journal that shrank below the recorded
     offset (e.g. it was reset) starts over from the top. Returns the updated
-    state together with a ``{"folded_count", "journal_length", "offset"}``
+    state together with a ``{"folded_count", "journal_length", "offset", "gamma"}``
     summary.
     """
     records = list(feedback)
@@ -881,13 +1006,14 @@ def sweep_bandit_journal(
     if len(records) < offset:
         offset = 0
     pending = records[offset:]
-    updated = fold_bandit_state(state, pending)
+    updated = fold_bandit_state(state, pending, gamma=gamma)
     updated["config"]["journal_fold_offset"] = len(records)
     updated["config"]["journal_folded_at"] = datetime.now(UTC).isoformat()
     return updated, {
         "folded_count": len(pending),
         "journal_length": len(records),
         "offset": len(records),
+        "gamma": gamma,
     }
 
 
@@ -938,13 +1064,18 @@ def summarize_bandit_lifecycle(
                 ),
             }
         config = state.get("config", {})
+        alpha_val = float(config.get("alpha", 1.0))
+        alpha_decay_val = float(config.get("alpha_decay", 0.0))
+        total_sel = sum(item["selections"] for item in arms_summary.values())
+        eff_alpha = float(alpha_val / (1.0 + alpha_decay_val * total_sel))
         state_summary = {
             "generated_at": str(state.get("generated_at", "")),
             "context_dim": int(config["context_dim"]),
-            "alpha": float(config["alpha"]),
-            "total_selections": sum(
-                item["selections"] for item in arms_summary.values()
-            ),
+            "alpha": alpha_val,
+            "alpha_decay": alpha_decay_val,
+            "effective_alpha": round(eff_alpha, 4),
+            "policy_type": str(config.get("policy_type", "linucb")),
+            "total_selections": total_sel,
             "arms": arms_summary,
         }
         if isinstance(config, dict) and "context_features" in config:
@@ -954,6 +1085,7 @@ def summarize_bandit_lifecycle(
                 "offset": int(config["journal_fold_offset"]),
                 "at": str(config["journal_folded_at"]),
             }
+
     records = list(feedback)
     return {
         "available": state is not None or policy is not None,
@@ -1215,18 +1347,21 @@ def simulate_cold_start_exploration(
     bootstrap_ratio: float = 0.5,
     arms: Sequence[str] = DEFAULT_COLD_START_ARMS,
     alpha: float = 1.0,
+    alpha_decay: float = 0.0,
+    gamma: float = 1.0,
+    policy_type: str = "linucb",
     context_features: Sequence[str] = DEFAULT_CONTEXT_FEATURES,
     initial_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Simulate an online LinUCB bandit serving cold-start users.
+    """Simulate an online contextual bandit serving cold-start users.
 
     Splits users into a warm pool (builds catalog popularity stats) and a held
     out ``rounds``-sized cold pool treated as new arrivals. Each cold user gets
     a bootstrap window (first ``bootstrap_ratio`` of their rows) used only for
     the context vector; the remaining rows are the engagement target. Per
-    round the bandit selects an arm for the user's context, serves top-k
-    artists, and receives a reward of ``precision@k`` against the target
-    artists.
+    round the bandit selects an arm for the user's context (via LinUCB or
+    Thompson Sampling), serves top-k artists, and receives a reward of
+    ``precision@k`` against the target artists.
 
     Alongside bandit learning, the always-popular policy (current production
     fallback) and the in-hindsight best arm per round are evaluated so regret
@@ -1246,6 +1381,14 @@ def simulate_cold_start_exploration(
         raise ValueError("holdout_ratio must be between 0 and 1 exclusive.")
     if not 0 < bootstrap_ratio < 1:
         raise ValueError("bootstrap_ratio must be between 0 and 1 exclusive.")
+    if policy_type not in SUPPORTED_BANDIT_POLICIES:
+        raise ValueError(
+            f"Unknown policy_type '{policy_type}'. Expected one of {SUPPORTED_BANDIT_POLICIES}."
+        )
+    if not np.isfinite(alpha_decay) or alpha_decay < 0:
+        raise ValueError("alpha_decay must be a non-negative finite number.")
+    if not np.isfinite(gamma) or gamma <= 0.0 or gamma > 1.0:
+        raise ValueError(f"gamma must be in the range (0, 1], got {gamma}.")
     resolved_context_features = validate_context_features(context_features)
 
     normalized = normalize_interactions(df)
@@ -1269,7 +1412,7 @@ def simulate_cold_start_exploration(
     }
 
     if initial_state is not None:
-        bandit = LinUCBContextualBandit.from_state(initial_state)
+        bandit = BaseContextualBandit.from_state(initial_state)
         if list(bandit.arms) != list(arms):
             raise ValueError(
                 "initial_state arms must match the simulation arms "
@@ -1281,14 +1424,26 @@ def simulate_cold_start_exploration(
             )
         if bandit.alpha != float(alpha):
             raise ValueError("initial_state alpha must match the simulation alpha.")
+        if bandit.policy_type != policy_type:
+            raise ValueError(
+                f"initial_state policy_type '{bandit.policy_type}' must match "
+                f"simulation policy_type '{policy_type}'."
+            )
         prior_selections = sum(bandit.selections.values())
         prior_rewards = sum(bandit.rewards.values())
     else:
-        bandit = LinUCBContextualBandit(
+        target_cls: Any = (
+            ThompsonSamplingContextualBandit
+            if policy_type == "thompson_sampling"
+            else LinUCBContextualBandit
+        )
+        bandit = target_cls(
             arms,
             len(resolved_context_features),
             alpha=alpha,
+            alpha_decay=alpha_decay,
             context_features=resolved_context_features,
+            seed=seed,
         )
         prior_selections = 0
         prior_rewards = 0.0
@@ -1316,7 +1471,7 @@ def simulate_cold_start_exploration(
         served = rank_cold_start_arm(chosen_arm, artist_stats, top_k)
         served_ids = [str(rec["artist_id"]) for rec in served]
         reward = precision_at_k(served_ids, target_artist_ids, top_k)
-        bandit.update(chosen_arm, context, reward)
+        bandit.update(chosen_arm, context, reward, gamma=gamma)
         cumulative_reward += reward
 
         best_reward = max(
@@ -1362,6 +1517,9 @@ def simulate_cold_start_exploration(
             "holdout_ratio": holdout_ratio,
             "bootstrap_ratio": bootstrap_ratio,
             "alpha": alpha,
+            "alpha_decay": alpha_decay,
+            "gamma": gamma,
+            "policy_type": policy_type,
             "arms": list(arms),
             "context_features": list(resolved_context_features),
             "catalog_size": len(artist_stats),

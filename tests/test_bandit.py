@@ -17,7 +17,9 @@ from music_recommender.bandit import (
     DEFAULT_COLD_START_ARMS,
     DEFAULT_CONTEXT_FEATURES,
     SUPPORTED_CONTEXT_FEATURES,
+    BaseContextualBandit,
     LinUCBContextualBandit,
+    ThompsonSamplingContextualBandit,
     append_bandit_feedback,
     build_cold_start_context,
     derive_cold_start_policy,
@@ -1968,3 +1970,112 @@ class TestValidateServeContext:
                 context=[1.0, 0.5, 0.2],
                 features=("log_plays", "mean_popularity_rank"),
             )
+
+
+class TestThompsonSamplingContextualBandit:
+    def test_select_and_update_arms(self) -> None:
+        bandit = ThompsonSamplingContextualBandit(
+            ("popular", "balanced", "long_tail"), 2, seed=42
+        )
+        context = [1.0, 0.5]
+        for _ in range(30):
+            arm = bandit.select_arm(context)
+            bandit.update(arm, context, 0.2)
+
+        assert set(bandit.selections) == set(DEFAULT_COLD_START_ARMS)
+        assert sum(bandit.selections.values()) == 30
+        assert sum(bandit.rewards.values()) == pytest.approx(6.0, abs=1e-6)
+
+    def test_reproducible_with_seed(self) -> None:
+        b1 = ThompsonSamplingContextualBandit(("popular", "balanced"), 2, seed=123)
+        b2 = ThompsonSamplingContextualBandit(("popular", "balanced"), 2, seed=123)
+        context = [0.8, -0.2]
+        selections1 = [b1.select_arm(context) for _ in range(10)]
+        selections2 = [b2.select_arm(context) for _ in range(10)]
+        assert selections1 == selections2
+
+    def test_state_serialization_roundtrip(self) -> None:
+        bandit = ThompsonSamplingContextualBandit(
+            ("popular", "balanced"), 2, alpha=1.5, alpha_decay=0.01, seed=7
+        )
+        context = [1.0, 2.0]
+        bandit.update("popular", context, 1.0)
+        state = snapshot_bandit_state(bandit)
+        assert state["config"]["policy_type"] == "thompson_sampling"
+        assert state["config"]["alpha_decay"] == 0.01
+
+        restored = BaseContextualBandit.from_state(state)
+        assert isinstance(restored, ThompsonSamplingContextualBandit)
+        assert restored.policy_type == "thompson_sampling"
+        assert restored.alpha == 1.5
+        assert restored.alpha_decay == 0.01
+        assert restored.selections["popular"] == 1
+
+
+class TestExponentialDiscountAndCooling:
+    def test_alpha_decay_cooling(self) -> None:
+        bandit = LinUCBContextualBandit(("popular", "balanced"), 2, alpha=2.0, alpha_decay=0.1)
+        assert bandit.effective_alpha == pytest.approx(2.0)
+        bandit.update("popular", [1.0, 0.0], 1.0)
+        bandit.update("balanced", [0.0, 1.0], 0.5)
+        # total_selections = 2 => effective_alpha = 2.0 / (1.0 + 0.1 * 2) = 2.0 / 1.2 = 1.6666...
+        assert bandit.effective_alpha == pytest.approx(2.0 / 1.2)
+
+    def test_gamma_recency_discount_math(self) -> None:
+        bandit = LinUCBContextualBandit(("popular", "balanced"), 2)
+        context = [1.0, 0.0]
+        bandit.update("popular", context, 1.0, gamma=0.5)
+        # Initially: A = I, b = 0 -> after 1st update with gamma=0.5: A = 0.5*I + [[1, 0], [0, 0]] = [[1.5, 0], [0, 0.5]], b = 0.5*0 + [1, 0] = [1.0, 0.0]
+        np.testing.assert_allclose(bandit._a["popular"], [[1.5, 0.0], [0.0, 0.5]])
+        np.testing.assert_allclose(bandit._b["popular"], [1.0, 0.0])
+
+        bandit.update("popular", context, 2.0, gamma=0.5)
+        # 2nd update: A = 0.5*[[1.5, 0], [0, 0.5]] + [[1, 0], [0, 0]] = [[1.75, 0], [0, 0.25]]
+        # b = 0.5*[1, 0] + 2*[1, 0] = [2.5, 0.0]
+        np.testing.assert_allclose(bandit._a["popular"], [[1.75, 0.0], [0.0, 0.25]])
+        np.testing.assert_allclose(bandit._b["popular"], [2.5, 0.0])
+
+    def test_invalid_gamma(self) -> None:
+        bandit = LinUCBContextualBandit(("popular", "balanced"), 2)
+        with pytest.raises(ValueError, match="gamma must be in the range"):
+            bandit.update("popular", [1.0, 0.0], 1.0, gamma=0.0)
+        with pytest.raises(ValueError, match="gamma must be in the range"):
+            bandit.update("popular", [1.0, 0.0], 1.0, gamma=1.5)
+
+    def test_fold_state_with_gamma(self) -> None:
+        bandit = LinUCBContextualBandit(("popular", "balanced"), 2)
+        state = snapshot_bandit_state(bandit)
+        records = [
+            {"arm": "popular", "context": [1.0, 0.0], "reward": 1.0},
+        ]
+        folded = fold_bandit_state(state, records, gamma=0.8)
+        np.testing.assert_allclose(folded["arms"]["popular"]["a"], [[1.8, 0.0], [0.0, 0.8]])
+
+    def test_sweep_journal_with_gamma(self) -> None:
+        bandit = LinUCBContextualBandit(("popular", "balanced"), 2)
+        state = snapshot_bandit_state(bandit)
+        records = [
+            {"arm": "popular", "context": [1.0, 0.0], "reward": 1.0},
+        ]
+        updated, summary = sweep_bandit_journal(state, records, gamma=0.9)
+        assert summary["gamma"] == 0.9
+        assert summary["folded_count"] == 1
+
+
+class TestPhase118Simulation:
+    def test_simulation_with_thompson_sampling_and_decay(self) -> None:
+        df = _interactions_df()
+        res = simulate_cold_start_exploration(
+            df,
+            5,
+            10,
+            policy_type="thompson_sampling",
+            alpha_decay=0.05,
+            gamma=0.9,
+            seed=42,
+        )
+        assert res["config"]["policy_type"] == "thompson_sampling"
+        assert res["config"]["alpha_decay"] == 0.05
+        assert res["config"]["gamma"] == 0.9
+        assert "regret" in res["summary"]
+
