@@ -508,6 +508,12 @@ class BanditUpdateRequest(BaseModel):
             "recorded set before folding."
         ),
     )
+    gamma: float | None = Field(
+        default=None,
+        gt=0.0,
+        le=1.0,
+        description="Optional recency discount factor gamma in range (0, 1].",
+    )
 
 
 @app.post("/bandit/update")
@@ -517,7 +523,8 @@ def bandit_update(
     """Fold pending served feedback into the persisted bandit state."""
     try:
         return get_service().sweep_bandit_feedback(
-            context_features=(payload.context_features if payload is not None else None)
+            context_features=(payload.context_features if payload is not None else None),
+            gamma=(payload.gamma if payload is not None else None),
         )
     except FileNotFoundError as error:
         raise HTTPException(

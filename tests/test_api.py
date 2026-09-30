@@ -90,15 +90,24 @@ class FakeService:
         }
 
     def sweep_bandit_feedback(
-        self, *, context_features: list[str] | None = None
+        self,
+        *,
+        context_features: list[str] | None = None,
+        gamma: float | None = None,
     ) -> dict[str, object]:
         self.last_sweep_called = True
+        self.last_gamma_passed = gamma
         if context_features is not None and context_features != self.context_features:
             raise ValueError(
                 f"Requested context features {context_features} do not match "
                 f"the state's recorded feature set {self.context_features}"
             )
-        return self.bandit_status()
+        if gamma is not None and (gamma <= 0.0 or gamma > 1.0):
+            raise ValueError(f"gamma must be in the range (0, 1], got {gamma}.")
+        status = self.bandit_status()
+        if gamma is not None:
+            status["gamma"] = gamma
+        return status
 
     def popular_artists(self, top_k: int) -> dict[str, object]:
         return {
@@ -851,7 +860,10 @@ def test_bandit_update_route_mismatched_context_features_is_unprocessable() -> N
 def test_bandit_update_route_missing_state_is_not_found() -> None:
     class NoStateService(FakeService):
         def sweep_bandit_feedback(
-            self, *, context_features: list[str] | None = None
+            self,
+            *,
+            context_features: list[str] | None = None,
+            gamma: float | None = None,
         ) -> dict[str, object]:
             raise FileNotFoundError("bandit_state.json")
 
@@ -868,7 +880,10 @@ def test_bandit_update_route_missing_state_is_not_found() -> None:
 def test_bandit_update_route_corrupt_state_is_unprocessable() -> None:
     class CorruptStateService(FakeService):
         def sweep_bandit_feedback(
-            self, *, context_features: list[str] | None = None
+            self,
+            *,
+            context_features: list[str] | None = None,
+            gamma: float | None = None,
         ) -> dict[str, object]:
             raise ValueError("Failed to parse bandit state")
 
@@ -1640,3 +1655,25 @@ def test_recommend_tracks_novelty_weight() -> None:
 
     assert response.status_code == 200
     assert response.json()["novelty_weight"] == 0.45
+
+
+def test_bandit_update_route_supports_gamma() -> None:
+    fake_service = FakeService()
+    with TestClient(api_main.app) as client:
+        api_main.service = fake_service
+        api_main.service_load_error = None
+        response = client.post("/bandit/update", json={"gamma": 0.85})
+
+    assert response.status_code == 200
+    assert fake_service.last_gamma_passed == 0.85
+    assert response.json()["gamma"] == 0.85
+
+
+def test_bandit_update_route_rejects_out_of_range_gamma() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+        response = client.post("/bandit/update", json={"gamma": 1.5})
+
+    assert response.status_code == 422
+
