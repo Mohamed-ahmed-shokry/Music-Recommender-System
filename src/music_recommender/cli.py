@@ -9,12 +9,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
 
+import numpy as np
 import typer
 
 from music_recommender import __version__
 from music_recommender.bandit import (
     DEFAULT_COLD_START_ARMS,
+    BaseContextualBandit,
     LinUCBContextualBandit,
+    ThompsonSamplingContextualBandit,
     append_bandit_feedback,
     compute_bandit_drift,
     derive_cold_start_policy,
@@ -2068,6 +2071,21 @@ def simulate_bandit(
     arms: str = ",".join(DEFAULT_COLD_START_ARMS),
     holdout_ratio: float = 0.25,
     alpha: float = 1.0,
+    policy_type: str = typer.Option(
+        "linucb",
+        "--policy-type",
+        help="Bandit policy algorithm: 'linucb' or 'thompson_sampling'.",
+    ),
+    alpha_decay: float = typer.Option(
+        0.0,
+        "--alpha-decay",
+        help="Exploration decay rate lambda >= 0 for alpha(t) = alpha / (1 + lambda * t).",
+    ),
+    gamma: float = typer.Option(
+        1.0,
+        "--gamma",
+        help="Recency discount factor gamma in range (0, 1].",
+    ),
     context_features: str | None = typer.Option(
         None,
         "--context-features",
@@ -2099,7 +2117,7 @@ def simulate_bandit(
         help="Path to persist the trained bandit state after the simulation.",
     ),
 ) -> None:
-    """Simulate a LinUCB cold-start exploration bandit against the current fallback."""
+    """Simulate a contextual cold-start exploration bandit against the current fallback."""
     resolved_report_dir = Path(report_dir) if report_dir is not None else REPORTS_DIR
     try:
         df = load_and_validate_interactions(RAW_DATA_PATH)
@@ -2129,6 +2147,9 @@ def simulate_bandit(
             arms=selected_arms,
             holdout_ratio=holdout_ratio,
             alpha=alpha,
+            alpha_decay=alpha_decay,
+            gamma=gamma,
+            policy_type=policy_type,
             context_features=resolved_features,
             initial_state=initial_state,
         )
@@ -2142,7 +2163,7 @@ def simulate_bandit(
             f"Resumed from a prior state ({prior['selections']} selections, "
             f"total reward {prior['total_reward']:.4f})."
         )
-    typer.echo(f"Cold-start exploration bandit simulation (top_k={top_k}):")
+    typer.echo(f"Cold-start exploration bandit simulation (policy={policy_type}, top_k={top_k}):")
     typer.echo(f"Context features: {', '.join(resolved_features)}")
     typer.echo(f"{'Arm':<12} {'Selected':>9} {'Cum. Reward':>12} {'Mean Reward':>12}")
     typer.echo("-" * 48)
@@ -2170,19 +2191,25 @@ def simulate_bandit(
     typer.echo(f"Bandit simulation report written to: {written}")
 
     if write_state is not None:
+        target_cls: Any = (
+            ThompsonSamplingContextualBandit
+            if policy_type == "thompson_sampling"
+            else LinUCBContextualBandit
+        )
         base_state = (
             initial_state
             if initial_state is not None
             else snapshot_bandit_state(
-                LinUCBContextualBandit(
+                target_cls(
                     selected_arms,
                     len(report["config"]["context_features"]),
                     alpha=report["config"]["alpha"],
+                    alpha_decay=alpha_decay,
                     context_features=report["config"]["context_features"],
                 )
             )
         )
-        trained = fold_bandit_state(base_state, feedback_from_report(report))
+        trained = fold_bandit_state(base_state, feedback_from_report(report), gamma=gamma)
         state_path = write_bandit_state(
             trained,
             Path(write_state).parent,
@@ -2264,6 +2291,11 @@ def bandit_update(
         "--output-state",
         help="Path to write the updated state (defaults to --state-path).",
     ),
+    gamma: float = typer.Option(
+        1.0,
+        "--gamma",
+        help="Recency discount factor gamma in range (0, 1].",
+    ),
     context_features: str | None = typer.Option(
         None,
         "--context-features",
@@ -2282,6 +2314,8 @@ def bandit_update(
     records.
     """
     try:
+        if not np.isfinite(gamma) or gamma <= 0.0 or gamma > 1.0:
+            raise ValueError(f"gamma must be in the range (0, 1], got {gamma}.")
         state = load_bandit_state(state_path)
         report = load_bandit_report(report_path) if report_path else None
 
@@ -2303,14 +2337,14 @@ def bandit_update(
 
         updated = state
         if report is not None:
-            updated = fold_bandit_state(updated, feedback_from_report(report))
+            updated = fold_bandit_state(updated, feedback_from_report(report), gamma=gamma)
 
         if journal.exists():
             updated, sweep = sweep_bandit_journal(
-                updated, load_bandit_feedback(journal)
+                updated, load_bandit_feedback(journal), gamma=gamma
             )
             typer.echo(
-                f"Folded {sweep['folded_count']} pending journal record(s); "
+                f"Folded {sweep['folded_count']} pending journal record(s) (gamma={gamma}); "
                 f"{sweep['journal_length'] - sweep['offset']} remain pending."
             )
 
@@ -2375,6 +2409,12 @@ def bandit_status(
     typer.echo("Cold-start bandit lifecycle:")
     if summary["available"]:
         typer.echo(f"State: available ({state_path_obj})")
+        st_info = summary["state"]
+        pol_type = st_info.get("policy_type", "linucb")
+        alpha_val = st_info.get("alpha", 1.0)
+        decay_val = st_info.get("alpha_decay", 0.0)
+        eff_alpha = st_info.get("effective_alpha", alpha_val)
+        typer.echo(f"Policy model: {pol_type} (alpha={alpha_val}, alpha_decay={decay_val}, effective_alpha={eff_alpha})")
     else:
         typer.echo("State: none (run simulate-bandit --write-state or bandit-update)")
     recorded_features = None
@@ -2689,6 +2729,11 @@ def bandit_sweep(
         "--loop",
         help="Run continuously as a daemon, sweeping pending feedback periodically.",
     ),
+    gamma: float = typer.Option(
+        1.0,
+        "--gamma",
+        help="Recency discount factor gamma in range (0, 1].",
+    ),
     snapshot_on_sweep: bool = typer.Option(
         False,
         "--snapshot-on-sweep",
@@ -2717,6 +2762,13 @@ def bandit_sweep(
             err=True,
         )
         raise typer.Exit(code=1)
+    if not np.isfinite(gamma) or gamma <= 0.0 or gamma > 1.0:
+        typer.secho(
+            f"Error: gamma must be in the range (0, 1], got {gamma}.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
 
     st_p = Path(state_path)
     j_p = Path(journal_path)
@@ -2730,13 +2782,13 @@ def bandit_sweep(
         pending = pending_feedback_count(state, feedback)
         if pending < threshold:
             return 0
-        updated, sweep = sweep_bandit_journal(state, feedback)
+        updated, sweep = sweep_bandit_journal(state, feedback, gamma=gamma)
         st_p.write_text(
             json.dumps(updated, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         typer.echo(
-            f"Folded {sweep['folded_count']} pending feedback record(s) into: {st_p}"
+            f"Folded {sweep['folded_count']} pending feedback record(s) (gamma={gamma}) into: {st_p}"
         )
         if snapshot_on_sweep:
             snap = save_bandit_snapshot(

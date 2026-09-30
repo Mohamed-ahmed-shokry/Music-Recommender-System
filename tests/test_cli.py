@@ -2559,3 +2559,107 @@ def test_bandit_sweep_cli(tmp_path: Path) -> None:
     assert res_invalid.exit_code == 1
     assert "must be a positive integer" in res_invalid.output
 
+
+def test_simulate_bandit_cli_with_policy_and_decay(tmp_path: Path) -> None:
+    report_file = tmp_path / "report.json"
+    state_file = tmp_path / "bandit_state.json"
+    result = runner.invoke(
+        cli.app,
+        [
+            "simulate-bandit",
+            "--rounds",
+            "5",
+            "--policy-type",
+            "thompson_sampling",
+            "--alpha-decay",
+            "0.05",
+            "--gamma",
+            "0.9",
+            "--report-dir",
+            str(tmp_path),
+            "--report-name",
+            "report",
+            "--write-state",
+            str(state_file),
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Cold-start exploration bandit simulation (policy=thompson_sampling" in result.output
+
+    res_status = runner.invoke(
+        cli.app,
+        ["bandit-status", "--state-path", str(state_file)],
+    )
+    assert res_status.exit_code == 0
+    assert "Policy model: thompson_sampling" in res_status.output
+    assert "alpha_decay=0.05" in res_status.output
+
+
+def test_bandit_update_cli_with_gamma(tmp_path: Path) -> None:
+    from music_recommender.bandit import (
+        LinUCBContextualBandit,
+        append_bandit_feedback,
+        snapshot_bandit_state,
+        write_bandit_state,
+    )
+
+    bandit = LinUCBContextualBandit(["popular", "balanced", "long_tail"], context_dim=3)
+    state = snapshot_bandit_state(bandit)
+    state_file = write_bandit_state(state, tmp_path, state_name="bandit_state")
+    journal = tmp_path / "feedback.json"
+    append_bandit_feedback(
+        {"arm": "popular", "context": [1.0, 0.0, 0.0], "reward": 1.0},
+        journal,
+    )
+
+    res = runner.invoke(
+        cli.app,
+        [
+            "bandit-update",
+            "--state-path",
+            str(state_file),
+            "--journal-path",
+            str(journal),
+            "--gamma",
+            "0.8",
+        ],
+    )
+    assert res.exit_code == 0
+    assert "gamma=0.8" in res.output
+
+
+def test_bandit_sweep_cli_with_gamma(tmp_path: Path) -> None:
+    from music_recommender.bandit import (
+        LinUCBContextualBandit,
+        append_bandit_feedback,
+        snapshot_bandit_state,
+        write_bandit_state,
+    )
+
+    bandit = LinUCBContextualBandit(["popular", "balanced", "long_tail"], context_dim=3)
+    state = snapshot_bandit_state(bandit)
+    state_file = write_bandit_state(state, tmp_path, state_name="bandit_state")
+    journal = tmp_path / "feedback.json"
+    append_bandit_feedback(
+        {"arm": "popular", "context": [1.0, 0.0, 0.0], "reward": 1.0},
+        journal,
+    )
+
+    res = runner.invoke(
+        cli.app,
+        [
+            "bandit-sweep",
+            "--state-path",
+            str(state_file),
+            "--journal-path",
+            str(journal),
+            "--threshold",
+            "1",
+            "--gamma",
+            "0.85",
+        ],
+    )
+    assert res.exit_code == 0
+    assert "gamma=0.85" in res.output
+
+
