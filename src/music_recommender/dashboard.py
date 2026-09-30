@@ -766,7 +766,8 @@ def _render_bandit_tab(service: RecommenderService) -> None:
         cols = st.columns(4)
         cols[0].metric("Arms", len(state["arms"]))
         cols[1].metric("Context dim", state["context_dim"])
-        cols[2].metric("Alpha", f"{state['alpha']:.2f}")
+        eff_alpha = state.get("effective_alpha", state.get("alpha", 1.0))
+        cols[2].metric("Alpha", f"{eff_alpha:.2f}")
         cols[3].metric("Total selections", state["total_selections"])
         st.dataframe(
             _bandit_arm_rows(status),
@@ -778,7 +779,12 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                 "Mean Reward": st.column_config.NumberColumn(format="%.4f"),
             },
         )
-        st.caption(f"State generated at {state['generated_at']}.")
+        st.caption(
+            f"Policy model: **{state.get('policy_type', 'linucb').upper()}** | "
+            f"Effective alpha: **{eff_alpha:.3f}** | "
+            f"State generated at {state['generated_at']} "
+            f"(alpha_decay={state.get('alpha_decay', 0.0)})."
+        )
 
     if status["policy"]:
         st.write(
@@ -803,15 +809,31 @@ def _render_bandit_tab(service: RecommenderService) -> None:
             f"**{status['journal']['pending']}** pending (no fold yet)."
         )
 
-    if st.button("Fold pending feedback", type="primary"):
+    fold_col1, fold_col2 = st.columns([2, 2])
+    with fold_col1:
+        gamma_input = st.slider(
+            "Recency discount factor (gamma)",
+            min_value=0.1,
+            max_value=1.0,
+            value=float(status.get("gamma", 1.0)),
+            step=0.05,
+            key="bandit_gamma_slider",
+            help="Weight given to previous statistics during fold (A -> gamma*A + x x^T).",
+        )
+    with fold_col2:
+        st.write("")
+        st.write("")
+        fold_clicked = st.button("Fold pending feedback", type="primary", key="fold_bandit_feedback_btn")
+
+    if fold_clicked:
         try:
-            updated = service.sweep_bandit_feedback()
+            updated = service.sweep_bandit_feedback(gamma=gamma_input)
         except (FileNotFoundError, ValueError) as error:
             st.error(f"Fold failed: {error}")
         else:
             st.success(
-                f"Folded pending feedback. Journal now "
-                f"{updated['journal']['pending']} pending."
+                f"Folded pending feedback with gamma={gamma_input:.2f}. "
+                f"Journal now {updated['journal']['pending']} pending."
             )
 
     st.divider()
