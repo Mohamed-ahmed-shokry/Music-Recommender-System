@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import numpy as np
@@ -1034,6 +1035,7 @@ def test_metadata_reports_cold_start_strategy(tmp_path: Path) -> None:
         "strategy": "popular",
         "policy": None,
         "context_features": list(DEFAULT_CONTEXT_FEATURES),
+        "supported_policies": ["linucb", "thompson_sampling", "epsilon_greedy"],
     }
 
     service.cold_start_policy = {"popular": 0.5, "long_tail": 0.5}
@@ -1558,3 +1560,68 @@ def test_service_sweep_bandit_feedback_with_gamma(tmp_path: Path) -> None:
         feedback_journal_path=journal,
     )
     assert status["journal"]["pending"] == 0
+
+
+def test_service_bandit_policy_type_supports_epsilon_greedy(tmp_path: Path) -> None:
+    service = create_service(tmp_path, bandit_policy_type="epsilon_greedy")
+    assert service.bandit_policy_type == "epsilon_greedy"
+    status = service.bandit_status()
+    assert "epsilon_greedy" in status["supported_policies"]
+    metadata = service.metadata()
+    assert "epsilon_greedy" in metadata["cold_start"]["supported_policies"]
+
+
+def test_service_evaluate_bandit_off_policy(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    service.cold_start_policy = {"popular": 0.8, "balanced": 0.2}
+    journal = tmp_path / "test_journal.json"
+    records = [
+        {"context": [1.0, 0.5, 0.0], "arm": "popular", "reward": 0.9},
+        {"context": [0.2, 1.0, 0.0], "arm": "balanced", "reward": 0.3},
+    ]
+    journal.write_text(json.dumps(records), encoding="utf-8")
+
+    result = service.evaluate_bandit_off_policy(feedback_journal_path=journal)
+    assert result["summary"]["records_evaluated"] == 2
+    assert "ips" in result["metrics"]
+    assert "doubly_robust" in result["metrics"]
+
+
+def test_service_evaluate_bandit_off_policy_missing_or_empty(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    with pytest.raises(FileNotFoundError, match="not found"):
+        service.evaluate_bandit_off_policy(
+            feedback_journal_path=tmp_path / "nonexistent.json"
+        )
+
+    empty = tmp_path / "empty.json"
+    empty.write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="no records"):
+        service.evaluate_bandit_off_policy(feedback_journal_path=empty)
+
+
+def test_service_compare_bandit_policies(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    comparison = service.compare_bandit_policies(
+        policies=["linucb", "epsilon_greedy"],
+        rounds=6,
+    )
+    assert set(comparison["policies"].keys()) == {"linucb", "epsilon_greedy"}
+    assert "champion" in comparison["summary"]
+
+
+def test_service_derive_cold_start_policy_from_state(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    state_path = _write_test_state(tmp_path)
+    persist_path = tmp_path / "new_derived_policy.json"
+
+    policy = service.derive_cold_start_policy_from_state(
+        state_path=state_path,
+        temperature=0.8,
+        temperature_decay=0.01,
+        persist_path=persist_path,
+        update_active_policy=True,
+    )
+    assert set(policy.keys()) == {"popular", "balanced", "long_tail"}
+    assert persist_path.exists()
+    assert service.cold_start_policy == policy

@@ -13,8 +13,12 @@ import numpy as np
 from music_recommender.artifacts import RecommenderArtifact, load_artifact
 from music_recommender.bandit import (
     SUPPORTED_BANDIT_POLICIES,
+    BaseContextualBandit,
     append_bandit_feedback,
+    compare_bandit_simulation_policies,
     compute_bandit_drift,
+    compute_off_policy_evaluation,
+    derive_cold_start_policy,
     dominant_policy_arm,
     feedback_records_from_bandit_serve,
     list_bandit_snapshots,
@@ -32,6 +36,7 @@ from music_recommender.bandit import (
     sweep_bandit_journal,
     validate_serve_context,
     validate_state_context_features,
+    write_cold_start_policy,
 )
 from music_recommender.baselines import popular_artists
 from music_recommender.config import (
@@ -51,6 +56,7 @@ from music_recommender.config import (
     DEFAULT_BANDIT_GAMMA,
     DEFAULT_BANDIT_POLICY_TYPE,
     DEFAULT_CONTENT_WEIGHT,
+    RAW_DATA_PATH,
     RAW_TRACK_DATA_PATH,
     RAW_TRACK_METADATA_PATH,
 )
@@ -67,6 +73,7 @@ from music_recommender.content import (
 from music_recommender.content import (
     listened_artist_ids as content_listened_artist_ids,
 )
+from music_recommender.data import load_interactions
 from music_recommender.ltr import rank_tracks_with_ltr, rank_with_ltr
 from music_recommender.ranking import (
     apply_popularity_penalty,
@@ -242,6 +249,7 @@ class RecommenderService:
                 "strategy": ("bandit" if self.cold_start_policy else "popular"),
                 "policy": self.cold_start_policy,
                 "context_features": list(self.context_features),
+                "supported_policies": list(SUPPORTED_BANDIT_POLICIES),
             },
             "bandit": bandit,
             "ltr": {
@@ -293,6 +301,7 @@ class RecommenderService:
         status["alpha_decay"] = self.bandit_alpha_decay
         status["gamma"] = self.bandit_gamma
         status["snapshots_count"] = len(self.list_bandit_snapshots())
+        status["supported_policies"] = list(SUPPORTED_BANDIT_POLICIES)
         return status
 
     def sweep_bandit_feedback(
@@ -413,6 +422,111 @@ class RecommenderService:
                 )
         state_a = load_bandit_snapshot(ref_p)
         return compute_bandit_drift(state_a, state_b)
+
+    def evaluate_bandit_off_policy(
+        self,
+        *,
+        target_policy: BaseContextualBandit | dict[str, float] | str | None = None,
+        feedback_journal_path: str | Path | None = None,
+        behavior_propensities: dict[str, float] | None = None,
+        min_propensity: float = 0.01,
+        ridge_lambda: float = 1.0,
+    ) -> dict[str, Any]:
+        """Evaluate a candidate policy offline using recorded feedback journal."""
+        journal_p = (
+            Path(feedback_journal_path)
+            if feedback_journal_path is not None
+            else BANDIT_FEEDBACK_PATH
+        )
+        if not journal_p.exists():
+            raise FileNotFoundError(f"Feedback journal not found: {journal_p}")
+        feedback = load_bandit_feedback(journal_p)
+        if not feedback:
+            raise ValueError(f"Feedback journal '{journal_p}' contains no records.")
+
+        policy_to_eval: BaseContextualBandit | dict[str, float] | str
+        if target_policy is not None:
+            policy_to_eval = target_policy
+        elif self.cold_start_policy:
+            policy_to_eval = self.cold_start_policy
+        elif BANDIT_STATE_PATH.exists():
+            policy_to_eval = BaseContextualBandit.from_state(
+                load_bandit_state(BANDIT_STATE_PATH)
+            )
+        else:
+            policy_to_eval = "popular"
+
+        return compute_off_policy_evaluation(
+            feedback,
+            policy_to_eval,
+            behavior_propensities=behavior_propensities,
+            min_propensity=min_propensity,
+            ridge_lambda=ridge_lambda,
+        )
+
+    def compare_bandit_policies(
+        self,
+        interactions_path: str | Path | None = None,
+        *,
+        policies: Sequence[str | dict[str, Any]] | None = None,
+        top_k: int = 5,
+        rounds: int = 20,
+        seed: int = 42,
+        holdout_seed: int = 42,
+        holdout_ratio: float = 0.5,
+        bootstrap_ratio: float = 0.5,
+    ) -> dict[str, Any]:
+        """Compare multiple contextual bandit policies on interaction data."""
+        data_p = (
+            Path(interactions_path)
+            if interactions_path is not None
+            else RAW_DATA_PATH
+        )
+        if not data_p.exists():
+            raise FileNotFoundError(f"Interactions data not found: {data_p}")
+        df = load_interactions(data_p)
+        return compare_bandit_simulation_policies(
+            df,
+            policies=policies,
+            top_k=top_k,
+            rounds=rounds,
+            seed=seed,
+            holdout_seed=holdout_seed,
+            holdout_ratio=holdout_ratio,
+            bootstrap_ratio=bootstrap_ratio,
+            context_features=self.context_features,
+        )
+
+    def derive_cold_start_policy_from_state(
+        self,
+        *,
+        state_path: str | Path | None = None,
+        temperature: float = 1.0,
+        temperature_decay: float = 0.0,
+        min_temperature: float = 0.01,
+        persist_path: str | Path | None = None,
+        update_active_policy: bool = True,
+    ) -> dict[str, float]:
+        """Derive per-arm cold-start serving weights from a bandit state or snapshot."""
+        st_p = Path(state_path) if state_path is not None else BANDIT_STATE_PATH
+        state = load_bandit_state(st_p)
+        policy = derive_cold_start_policy(
+            state,
+            temperature=temperature,
+            temperature_decay=temperature_decay,
+            min_temperature=min_temperature,
+        )
+        if persist_path is not None:
+            target_p = Path(persist_path)
+            target_p.parent.mkdir(parents=True, exist_ok=True)
+            write_cold_start_policy(
+                policy,
+                target_p.parent,
+                policy_name=target_p.stem,
+            )
+        if update_active_policy:
+            self.cold_start_policy = policy
+        return policy
 
     def health(self) -> dict[str, Any]:
         """Return lightweight service health details."""
