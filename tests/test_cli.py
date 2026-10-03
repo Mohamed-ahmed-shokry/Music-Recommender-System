@@ -2663,3 +2663,160 @@ def test_bandit_sweep_cli_with_gamma(tmp_path: Path) -> None:
     )
     assert res.exit_code == 0
     assert "gamma=0.85" in res.output
+
+
+def test_simulate_bandit_cli_compare_policies(tmp_path: Path) -> None:
+    report_file = tmp_path / "cmp_report.json"
+    res = runner.invoke(
+        cli.app,
+        [
+            "simulate-bandit",
+            "--compare-policies",
+            "--rounds",
+            "3",
+            "--policies",
+            "linucb,thompson_sampling,epsilon_greedy",
+            "--report-dir",
+            str(tmp_path),
+            "--report-name",
+            "cmp_report",
+        ],
+    )
+    assert res.exit_code == 0
+    assert "Multi-Policy Contextual Bandit Benchmark" in res.output
+    assert "Rank" in res.output
+    assert "Win Rate" in res.output
+    assert "Best performing policy:" in res.output
+    assert report_file.exists()
+
+
+def test_simulate_bandit_cli_epsilon_greedy(tmp_path: Path) -> None:
+    state_file = tmp_path / "bandit_state.json"
+    res = runner.invoke(
+        cli.app,
+        [
+            "simulate-bandit",
+            "--rounds",
+            "3",
+            "--policy-type",
+            "epsilon_greedy",
+            "--alpha",
+            "0.2",
+            "--alpha-decay",
+            "0.01",
+            "--report-dir",
+            str(tmp_path),
+            "--report-name",
+            "eps_report",
+            "--write-state",
+            str(state_file),
+        ],
+    )
+    assert res.exit_code == 0
+    assert (
+        "Cold-start exploration bandit simulation (policy=epsilon_greedy"
+        in res.output
+    )
+    assert state_file.exists()
+
+
+def test_bandit_policy_cli_from_state(tmp_path: Path) -> None:
+    from music_recommender.bandit import (
+        LinUCBContextualBandit,
+        snapshot_bandit_state,
+        write_bandit_state,
+    )
+
+    bandit = LinUCBContextualBandit(["popular", "balanced", "long_tail"], context_dim=2)
+    state = snapshot_bandit_state(bandit)
+    state_file = write_bandit_state(state, tmp_path, state_name="test_state")
+
+    res = runner.invoke(
+        cli.app,
+        [
+            "bandit-policy",
+            "--from-state",
+            str(state_file),
+            "--temperature",
+            "1.2",
+            "--temperature-decay",
+            "0.01",
+            "--policy-dir",
+            str(tmp_path),
+            "--policy-name",
+            "derived_policy",
+        ],
+    )
+    assert res.exit_code == 0
+    assert "Learned cold-start policy arm weights (from state" in res.output
+    assert (tmp_path / "derived_policy.json").exists()
+
+
+def test_bandit_eval_offline_cli(tmp_path: Path) -> None:
+    from music_recommender.bandit import (
+        LinUCBContextualBandit,
+        append_bandit_feedback,
+        snapshot_bandit_state,
+        write_bandit_state,
+    )
+
+    journal = tmp_path / "test_feedback.jsonl"
+    for i in range(5):
+        append_bandit_feedback(
+            {
+                "arm": "popular" if i % 2 == 0 else "balanced",
+                "context": [0.5, 1.2],
+                "reward": 0.8 if i % 2 == 0 else 0.4,
+                "behavior_propensities": {
+                    "popular": 0.4,
+                    "balanced": 0.3,
+                    "long_tail": 0.3,
+                },
+            },
+            journal,
+        )
+
+    # 1. Default evaluation (constructs policy from policy_type)
+    res = runner.invoke(
+        cli.app,
+        [
+            "bandit-eval-offline",
+            "--feedback-path",
+            str(journal),
+            "--policy-type",
+            "epsilon_greedy",
+            "--alpha",
+            "0.1",
+            "--write-report",
+            "--report-dir",
+            str(tmp_path),
+            "--report-name",
+            "test_ope_report",
+        ],
+    )
+    assert res.exit_code == 0
+    assert "Off-Policy Evaluation" in res.output
+    assert "Inverse Propensity (IPS)" in res.output
+    assert "Self-Normalized (SnIPS)" in res.output
+    assert "Direct Method (DM)" in res.output
+    assert "Doubly Robust (DR)" in res.output
+    assert (tmp_path / "test_ope_report.json").exists()
+
+    # 2. Evaluation from candidate state snapshot
+    bandit = LinUCBContextualBandit(["popular", "balanced", "long_tail"], context_dim=2)
+    state = snapshot_bandit_state(bandit)
+    state_file = write_bandit_state(state, tmp_path, state_name="eval_cand_state")
+
+    res_state = runner.invoke(
+        cli.app,
+        [
+            "bandit-eval-offline",
+            "--feedback-path",
+            str(journal),
+            "--from-state",
+            str(state_file),
+        ],
+    )
+    assert res_state.exit_code == 0
+    assert "Off-Policy Evaluation" in res_state.output
+

@@ -15,10 +15,14 @@ import typer
 from music_recommender import __version__
 from music_recommender.bandit import (
     DEFAULT_COLD_START_ARMS,
+    BaseContextualBandit,
+    EpsilonGreedyContextualBandit,
     LinUCBContextualBandit,
     ThompsonSamplingContextualBandit,
     append_bandit_feedback,
+    compare_bandit_simulation_policies,
     compute_bandit_drift,
+    compute_off_policy_evaluation,
     derive_cold_start_policy,
     feedback_from_report,
     fold_bandit_state,
@@ -39,9 +43,11 @@ from music_recommender.bandit import (
     summarize_bandit_lifecycle,
     sweep_bandit_journal,
     validate_state_context_features,
+    write_bandit_comparison_report,
     write_bandit_report,
     write_bandit_state,
     write_cold_start_policy,
+    write_ope_report,
 )
 from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
@@ -2095,6 +2101,19 @@ def simulate_bandit(
             "bandit_context_features.json config."
         ),
     ),
+    compare_policies: bool = typer.Option(
+        False,
+        "--compare-policies",
+        help="Run comparative multi-policy benchmarking on identical holdouts.",
+    ),
+    policies: str = typer.Option(
+        "linucb,thompson_sampling,epsilon_greedy",
+        "--policies",
+        help=(
+            "Comma-separated policy types to benchmark when "
+            "--compare-policies is set."
+        ),
+    ),
     report_name: str | None = typer.Option(
         None,
         "--report-name",
@@ -2135,6 +2154,67 @@ def simulate_bandit(
             env=os.getenv(CONTEXT_FEATURES_ENV_VAR),
             config_path=BANDIT_CONTEXT_FEATURES_PATH,
         )
+
+        if compare_policies:
+            policy_names = tuple(
+                p.strip() for p in policies.split(",") if p.strip()
+            )
+            policy_specs = [
+                {
+                    "name": p,
+                    "policy_type": p,
+                    "alpha": alpha if p != "epsilon_greedy" else min(alpha, 0.5),
+                    "alpha_decay": alpha_decay,
+                    "gamma": gamma,
+                }
+                for p in policy_names
+            ]
+            comparison_report = compare_bandit_simulation_policies(
+                df,
+                policies=policy_specs,
+                top_k=top_k,
+                rounds=rounds,
+                seed=seed,
+                arms=selected_arms,
+                holdout_ratio=holdout_ratio,
+                context_features=resolved_features,
+            )
+            typer.echo(
+                f"Multi-Policy Contextual Bandit Benchmark "
+                f"(rounds={rounds}, top_k={top_k}):"
+            )
+            typer.echo(f"Context features: {', '.join(resolved_features)}")
+            typer.echo(
+                f"{'Rank':<6} {'Policy':<20} {'Cum. Reward':>12} "
+                f"{'Mean Reward':>12} {'Regret':>10} {'Win Rate':>10}"
+            )
+            typer.echo("-" * 74)
+            leaderboard = comparison_report["summary"]["leaderboard"]
+            for rank, item in enumerate(leaderboard, start=1):
+                p_name = item["name"]
+                p_stats = comparison_report["policies"][p_name]
+                typer.echo(
+                    f"{rank:<6} {p_name:<20} "
+                    f"{p_stats['cumulative_reward']:>12.4f} "
+                    f"{p_stats['mean_reward']:>12.4f} "
+                    f"{p_stats['regret']:>10.4f} "
+                    f"{item['win_rate']:>9.1%}"
+                )
+            typer.echo("-" * 74)
+            champ_name = comparison_report["summary"]["champion"]
+            champ_rew = comparison_report["policies"][champ_name]["cumulative_reward"]
+            typer.echo(
+                f"Best performing policy: {champ_name} "
+                f"(cumulative_reward={champ_rew:.4f})"
+            )
+            written = write_bandit_comparison_report(
+                comparison_report,
+                resolved_report_dir,
+                report_name=report_name,
+            )
+            typer.echo(f"Bandit comparison report written to: {written}")
+            return
+
         initial_state = (
             load_bandit_state(from_state) if from_state is not None else None
         )
@@ -2193,11 +2273,14 @@ def simulate_bandit(
     typer.echo(f"Bandit simulation report written to: {written}")
 
     if write_state is not None:
-        target_cls: Any = (
-            ThompsonSamplingContextualBandit
-            if policy_type == "thompson_sampling"
-            else LinUCBContextualBandit
-        )
+        target_cls: Any
+        if policy_type == "thompson_sampling":
+            target_cls = ThompsonSamplingContextualBandit
+        elif policy_type == "epsilon_greedy":
+            target_cls = EpsilonGreedyContextualBandit
+        else:
+            target_cls = LinUCBContextualBandit
+
         base_state = (
             initial_state
             if initial_state is not None
@@ -2229,11 +2312,27 @@ def bandit_policy(
         "--report-path",
         help="Path to a bandit simulation JSON report to derive weights from.",
     ),
+    from_state: str | None = typer.Option(
+        None,
+        "--from-state",
+        help="Path to a bandit state JSON snapshot to derive weights directly from.",
+    ),
     temperature: float = typer.Option(
         1.0,
         "--temperature",
         min=0.01,
         help="Softmax temperature scaling arm weights from mean rewards.",
+    ),
+    temperature_decay: float = typer.Option(
+        0.0,
+        "--temperature-decay",
+        help="Temperature annealing decay rate lambda >= 0.",
+    ),
+    min_temperature: float = typer.Option(
+        0.05,
+        "--min-temperature",
+        min=0.001,
+        help="Minimum temperature floor under annealing schedule.",
     ),
     policy_name: str | None = typer.Option(
         None,
@@ -2246,11 +2345,22 @@ def bandit_policy(
         help="Directory for the persisted cold-start policy.",
     ),
 ) -> None:
-    """Derive cold-start arm weights from a bandit report into a serving policy."""
+    """Derive cold-start arm weights from a bandit report or state."""
     resolved_policy_dir = Path(policy_dir) if policy_dir is not None else REPORTS_DIR
     try:
-        report = load_bandit_report(report_path)
-        policy = derive_cold_start_policy(report, temperature=temperature)
+        if from_state is not None:
+            source_data = load_bandit_state(from_state)
+            source_desc = f"state '{from_state}'"
+        else:
+            source_data = load_bandit_report(report_path)
+            source_desc = f"report '{report_path}'"
+
+        policy = derive_cold_start_policy(
+            source_data,
+            temperature=temperature,
+            temperature_decay=temperature_decay,
+            min_temperature=min_temperature,
+        )
         written = write_cold_start_policy(
             policy,
             resolved_policy_dir,
@@ -2260,7 +2370,7 @@ def bandit_policy(
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
-    typer.echo("Learned cold-start policy arm weights:")
+    typer.echo(f"Learned cold-start policy arm weights (from {source_desc}):")
     typer.echo(f"{'Arm':<12} {'Weight':>12}")
     typer.echo("-" * 26)
     for arm, weight in sorted(policy.items(), key=lambda item: (-item[1], item[0])):
@@ -2271,6 +2381,161 @@ def bandit_policy(
             "Policy saved to the default serving location; "
             "recommend-user will now use it for unknown users."
         )
+
+
+@app.command()
+def bandit_eval_offline(
+    feedback_path: str = typer.Option(
+        BANDIT_FEEDBACK_PATH,
+        "--feedback-path",
+        help="Path to JSONL feedback journal for off-policy evaluation.",
+    ),
+    policy_type: str = typer.Option(
+        "linucb",
+        "--policy-type",
+        help=(
+            "Candidate policy algorithm: 'linucb', 'thompson_sampling', "
+            "or 'epsilon_greedy'."
+        ),
+    ),
+    alpha: float = typer.Option(
+        1.0,
+        "--alpha",
+        help="Candidate policy exploration parameter alpha (or epsilon).",
+    ),
+    alpha_decay: float = typer.Option(
+        0.0,
+        "--alpha-decay",
+        help="Exploration decay rate lambda for candidate policy.",
+    ),
+    from_state: str | None = typer.Option(
+        None,
+        "--from-state",
+        help="Path to a candidate bandit state JSON snapshot to evaluate.",
+    ),
+    policy_path: str | None = typer.Option(
+        None,
+        "--policy-path",
+        help="Path to a cold-start static policy weights JSON to evaluate.",
+    ),
+    min_propensity: float = typer.Option(
+        0.01,
+        "--min-propensity",
+        help="Minimum propensity clipping threshold.",
+    ),
+    ridge_lambda: float = typer.Option(
+        1.0,
+        "--ridge-lambda",
+        help="L2 regularization for direct method reward regression model.",
+    ),
+    write_report: bool = typer.Option(
+        False,
+        "--write-report",
+        help="Persist evaluation results to a JSON report.",
+    ),
+    report_name: str | None = typer.Option(
+        None,
+        "--report-name",
+        help="Name for the OPE JSON report.",
+    ),
+    report_dir: str | None = typer.Option(
+        None,
+        "--report-dir",
+        help="Directory for the persistent OPE report.",
+    ),
+) -> None:
+    """Evaluate candidate bandit policies offline using OPE (IPS/SnIPS/DM/DR)."""
+    journal_path = Path(feedback_path)
+    try:
+        records = load_bandit_feedback(journal_path)
+        if not records:
+            raise ValueError(f"Feedback journal '{journal_path}' contains no records.")
+
+        target: BaseContextualBandit | dict[str, float] | str
+        if from_state is not None:
+            target = BaseContextualBandit.from_state(load_bandit_state(from_state))
+        elif policy_path is not None:
+            target = load_cold_start_policy(policy_path)
+        else:
+            ctx_array = np.asarray(records[0].get("context"), dtype=float)
+            dim = int(ctx_array.size)
+            if dim == 0:
+                raise ValueError(
+                    "Logged feedback records contain empty context vectors."
+                )
+            behavior_props = records[0].get("behavior_propensities")
+            arm_names = (
+                tuple(behavior_props.keys())
+                if isinstance(behavior_props, dict) and behavior_props
+                else DEFAULT_COLD_START_ARMS
+            )
+            target_cls: Any
+            if policy_type == "thompson_sampling":
+                target_cls = ThompsonSamplingContextualBandit
+            elif policy_type == "epsilon_greedy":
+                target_cls = EpsilonGreedyContextualBandit
+            else:
+                target_cls = LinUCBContextualBandit
+            target = target_cls(arm_names, dim, alpha=alpha, alpha_decay=alpha_decay)
+
+        results = compute_off_policy_evaluation(
+            records,
+            target,
+            min_propensity=min_propensity,
+            ridge_lambda=ridge_lambda,
+        )
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+    summary = results["summary"]
+    metrics = results["metrics"]
+    typer.echo(f"Off-Policy Evaluation (Target Policy: {results['target_policy']}):")
+    typer.echo(f"Logged records evaluated: {summary['records_evaluated']}")
+    typer.echo(f"Match rate: {summary['match_rate']:.1%}")
+    typer.echo(f"Effective Sample Size (ESS): {summary['effective_sample_size']:.2f}")
+    typer.echo(f"Mean logged reward: {summary['logging_mean_reward']:.4f}")
+    typer.echo("-" * 52)
+    typer.echo(f"{'Estimator':<24} {'Value':>12} {'Std Error':>12}")
+    typer.echo("-" * 52)
+    estimators_table = [
+        (
+            "Inverse Propensity (IPS)",
+            metrics["ips"].get("value"),
+            metrics["ips"].get("standard_error"),
+        ),
+        (
+            "Self-Normalized (SnIPS)",
+            metrics["snips"].get("value"),
+            None,
+        ),
+        (
+            "Direct Method (DM)",
+            metrics["direct_method"].get("value"),
+            metrics["direct_method"].get("standard_error"),
+        ),
+        (
+            "Doubly Robust (DR)",
+            metrics["doubly_robust"].get("value"),
+            metrics["doubly_robust"].get("standard_error"),
+        ),
+    ]
+    for est, v, se in estimators_table:
+        v_str = f"{v:.4f}" if v is not None else "N/A"
+        se_str = f"{se:.4f}" if se is not None else "N/A"
+        typer.echo(f"{est:<24} {v_str:>12} {se_str:>12}")
+    typer.echo("-" * 52)
+
+    if write_report:
+        resolved_report_dir = (
+            Path(report_dir) if report_dir is not None else REPORTS_DIR
+        )
+        written = write_ope_report(
+            results,
+            resolved_report_dir,
+            report_name=report_name,
+        )
+        typer.echo(f"OPE report written to: {written}")
 
 
 @app.command()
