@@ -13,8 +13,13 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from api.middleware import RequestSafetyMiddleware
 from music_recommender import __version__
+from music_recommender.bandit import (
+    derive_cold_start_policy,
+    load_bandit_report,
+)
 from music_recommender.config import (
     BANDIT_SNAPSHOTS_DIR,
+    COLD_START_POLICY_PATH,
     DEFAULT_CONTENT_WEIGHT,
     REPORTS_DIR,
 )
@@ -608,6 +613,202 @@ def get_bandit_drift(
         raise HTTPException(
             status_code=404,
             detail=f"State or reference snapshot not found: {error}",
+        ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+class BanditOpeRequest(BaseModel):
+    """Optional validation body for off-policy evaluation."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    feedback_journal_path: str | None = Field(
+        default=None,
+        description="Optional path to logged feedback journal.",
+    )
+    target_policy: str | dict[str, float] | None = Field(
+        default=None,
+        description=(
+            "Candidate policy algorithm ('linucb', 'thompson_sampling', "
+            "'epsilon_greedy'), arm name, or static weights dict."
+        ),
+    )
+    min_propensity: float = Field(
+        default=0.01,
+        gt=0.0,
+        le=1.0,
+        description="Minimum propensity clipping threshold.",
+    )
+    ridge_lambda: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Ridge regression L2 regularization for Direct Method.",
+    )
+
+
+class BanditCompareRequest(BaseModel):
+    """Optional payload for multi-policy comparative benchmarking."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    policies: list[str | dict[str, object]] | None = Field(
+        default=None,
+        description="List of policy names or spec dicts to benchmark.",
+    )
+    top_k: int = Field(
+        default=5,
+        gt=0,
+        le=MAX_API_RESULTS,
+        description="Number of recommendations per cold-start user.",
+    )
+    rounds: int = Field(
+        default=20,
+        gt=0,
+        le=500,
+        description="Number of simulation rounds.",
+    )
+    seed: int = Field(
+        default=42,
+        description="RNG seed for simulation.",
+    )
+    holdout_ratio: float = Field(
+        default=0.5,
+        gt=0.0,
+        lt=1.0,
+        description="Fraction of users held out for evaluation.",
+    )
+
+
+class BanditDerivePolicyRequest(BaseModel):
+    """Payload for deriving cold-start serving weights."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    from_state: str | None = Field(
+        default=None,
+        description="Optional path to a bandit state snapshot JSON.",
+    )
+    report_path: str | None = Field(
+        default=None,
+        description="Optional path to a bandit simulation report JSON.",
+    )
+    temperature: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Softmax temperature for arm weights.",
+    )
+    temperature_decay: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Annealing decay rate lambda >= 0.",
+    )
+    min_temperature: float = Field(
+        default=0.05,
+        gt=0.0,
+        description="Minimum temperature floor under annealing schedule.",
+    )
+    persist: bool = Field(
+        default=False,
+        description="Whether to persist derived policy to default serving location.",
+    )
+
+
+@app.post("/bandit/evaluate/off-policy")
+def bandit_evaluate_off_policy(
+    payload: BanditOpeRequest | None = None,
+) -> dict[str, object]:
+    """Evaluate candidate policy offline on logged feedback using OPE."""
+    try:
+        service = get_service()
+        req = payload or BanditOpeRequest()
+        return service.evaluate_bandit_off_policy(
+            target_policy=req.target_policy,
+            feedback_journal_path=req.feedback_journal_path,
+            min_propensity=req.min_propensity,
+            ridge_lambda=req.ridge_lambda,
+        )
+    except FileNotFoundError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Feedback journal or policy not found: {error}",
+        ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/bandit/evaluate/compare")
+def bandit_evaluate_compare(
+    payload: BanditCompareRequest | None = None,
+) -> dict[str, object]:
+    """Benchmark multiple contextual bandit policies on identical holdouts."""
+    try:
+        service = get_service()
+        req = payload or BanditCompareRequest()
+        return service.compare_bandit_policies(
+            policies=req.policies,
+            top_k=req.top_k,
+            rounds=req.rounds,
+            seed=req.seed,
+            holdout_ratio=req.holdout_ratio,
+        )
+    except FileNotFoundError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Interactions data not found: {error}",
+        ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/bandit/policy/derive")
+def bandit_policy_derive(
+    payload: BanditDerivePolicyRequest | None = None,
+) -> dict[str, object]:
+    """Derive cold-start serving weights with optional temperature annealing."""
+    try:
+        service = get_service()
+        req = payload or BanditDerivePolicyRequest()
+        persist_path = COLD_START_POLICY_PATH if req.persist else None
+
+        if req.report_path is not None:
+            report_data = load_bandit_report(req.report_path)
+            derived = derive_cold_start_policy(
+                report_data,
+                temperature=req.temperature,
+                temperature_decay=req.temperature_decay,
+                min_temperature=req.min_temperature,
+            )
+            if persist_path is not None:
+                service.cold_start_policy = derived
+            source = f"report:{req.report_path}"
+        else:
+            derived = service.derive_cold_start_policy_from_state(
+                state_path=req.from_state,
+                temperature=req.temperature,
+                temperature_decay=req.temperature_decay,
+                min_temperature=req.min_temperature,
+                persist_path=persist_path,
+                update_active_policy=req.persist,
+            )
+            source = (
+                f"state:{req.from_state}"
+                if req.from_state is not None
+                else "active_state"
+            )
+
+        return {
+            "source": source,
+            "policy": derived,
+            "temperature": req.temperature,
+            "temperature_decay": req.temperature_decay,
+            "min_temperature": req.min_temperature,
+            "persisted": req.persist,
+        }
+    except FileNotFoundError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Source state or report not found: {error}",
         ) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

@@ -17,6 +17,7 @@ class FakeService:
             "log_unique_artists",
             "mean_popularity_rank",
         ]
+        self.cold_start_policy: dict[str, float] = {"popular": 1.0}
 
     def health(self) -> dict[str, object]:
         return {"status": "ok", "artifact_version": "4.0"}
@@ -108,6 +109,90 @@ class FakeService:
         if gamma is not None:
             status["gamma"] = gamma
         return status
+
+    def evaluate_bandit_off_policy(
+        self,
+        *,
+        target_policy: object = None,
+        feedback_journal_path: object = None,
+        behavior_propensities: object = None,
+        min_propensity: float = 0.01,
+        ridge_lambda: float = 1.0,
+    ) -> dict[str, object]:
+        return {
+            "target_policy": str(target_policy or "linucb_bandit"),
+            "summary": {
+                "records_evaluated": 10,
+                "logging_mean_reward": 0.5,
+                "match_rate": 0.8,
+                "effective_sample_size": 8.5,
+            },
+            "metrics": {
+                "ips": {"value": 0.6, "standard_error": 0.05},
+                "snips": {"value": 0.58},
+                "direct_method": {"value": 0.62, "standard_error": 0.04},
+                "doubly_robust": {
+                    "value": 0.61,
+                    "standard_error": 0.04,
+                    "lift_over_logging": 0.11,
+                },
+            },
+            "arms": {"popular": {"target_selection_ratio": 0.5}},
+        }
+
+    def compare_bandit_policies(
+        self,
+        interactions_path: object = None,
+        *,
+        policies: object = None,
+        top_k: int = 5,
+        rounds: int = 20,
+        seed: int = 42,
+        holdout_seed: int = 42,
+        holdout_ratio: float = 0.5,
+        bootstrap_ratio: float = 0.5,
+    ) -> dict[str, object]:
+        return {
+            "config": {"top_k": top_k, "rounds": rounds, "seed": seed},
+            "policies": {
+                "linucb": {
+                    "cumulative_reward": 10.0,
+                    "mean_reward": 0.5,
+                    "regret": 2.0,
+                },
+                "thompson_sampling": {
+                    "cumulative_reward": 11.0,
+                    "mean_reward": 0.55,
+                    "regret": 1.0,
+                },
+            },
+            "summary": {
+                "champion": "thompson_sampling",
+                "leaderboard": [
+                    {
+                        "name": "thompson_sampling",
+                        "mean_reward": 0.55,
+                        "win_rate": 0.6,
+                    },
+                    {"name": "linucb", "mean_reward": 0.5, "win_rate": 0.4},
+                ],
+            },
+        }
+
+    def derive_cold_start_policy_from_state(
+        self,
+        *,
+        state_path: object = None,
+        temperature: float = 1.0,
+        temperature_decay: float = 0.0,
+        min_temperature: float = 0.01,
+        persist_path: object = None,
+        update_active_policy: bool = True,
+    ) -> dict[str, float]:
+        policy = {"popular": 0.6, "balanced": 0.25, "long_tail": 0.15}
+        if update_active_policy:
+            self.cold_start_policy = policy
+        return policy
 
     def popular_artists(self, top_k: int) -> dict[str, object]:
         return {
@@ -1676,3 +1761,154 @@ def test_bandit_update_route_rejects_out_of_range_gamma() -> None:
         response = client.post("/bandit/update", json={"gamma": 1.5})
 
     assert response.status_code == 422
+
+
+def test_bandit_evaluate_off_policy_route_success() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+        response = client.post(
+            "/bandit/evaluate/off-policy",
+            json={
+                "target_policy": "epsilon_greedy",
+                "min_propensity": 0.05,
+                "ridge_lambda": 0.5,
+            },
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["target_policy"] == "epsilon_greedy"
+    assert "metrics" in body
+    assert body["summary"]["records_evaluated"] == 10
+
+
+def test_bandit_evaluate_off_policy_route_not_found() -> None:
+    class MissingJournalService(FakeService):
+        def evaluate_bandit_off_policy(self, **kwargs: object) -> dict[str, object]:
+            raise FileNotFoundError("Feedback journal not found: missing.jsonl")
+
+    with TestClient(api_main.app) as client:
+        api_main.service = MissingJournalService()
+        api_main.service_load_error = None
+        response = client.post("/bandit/evaluate/off-policy")
+    assert response.status_code == 404
+    assert "Feedback journal or policy not found" in response.json()["detail"]
+
+
+def test_bandit_evaluate_off_policy_route_invalid_propensity() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+        response = client.post(
+            "/bandit/evaluate/off-policy",
+            json={"min_propensity": -0.1},
+        )
+    assert response.status_code == 422
+
+
+def test_bandit_evaluate_compare_route_success() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+        response = client.post(
+            "/bandit/evaluate/compare",
+            json={
+                "policies": ["linucb", "thompson_sampling"],
+                "rounds": 10,
+                "top_k": 3,
+            },
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["config"]["rounds"] == 10
+    assert body["summary"]["champion"] == "thompson_sampling"
+
+
+def test_bandit_evaluate_compare_route_not_found() -> None:
+    class MissingInteractionsService(FakeService):
+        def compare_bandit_policies(self, **kwargs: object) -> dict[str, object]:
+            raise FileNotFoundError("Interactions data not found: missing.csv")
+
+    with TestClient(api_main.app) as client:
+        api_main.service = MissingInteractionsService()
+        api_main.service_load_error = None
+        response = client.post("/bandit/evaluate/compare")
+    assert response.status_code == 404
+    assert "Interactions data not found" in response.json()["detail"]
+
+
+def test_bandit_evaluate_compare_route_invalid_rounds() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+        response = client.post(
+            "/bandit/evaluate/compare",
+            json={"rounds": 0},
+        )
+    assert response.status_code == 422
+
+
+def test_bandit_policy_derive_route_from_state_success() -> None:
+    fake_service = FakeService()
+    with TestClient(api_main.app) as client:
+        api_main.service = fake_service
+        api_main.service_load_error = None
+        response = client.post(
+            "/bandit/policy/derive",
+            json={
+                "temperature": 1.5,
+                "temperature_decay": 0.02,
+                "min_temperature": 0.05,
+                "persist": False,
+            },
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["temperature"] == 1.5
+    assert body["persisted"] is False
+    assert "policy" in body
+    assert body["policy"]["popular"] == 0.6
+
+
+def test_bandit_policy_derive_route_with_persist() -> None:
+    fake_service = FakeService()
+    with TestClient(api_main.app) as client:
+        api_main.service = fake_service
+        api_main.service_load_error = None
+        response = client.post(
+            "/bandit/policy/derive",
+            json={"persist": True},
+        )
+    assert response.status_code == 200
+    assert response.json()["persisted"] is True
+    assert fake_service.cold_start_policy["popular"] == 0.6
+
+
+def test_bandit_policy_derive_route_not_found() -> None:
+    class MissingStateService(FakeService):
+        def derive_cold_start_policy_from_state(
+            self, **kwargs: object
+        ) -> dict[str, float]:
+            raise FileNotFoundError("State file not found")
+
+    with TestClient(api_main.app) as client:
+        api_main.service = MissingStateService()
+        api_main.service_load_error = None
+        response = client.post(
+            "/bandit/policy/derive",
+            json={"from_state": "nonexistent_state.json"},
+        )
+    assert response.status_code == 404
+    assert "Source state or report not found" in response.json()["detail"]
+
+
+def test_bandit_policy_derive_route_invalid_temperature() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+        response = client.post(
+            "/bandit/policy/derive",
+            json={"temperature": -1.0},
+        )
+    assert response.status_code == 422
+
