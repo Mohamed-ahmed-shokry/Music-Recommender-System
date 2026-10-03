@@ -1819,3 +1819,461 @@ def load_cold_start_policy(policy_path: Path | str) -> dict[str, float]:
         raise ValueError(f"'{path}' contains non-numeric policy weights.") from error
     _validate_policy(normalized)
     return normalized
+
+
+def compute_off_policy_evaluation(
+    feedback_records: Sequence[dict[str, Any]],
+    target_policy: BaseContextualBandit | dict[str, float] | str,
+    *,
+    behavior_propensities: dict[str, float] | None = None,
+    min_propensity: float = 0.01,
+    ridge_lambda: float = 1.0,
+) -> dict[str, Any]:
+    """Evaluate a candidate bandit policy offline using logged feedback records.
+
+    Computes Inverse Propensity Scoring (IPS), Self-Normalized IPS (SnIPS),
+    Direct Method (DM) with regularized ridge regression, and Doubly Robust (DR)
+    policy value estimates, standard errors, and effective sample size (ESS).
+    """
+    if not feedback_records:
+        raise ValueError("Feedback records must not be empty.")
+    if not np.isfinite(min_propensity) or min_propensity <= 0.0 or min_propensity > 1.0:
+        raise ValueError("min_propensity must be in the range (0, 1].")
+    if not np.isfinite(ridge_lambda) or ridge_lambda <= 0.0:
+        raise ValueError("ridge_lambda must be a positive finite number.")
+
+    for record in feedback_records:
+        _validate_feedback_record(record)
+
+    first_ctx = _feedback_record_context(feedback_records[0])
+    context_dim = len(first_ctx)
+    for record in feedback_records:
+        ctx = _feedback_record_context(record)
+        if len(ctx) != context_dim:
+            raise ValueError(
+                f"Inconsistent context dimension: expected {context_dim}, "
+                f"got {len(ctx)}."
+            )
+
+    target_policy_name: str
+    bandit_obj: BaseContextualBandit | None = None
+    norm_weights: dict[str, float] = {}
+
+    if isinstance(target_policy, BaseContextualBandit):
+        target_policy_name = f"{target_policy.policy_type}_bandit"
+        bandit_obj = target_policy
+    elif isinstance(target_policy, dict):
+        _validate_policy(target_policy)
+        target_policy_name = "custom_policy"
+        sum_w = sum(target_policy.values())
+        norm_weights = {k: v / sum_w for k, v in target_policy.items()}
+    elif isinstance(target_policy, str):
+        _validate_arms([target_policy])
+        target_policy_name = f"arm_{target_policy}"
+        norm_weights = {target_policy: 1.0}
+    else:
+        raise ValueError(
+            "target_policy must be a BaseContextualBandit, a policy dict, "
+            "or an arm name."
+        )
+
+    n_records = len(feedback_records)
+    contexts = np.asarray(
+        [_feedback_record_context(rec) for rec in feedback_records], dtype=float
+    )
+    logged_arms = [str(rec["arm"]) for rec in feedback_records]
+    logged_rewards = np.asarray(
+        [float(rec["reward"]) for rec in feedback_records], dtype=float
+    )
+
+    all_arms_set = set(DEFAULT_COLD_START_ARMS).union(logged_arms)
+    if bandit_obj is not None:
+        all_arms_set.update(bandit_obj.arms)
+    else:
+        all_arms_set.update(norm_weights.keys())
+    all_arms = sorted(all_arms_set)
+    arm_to_idx = {arm: i for i, arm in enumerate(all_arms)}
+
+    if behavior_propensities is not None:
+        _validate_policy(behavior_propensities)
+        b_sum = sum(behavior_propensities.values())
+        b_weights = {
+            arm: max(min_propensity, behavior_propensities.get(arm, 0.0) / b_sum)
+            for arm in all_arms
+        }
+        b_total = sum(b_weights.values())
+        mu_map = {arm: b_weights[arm] / b_total for arm in all_arms}
+    else:
+        counts = dict.fromkeys(all_arms, 0)
+        for arm in logged_arms:
+            counts[arm] += 1
+        smoothed = {
+            arm: max(min_propensity, counts[arm] / n_records) for arm in all_arms
+        }
+        s_total = sum(smoothed.values())
+        mu_map = {arm: smoothed[arm] / s_total for arm in all_arms}
+
+    pi_matrix = np.zeros((n_records, len(all_arms)), dtype=float)
+    for i in range(n_records):
+        ctx = contexts[i]
+        if bandit_obj is not None:
+            if bandit_obj.policy_type == "epsilon_greedy":
+                eps = float(np.clip(bandit_obj.effective_alpha, 0.0, 1.0))
+                k = len(bandit_obj.arms)
+                best_arm = bandit_obj.select_arm(ctx)
+                for a in bandit_obj.arms:
+                    idx = arm_to_idx[a]
+                    prob = eps / k + ((1.0 - eps) if a == best_arm else 0.0)
+                    pi_matrix[i, idx] = prob
+            else:
+                chosen = bandit_obj.select_arm(ctx)
+                pi_matrix[i, arm_to_idx[chosen]] = 1.0
+        else:
+            for a, w in norm_weights.items():
+                if a in arm_to_idx:
+                    pi_matrix[i, arm_to_idx[a]] = w
+
+    thetas: dict[str, np.ndarray] = {}
+    eye = np.eye(context_dim) * ridge_lambda
+    for arm in all_arms:
+        arm_indices = [i for i, a in enumerate(logged_arms) if a == arm]
+        if arm_indices:
+            x_arm = contexts[arm_indices]
+            y_arm = logged_rewards[arm_indices]
+            theta_a = np.linalg.inv(x_arm.T @ x_arm + eye) @ (x_arm.T @ y_arm)
+        else:
+            theta_a = np.zeros(context_dim)
+        thetas[arm] = theta_a
+
+    r_hat = np.zeros((n_records, len(all_arms)), dtype=float)
+    for arm_idx, arm in enumerate(all_arms):
+        r_hat[:, arm_idx] = np.clip(contexts @ thetas[arm], 0.0, 1.0)
+
+    weights = np.zeros(n_records, dtype=float)
+    matches = 0
+    for i in range(n_records):
+        logged_a = logged_arms[i]
+        logged_idx = arm_to_idx[logged_a]
+        pi_val = pi_matrix[i, logged_idx]
+        mu_val = mu_map[logged_a]
+        weights[i] = pi_val / mu_val if mu_val > 0 else 0.0
+        target_argmax_arm = all_arms[int(np.argmax(pi_matrix[i]))]
+        if target_argmax_arm == logged_a:
+            matches += 1
+
+    ips_terms = weights * logged_rewards
+    v_ips = float(np.mean(ips_terms))
+    se_ips = (
+        float(np.std(ips_terms, ddof=1) / np.sqrt(n_records)) if n_records > 1 else 0.0
+    )
+
+    sum_weights = float(np.sum(weights))
+    v_snips = float(np.sum(ips_terms) / sum_weights) if sum_weights > 0 else 0.0
+
+    sum_sq_weights = float(np.sum(weights**2))
+    ess = float((sum_weights**2) / sum_sq_weights) if sum_sq_weights > 0 else 0.0
+
+    dm_terms = np.sum(pi_matrix * r_hat, axis=1)
+    v_dm = float(np.mean(dm_terms))
+    se_dm = (
+        float(np.std(dm_terms, ddof=1) / np.sqrt(n_records)) if n_records > 1 else 0.0
+    )
+
+    logged_r_hat = np.array(
+        [r_hat[i, arm_to_idx[logged_arms[i]]] for i in range(n_records)]
+    )
+    dr_terms = dm_terms + weights * (logged_rewards - logged_r_hat)
+    v_dr = float(np.mean(dr_terms))
+    se_dr = (
+        float(np.std(dr_terms, ddof=1) / np.sqrt(n_records)) if n_records > 1 else 0.0
+    )
+
+    logging_mean_reward = float(np.mean(logged_rewards))
+    match_rate = float(matches / n_records)
+
+    arm_stats: dict[str, dict[str, Any]] = {}
+    for arm_idx, arm in enumerate(all_arms):
+        arm_indices = [i for i, a in enumerate(logged_arms) if a == arm]
+        cnt = len(arm_indices)
+        mean_r = float(np.mean(logged_rewards[arm_indices])) if cnt > 0 else 0.0
+        share = float(np.mean(pi_matrix[:, arm_idx]))
+        arm_stats[arm] = {
+            "logged_count": cnt,
+            "logged_mean_reward": round(mean_r, 6),
+            "target_action_share": round(share, 6),
+        }
+
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "target_policy": target_policy_name,
+        "summary": {
+            "records_evaluated": n_records,
+            "logging_mean_reward": round(logging_mean_reward, 6),
+            "match_rate": round(match_rate, 6),
+            "effective_sample_size": round(ess, 2),
+        },
+        "metrics": {
+            "ips": {
+                "value": round(v_ips, 6),
+                "standard_error": round(se_ips, 6),
+            },
+            "snips": {
+                "value": round(v_snips, 6),
+            },
+            "direct_method": {
+                "value": round(v_dm, 6),
+                "standard_error": round(se_dm, 6),
+            },
+            "doubly_robust": {
+                "value": round(v_dr, 6),
+                "standard_error": round(se_dr, 6),
+                "lift_over_logging": round(v_dr - logging_mean_reward, 6),
+            },
+        },
+        "arms": arm_stats,
+    }
+
+
+def compare_bandit_simulation_policies(
+    df: pd.DataFrame,
+    *,
+    policies: Sequence[str | dict[str, Any]] | None = None,
+    top_k: int = 5,
+    rounds: int = 20,
+    seed: int = 42,
+    holdout_seed: int = 42,
+    holdout_ratio: float = 0.5,
+    bootstrap_ratio: float = 0.5,
+    context_features: Sequence[str] = DEFAULT_CONTEXT_FEATURES,
+    arms: Sequence[str] = DEFAULT_COLD_START_ARMS,
+) -> dict[str, Any]:
+    """Compare multiple contextual bandit policies across identical holdout splits.
+
+    Runs LinUCB, Thompson Sampling, Epsilon-Greedy, and custom parameterizations
+    over the same users and bootstrap contexts, reporting side-by-side rewards,
+    regrets, arm allocations, and win-rate leaderboards.
+    """
+    if policies is None:
+        policy_specs: list[dict[str, Any]] = [
+            {"name": "linucb", "policy_type": "linucb"},
+            {"name": "thompson_sampling", "policy_type": "thompson_sampling"},
+            {"name": "epsilon_greedy", "policy_type": "epsilon_greedy"},
+        ]
+    else:
+        policy_specs = []
+        for p in policies:
+            if isinstance(p, str):
+                policy_specs.append({"name": p, "policy_type": p})
+            elif isinstance(p, dict):
+                spec = dict(p)
+                if "policy_type" not in spec:
+                    spec["policy_type"] = spec.get("name", "linucb")
+                if "name" not in spec:
+                    spec["name"] = spec["policy_type"]
+                policy_specs.append(spec)
+            else:
+                raise ValueError(
+                    "Each policy specification must be a string or dictionary."
+                )
+
+    if not policy_specs:
+        raise ValueError("At least one policy must be specified for comparison.")
+
+    results: dict[str, dict[str, Any]] = {}
+    for spec in policy_specs:
+        p_name = str(spec["name"])
+        p_type = str(spec["policy_type"])
+        alpha_val = float(
+            spec.get("alpha", 1.0 if p_type != "epsilon_greedy" else 0.2)
+        )
+        alpha_decay_val = float(spec.get("alpha_decay", 0.0))
+        gamma_val = float(spec.get("gamma", 1.0))
+
+        sim = simulate_cold_start_exploration(
+            df,
+            top_k=top_k,
+            rounds=rounds,
+            seed=seed,
+            holdout_seed=holdout_seed,
+            holdout_ratio=holdout_ratio,
+            bootstrap_ratio=bootstrap_ratio,
+            alpha=alpha_val,
+            alpha_decay=alpha_decay_val,
+            gamma=gamma_val,
+            policy_type=p_type,
+            arms=arms,
+            context_features=context_features,
+        )
+        results[p_name] = sim
+
+    first_sim = next(iter(results.values()))
+    n_rounds = len(first_sim["rounds"])
+    win_counts = dict.fromkeys(results, 0)
+    for r_idx in range(n_rounds):
+        round_rewards = {
+            p_name: results[p_name]["rounds"][r_idx]["reward"] for p_name in results
+        }
+        max_r = max(round_rewards.values())
+        for p_name, r in round_rewards.items():
+            if r == max_r:
+                win_counts[p_name] += 1
+
+    always_popular_mean = first_sim["summary"]["always_popular"]["mean_reward"]
+    best_in_hindsight_mean = (
+        round(first_sim["summary"]["best_in_hindsight"] / n_rounds, 6)
+        if n_rounds > 0
+        else 0.0
+    )
+
+    policy_reports: dict[str, Any] = {}
+    leaderboard_items: list[dict[str, Any]] = []
+    for p_name, sim in results.items():
+        summary = sim["summary"]
+        mean_rew = summary["mean_reward"]
+        cum_rew = summary["cumulative_reward"]
+        regret = summary["regret"]
+        win_rate = round(win_counts[p_name] / n_rounds, 4) if n_rounds > 0 else 0.0
+        lift = round(mean_rew - always_popular_mean, 6)
+        arm_counts = {
+            arm: int(stats["selections"]) for arm, stats in sim["arms"].items()
+        }
+
+        p_data = {
+            "policy_type": sim["config"]["policy_type"],
+            "cumulative_reward": cum_rew,
+            "mean_reward": mean_rew,
+            "regret": regret,
+            "win_rate": win_rate,
+            "lift_over_popular": lift,
+            "arm_selections": arm_counts,
+        }
+        policy_reports[p_name] = p_data
+        leaderboard_items.append(
+            {
+                "name": p_name,
+                "policy_type": sim["config"]["policy_type"],
+                "mean_reward": mean_rew,
+                "regret": regret,
+                "win_rate": win_rate,
+                "lift_over_popular": lift,
+            }
+        )
+
+    leaderboard_items.sort(
+        key=lambda item: (-item["mean_reward"], item["regret"], item["name"])
+    )
+    champion = leaderboard_items[0]["name"]
+
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "config": {
+            "top_k": top_k,
+            "rounds": n_rounds,
+            "seed": seed,
+            "holdout_seed": holdout_seed,
+            "holdout_ratio": holdout_ratio,
+            "bootstrap_ratio": bootstrap_ratio,
+            "context_features": list(validate_context_features(context_features)),
+            "arms": list(arms),
+        },
+        "policies": policy_reports,
+        "summary": {
+            "champion": champion,
+            "leaderboard": leaderboard_items,
+            "always_popular_mean_reward": always_popular_mean,
+            "best_in_hindsight_mean_reward": best_in_hindsight_mean,
+        },
+    }
+
+
+def write_bandit_comparison_report(
+    report: dict[str, Any],
+    report_dir: Path | str,
+    *,
+    report_name: str | None = None,
+) -> Path:
+    """Persist a multi-policy bandit comparison report as JSON."""
+    if (
+        not isinstance(report, dict)
+        or "config" not in report
+        or "policies" not in report
+        or "summary" not in report
+    ):
+        raise ValueError("Invalid bandit comparison report structure.")
+    target_dir = Path(report_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    report_path = target_dir / f"{report_name or 'bandit_comparison'}.json"
+    report_path.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return report_path
+
+
+def load_bandit_comparison_report(report_path: Path | str) -> dict[str, Any]:
+    """Load and validate a persisted multi-policy bandit comparison report."""
+    path = Path(report_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Bandit comparison report not found: {path}")
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            f"Failed to parse bandit comparison report '{path}': {error}"
+        ) from error
+    if (
+        not isinstance(report, dict)
+        or "config" not in report
+        or "policies" not in report
+        or "summary" not in report
+    ):
+        raise ValueError(
+            f"'{path}' is not a valid bandit comparison report "
+            "(missing 'config', 'policies', or 'summary')."
+        )
+    return report
+
+
+def write_ope_report(
+    report: dict[str, Any],
+    report_dir: Path | str,
+    *,
+    report_name: str | None = None,
+) -> Path:
+    """Persist an off-policy evaluation (OPE) report as JSON."""
+    if (
+        not isinstance(report, dict)
+        or "metrics" not in report
+        or "summary" not in report
+    ):
+        raise ValueError("Invalid OPE report structure.")
+    target_dir = Path(report_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    report_path = target_dir / f"{report_name or 'bandit_ope'}.json"
+    report_path.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return report_path
+
+
+def load_ope_report(report_path: Path | str) -> dict[str, Any]:
+    """Load and validate a persisted off-policy evaluation (OPE) report."""
+    path = Path(report_path)
+    if not path.exists():
+        raise FileNotFoundError(f"OPE report not found: {path}")
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            f"Failed to parse OPE report '{path}': {error}"
+        ) from error
+    if (
+        not isinstance(report, dict)
+        or "metrics" not in report
+        or "summary" not in report
+    ):
+        raise ValueError(
+            f"'{path}' is not a valid OPE report (missing 'metrics' or 'summary')."
+        )
+    return report

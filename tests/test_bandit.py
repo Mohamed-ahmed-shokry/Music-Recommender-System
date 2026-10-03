@@ -23,17 +23,21 @@ from music_recommender.bandit import (
     ThompsonSamplingContextualBandit,
     append_bandit_feedback,
     build_cold_start_context,
+    compare_bandit_simulation_policies,
+    compute_off_policy_evaluation,
     derive_cold_start_policy,
     dominant_policy_arm,
     feedback_from_bandit_serve,
     feedback_from_report,
     feedback_records_from_bandit_serve,
     fold_bandit_state,
+    load_bandit_comparison_report,
     load_bandit_context_features,
     load_bandit_feedback,
     load_bandit_report,
     load_bandit_state,
     load_cold_start_policy,
+    load_ope_report,
     neutral_serve_context,
     pending_feedback_count,
     rank_cold_start_arm,
@@ -46,9 +50,11 @@ from music_recommender.bandit import (
     sweep_bandit_journal,
     validate_context_features,
     validate_serve_context,
+    write_bandit_comparison_report,
     write_bandit_report,
     write_bandit_state,
     write_cold_start_policy,
+    write_ope_report,
 )
 from music_recommender.baselines import popular_artists
 from music_recommender.config import CONTEXT_FEATURES_ENV_VAR
@@ -2197,3 +2203,148 @@ class TestPhase124Simulation:
         assert res["config"]["gamma"] == 0.9
         assert "regret" in res["summary"]
         assert res["summary"]["rounds_completed"] == 10
+
+
+class TestOffPolicyEvaluation:
+    def test_compute_ope_with_bandit_policy(self) -> None:
+        records = [
+            {"context": [1.0, 0.5], "arm": "popular", "reward": 0.8},
+            {"context": [0.5, 1.0], "arm": "balanced", "reward": 0.4},
+            {"context": [1.2, 0.2], "arm": "popular", "reward": 1.0},
+            {"context": [0.1, 0.9], "arm": "long_tail", "reward": 0.2},
+        ]
+        bandit = LinUCBContextualBandit(("popular", "balanced", "long_tail"), 2)
+        ope = compute_off_policy_evaluation(records, bandit)
+
+        assert ope["summary"]["records_evaluated"] == 4
+        assert "ips" in ope["metrics"]
+        assert "snips" in ope["metrics"]
+        assert "direct_method" in ope["metrics"]
+        assert "doubly_robust" in ope["metrics"]
+        assert ope["metrics"]["ips"]["value"] >= 0.0
+        assert ope["summary"]["match_rate"] >= 0.0
+        assert ope["summary"]["effective_sample_size"] > 0.0
+
+    def test_compute_ope_with_policy_dict(self) -> None:
+        records = [
+            {"context": [1.0, 0.5], "arm": "popular", "reward": 0.8},
+            {"context": [0.5, 1.0], "arm": "balanced", "reward": 0.4},
+        ]
+        policy = {"popular": 0.7, "balanced": 0.3}
+        ope = compute_off_policy_evaluation(records, policy)
+        assert ope["target_policy"] == "custom_policy"
+        assert "lift_over_logging" in ope["metrics"]["doubly_robust"]
+
+    def test_compute_ope_with_single_arm(self) -> None:
+        records = [
+            {"context": [1.0, 0.5], "arm": "popular", "reward": 0.8},
+            {"context": [0.5, 1.0], "arm": "balanced", "reward": 0.4},
+        ]
+        ope = compute_off_policy_evaluation(records, "popular")
+        assert ope["target_policy"] == "arm_popular"
+        assert ope["arms"]["popular"]["target_action_share"] == 1.0
+
+    def test_compute_ope_with_behavior_propensities(self) -> None:
+        records = [
+            {"context": [1.0, 0.5], "arm": "popular", "reward": 0.8},
+            {"context": [0.5, 1.0], "arm": "balanced", "reward": 0.4},
+        ]
+        bandit = EpsilonGreedyContextualBandit(("popular", "balanced"), 2, alpha=0.1)
+        ope = compute_off_policy_evaluation(
+            records,
+            bandit,
+            behavior_propensities={"popular": 0.5, "balanced": 0.5},
+        )
+        assert ope["summary"]["records_evaluated"] == 2
+
+    def test_ope_validation_errors(self) -> None:
+        with pytest.raises(ValueError, match="must not be empty"):
+            compute_off_policy_evaluation([], "popular")
+        with pytest.raises(ValueError, match="min_propensity"):
+            compute_off_policy_evaluation(
+                [{"context": [1.0], "arm": "popular", "reward": 1.0}],
+                "popular",
+                min_propensity=0.0,
+            )
+        with pytest.raises(ValueError, match="Inconsistent context dimension"):
+            compute_off_policy_evaluation(
+                [
+                    {"context": [1.0, 2.0], "arm": "popular", "reward": 1.0},
+                    {"context": [1.0], "arm": "popular", "reward": 0.5},
+                ],
+                "popular",
+            )
+
+
+class TestMultiPolicyComparison:
+    def test_compare_policies_default_suite(self) -> None:
+        df = _interactions_df()
+        comp = compare_bandit_simulation_policies(df, top_k=5, rounds=10, seed=42)
+
+        assert comp["config"]["rounds"] == 10
+        assert set(comp["policies"].keys()) == {
+            "linucb",
+            "thompson_sampling",
+            "epsilon_greedy",
+        }
+        assert comp["summary"]["champion"] in comp["policies"]
+        assert len(comp["summary"]["leaderboard"]) == 3
+        for item in comp["summary"]["leaderboard"]:
+            assert "mean_reward" in item
+            assert "win_rate" in item
+            assert "regret" in item
+
+    def test_compare_policies_custom_configs(self) -> None:
+        df = _interactions_df()
+        comp = compare_bandit_simulation_policies(
+            df,
+            policies=[
+                {"name": "linucb_fast", "policy_type": "linucb", "alpha": 0.5},
+                {"name": "linucb_slow", "policy_type": "linucb", "alpha": 2.0},
+            ],
+            rounds=8,
+        )
+        assert set(comp["policies"].keys()) == {"linucb_fast", "linucb_slow"}
+        assert len(comp["summary"]["leaderboard"]) == 2
+
+    def test_compare_policies_validation(self) -> None:
+        df = _interactions_df()
+        with pytest.raises(ValueError, match="At least one policy"):
+            compare_bandit_simulation_policies(df, policies=[])
+        with pytest.raises(ValueError, match="string or dictionary"):
+            compare_bandit_simulation_policies(df, policies=[123])  # type: ignore[list-item]
+
+
+class TestPhase125Reports:
+    def test_bandit_comparison_report_roundtrip(self, tmp_path: Path) -> None:
+        report = {
+            "config": {"rounds": 5},
+            "policies": {"linucb": {"mean_reward": 0.4}},
+            "summary": {"champion": "linucb"},
+        }
+        path = write_bandit_comparison_report(report, tmp_path, report_name="test_comp")
+        assert path.exists()
+        loaded = load_bandit_comparison_report(path)
+        assert loaded == report
+
+    def test_ope_report_roundtrip(self, tmp_path: Path) -> None:
+        report = {
+            "metrics": {"ips": {"value": 0.5}},
+            "summary": {"records_evaluated": 10},
+        }
+        path = write_ope_report(report, tmp_path, report_name="test_ope")
+        assert path.exists()
+        loaded = load_ope_report(path)
+        assert loaded == report
+
+    def test_report_validation_errors(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="Invalid bandit comparison report"):
+            write_bandit_comparison_report({"invalid": True}, tmp_path)
+        with pytest.raises(ValueError, match="Invalid OPE report"):
+            write_ope_report({"invalid": True}, tmp_path)
+        bad_json = tmp_path / "bad.json"
+        bad_json.write_text("{}", encoding="utf-8")
+        with pytest.raises(ValueError, match="not a valid bandit comparison report"):
+            load_bandit_comparison_report(bad_json)
+        with pytest.raises(ValueError, match="not a valid OPE report"):
+            load_ope_report(bad_json)
