@@ -18,6 +18,7 @@ from music_recommender.bandit import (
     DEFAULT_CONTEXT_FEATURES,
     SUPPORTED_CONTEXT_FEATURES,
     BaseContextualBandit,
+    EpsilonGreedyContextualBandit,
     LinUCBContextualBandit,
     ThompsonSamplingContextualBandit,
     append_bandit_feedback,
@@ -454,6 +455,40 @@ class TestDeriveColdStartPolicy:
             derive_cold_start_policy(
                 {"arms": {"popular": {"mean_reward": float("nan")}}}
             )
+
+    def test_derives_policy_from_bandit_state(self) -> None:
+        state = {
+            "config": {"arms": ["popular", "balanced", "long_tail"]},
+            "arms": {
+                "popular": {"selections": 10, "rewards": 1.0},
+                "balanced": {"selections": 10, "rewards": 5.0},
+                "long_tail": {"selections": 10, "rewards": 9.0},
+            },
+        }
+        policy = derive_cold_start_policy(state)
+        assert set(policy) == set(DEFAULT_COLD_START_ARMS)
+        assert policy["long_tail"] > policy["balanced"] > policy["popular"]
+
+    def test_temperature_annealing_decay(self) -> None:
+        state = {
+            "config": {"arms": ["popular", "balanced"]},
+            "arms": {
+                "popular": {"selections": 50, "rewards": 10.0},
+                "balanced": {"selections": 50, "rewards": 40.0},
+            },
+        }
+        fixed = derive_cold_start_policy(state, temperature=1.0)
+        annealed = derive_cold_start_policy(
+            state, temperature=1.0, temperature_decay=0.05
+        )
+        assert annealed["balanced"] > fixed["balanced"]
+
+    def test_temperature_annealing_validation(self) -> None:
+        report = {"arms": {"popular": {"mean_reward": 0.5}}}
+        with pytest.raises(ValueError, match="temperature_decay"):
+            derive_cold_start_policy(report, temperature_decay=-0.1)
+        with pytest.raises(ValueError, match="min_temperature"):
+            derive_cold_start_policy(report, min_temperature=0)
 
 
 class TestRankColdStartBandit:
@@ -2085,3 +2120,80 @@ class TestPhase118Simulation:
         assert res["config"]["alpha_decay"] == 0.05
         assert res["config"]["gamma"] == 0.9
         assert "regret" in res["summary"]
+
+
+class TestEpsilonGreedyContextualBandit:
+    def test_select_and_update_arms(self) -> None:
+        bandit = EpsilonGreedyContextualBandit(
+            ("popular", "balanced", "long_tail"), 2, alpha=0.2, seed=42
+        )
+        context = [1.0, 0.5]
+        for _ in range(30):
+            arm = bandit.select_arm(context)
+            bandit.update(arm, context, 0.2)
+
+        assert set(bandit.selections) == set(DEFAULT_COLD_START_ARMS)
+        assert sum(bandit.selections.values()) == 30
+        assert sum(bandit.rewards.values()) == pytest.approx(6.0, abs=1e-6)
+
+    def test_reproducible_with_seed(self) -> None:
+        b1 = EpsilonGreedyContextualBandit(
+            ("popular", "balanced"), 2, alpha=0.5, seed=123
+        )
+        b2 = EpsilonGreedyContextualBandit(
+            ("popular", "balanced"), 2, alpha=0.5, seed=123
+        )
+        context = [0.8, -0.2]
+        selections1 = [b1.select_arm(context) for _ in range(15)]
+        selections2 = [b2.select_arm(context) for _ in range(15)]
+        assert selections1 == selections2
+
+    def test_pure_greedy_selects_highest_point_estimate(self) -> None:
+        bandit = EpsilonGreedyContextualBandit(
+            ("popular", "balanced"), 1, alpha=0.0000001, seed=42
+        )
+        for _ in range(5):
+            bandit.update("popular", [1.0], 1.0)
+            bandit.update("balanced", [1.0], 0.1)
+
+        selections = [bandit.select_arm([1.0]) for _ in range(10)]
+        assert selections == ["popular"] * 10
+
+    def test_state_serialization_roundtrip(self) -> None:
+        bandit = EpsilonGreedyContextualBandit(
+            ("popular", "balanced"), 2, alpha=0.3, alpha_decay=0.01, seed=7
+        )
+        context = [1.0, 2.0]
+        bandit.update("popular", context, 1.0)
+        state = snapshot_bandit_state(bandit)
+        assert state["config"]["policy_type"] == "epsilon_greedy"
+        assert state["config"]["alpha"] == 0.3
+        assert state["config"]["alpha_decay"] == 0.01
+
+        restored = BaseContextualBandit.from_state(state)
+        assert isinstance(restored, EpsilonGreedyContextualBandit)
+        assert restored.policy_type == "epsilon_greedy"
+        assert restored.alpha == 0.3
+        assert restored.alpha_decay == 0.01
+        assert restored.selections["popular"] == 1
+
+
+class TestPhase124Simulation:
+    def test_simulation_with_epsilon_greedy(self) -> None:
+        df = _interactions_df()
+        res = simulate_cold_start_exploration(
+            df,
+            5,
+            10,
+            policy_type="epsilon_greedy",
+            alpha=0.2,
+            alpha_decay=0.05,
+            gamma=0.9,
+            seed=42,
+        )
+        assert res["config"]["policy_type"] == "epsilon_greedy"
+        assert res["config"]["alpha"] == 0.2
+        assert res["config"]["alpha_decay"] == 0.05
+        assert res["config"]["gamma"] == 0.9
+        assert "regret" in res["summary"]
+        assert res["summary"]["rounds_completed"] == 10

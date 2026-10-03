@@ -43,7 +43,11 @@ from music_recommender.ranking import validate_ranking_parameters
 
 DEFAULT_COLD_START_ARMS: tuple[str, ...] = ("popular", "balanced", "long_tail")
 DEFAULT_CONTEXT_FEATURES = ("log_plays", "log_unique_artists", "mean_popularity_rank")
-SUPPORTED_BANDIT_POLICIES: tuple[str, ...] = ("linucb", "thompson_sampling")
+SUPPORTED_BANDIT_POLICIES: tuple[str, ...] = (
+    "linucb",
+    "thompson_sampling",
+    "epsilon_greedy",
+)
 DEFAULT_BANDIT_POLICY: str = "linucb"
 
 
@@ -385,11 +389,13 @@ class BaseContextualBandit:
         _validate_arms([str(arm) for arm in arms])
 
         if cls is BaseContextualBandit:
-            target_cls: type[BaseContextualBandit] = (
-                ThompsonSamplingContextualBandit
-                if policy_type_raw == "thompson_sampling"
-                else LinUCBContextualBandit
-            )
+            target_cls: type[BaseContextualBandit]
+            if policy_type_raw == "thompson_sampling":
+                target_cls = ThompsonSamplingContextualBandit
+            elif policy_type_raw == "epsilon_greedy":
+                target_cls = EpsilonGreedyContextualBandit
+            else:
+                target_cls = LinUCBContextualBandit
         else:
             target_cls = cls
 
@@ -516,6 +522,46 @@ class ThompsonSamplingContextualBandit(BaseContextualBandit):
         best_arm = max(
             self.arms,
             key=lambda arm: (sampled_scores[arm], arm),
+        )
+        return best_arm
+
+
+class EpsilonGreedyContextualBandit(BaseContextualBandit):
+    """Contextual multi-armed bandit using contextual epsilon-greedy exploration.
+
+    Each arm maintains a ridge regression over context features. With
+    probability epsilon(t) = epsilon / (1 + alpha_decay * t) (where epsilon
+    is parameterized via the alpha exploration parameter), an arm is chosen
+    uniformly at random. With probability 1 - epsilon(t), the arm with the
+    highest estimated reward x^T theta (where theta = A^{-1} b) is selected
+    greedily, with deterministic lexicographic tie-breaking.
+    """
+
+    policy_type = "epsilon_greedy"
+
+    def select_arm(self, context: Sequence[float]) -> str:
+        """Select an arm using contextual epsilon-greedy exploration."""
+        context_array = np.asarray(context, dtype=float)
+        if context_array.ndim != 1 or context_array.size != self.context_dim:
+            raise ValueError(
+                f"context must be a {self.context_dim}-dimensional vector."
+            )
+        eps = float(np.clip(self.effective_alpha, 0.0, 1.0))
+        if self._rng.random() < eps:
+            arm_index = int(self._rng.integers(0, len(self.arms)))
+            return self.arms[arm_index]
+
+        scores: dict[str, float] = {}
+        for arm in self.arms:
+            matrix = self._a[arm]
+            inv_matrix = np.linalg.inv(matrix)
+            theta = inv_matrix @ self._b[arm]
+            score = float(np.clip(context_array @ theta, -1e9, 1e9))
+            scores[arm] = score
+
+        best_arm = max(
+            self.arms,
+            key=lambda arm: (scores[arm], arm),
         )
         return best_arm
 
@@ -1434,7 +1480,11 @@ def simulate_cold_start_exploration(
         target_cls: Any = (
             ThompsonSamplingContextualBandit
             if policy_type == "thompson_sampling"
-            else LinUCBContextualBandit
+            else (
+                EpsilonGreedyContextualBandit
+                if policy_type == "epsilon_greedy"
+                else LinUCBContextualBandit
+            )
         )
         bandit = target_cls(
             arms,
@@ -1601,15 +1651,23 @@ def derive_cold_start_policy(
     report: dict[str, Any],
     *,
     temperature: float = 1.0,
+    temperature_decay: float = 0.0,
+    min_temperature: float = 0.01,
 ) -> dict[str, float]:
-    """Convert a bandit report into per-arm serving weights (softmax).
+    """Convert a bandit report or state snapshot into per-arm serving weights (softmax).
 
     Weights are computed as the softmax over each arm's learned mean reward,
     so higher-reward arms dominate the served blend while lower-reward arms
-    retain a small exploration share. Deterministic for a given report.
+    retain an exploration share. Supports temperature annealing
+    tau(t) = max(min_temperature, tau_0 / (1 + temperature_decay * t)),
+    where t is the total round or selection count.
     """
     if not np.isfinite(temperature) or temperature <= 0:
         raise ValueError("temperature must be a finite positive number.")
+    if not np.isfinite(temperature_decay) or temperature_decay < 0:
+        raise ValueError("temperature_decay must be a non-negative finite number.")
+    if not np.isfinite(min_temperature) or min_temperature <= 0:
+        raise ValueError("min_temperature must be a finite positive number.")
     if "arms" not in report or not isinstance(report["arms"], dict):
         raise ValueError(
             "Report must contain an 'arms' dictionary with learned arm weights."
@@ -1619,15 +1677,46 @@ def derive_cold_start_policy(
     for arm, stats in report["arms"].items():
         if not isinstance(stats, dict):
             raise ValueError(f"Arm '{arm}' stats must be a dictionary.")
-        mean_reward = stats.get("mean_reward")
+        if "mean_reward" in stats:
+            mean_reward = stats.get("mean_reward")
+        elif "rewards" in stats and "selections" in stats:
+            selections = stats.get("selections")
+            rewards = stats.get("rewards")
+            if type(selections) is not int or selections < 0:
+                raise ValueError(f"Arm '{arm}' has invalid selections tally.")
+            if not isinstance(rewards, (int, float)) or not np.isfinite(rewards):
+                raise ValueError(f"Arm '{arm}' has invalid rewards tally.")
+            mean_reward = float(rewards) / selections if selections > 0 else 0.0
+        else:
+            raise ValueError(f"Arm '{arm}' is missing a finite 'mean_reward'.")
+
         if not isinstance(mean_reward, (int, float)) or not np.isfinite(mean_reward):
             raise ValueError(f"Arm '{arm}' is missing a finite 'mean_reward'.")
         arm_rewards[arm] = float(mean_reward)
 
     _validate_arms(list(arm_rewards))
+
+    effective_temperature = float(temperature)
+    if temperature_decay > 0.0:
+        t = 0
+        if "summary" in report and isinstance(report["summary"], dict):
+            rounds_val = report["summary"].get("rounds_completed", 0)
+            if isinstance(rounds_val, (int, float)):
+                t = int(rounds_val)
+        if t == 0:
+            t = sum(
+                int(s.get("selections", 0))
+                for s in report["arms"].values()
+                if isinstance(s, dict) and isinstance(s.get("selections"), int)
+            )
+        effective_temperature = max(
+            min_temperature,
+            float(temperature / (1.0 + temperature_decay * t)),
+        )
+
     rewards = np.asarray([arm_rewards[arm] for arm in arm_rewards], dtype=float)
     shifted = rewards - rewards.max()
-    exponentials = np.exp(shifted / temperature)
+    exponentials = np.exp(shifted / effective_temperature)
     weights = exponentials / exponentials.sum()
     return {
         arm: round(float(weight), 8)
