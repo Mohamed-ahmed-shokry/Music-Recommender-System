@@ -21,7 +21,10 @@ served traffic contributes directly to the next policy.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import tempfile
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -913,18 +916,35 @@ def _validate_feedback_record(record: dict[str, Any]) -> None:
         raise ValueError("Feedback record 'reward' must be a finite number.")
 
 
-def append_bandit_feedback(
-    record: dict[str, Any],
+def append_bandit_feedback_batch(
+    records: Sequence[dict[str, Any]],
     path: Path | str,
 ) -> Path:
-    """Append a served-request observation to the feedback journal.
+    """Append a batch of served-request observations to the feedback journal.
 
     The journal is a JSON list of ``{context, arm, reward}`` records, matching
-    the per-round observations recorded by the simulation, so live serving
-    feedback and offline report rounds can be folded into a state together.
+    the per-round observations recorded by the simulation. The batch is appended
+    atomically in a single file operation. If ``records`` is empty, the journal file
+    is left untouched.
     """
-    _validate_feedback_record(record)
     target = Path(path)
+    if not records:
+        return target
+
+    formatted_entries: list[dict[str, Any]] = []
+    for record in records:
+        _validate_feedback_record(record)
+        entry: dict[str, Any] = {
+            "context": [float(value) for value in _feedback_record_context(record)],
+            "arm": str(record["arm"]),
+            "reward": float(record["reward"]),
+        }
+        if "occurred_at" in record:
+            entry["occurred_at"] = str(record["occurred_at"])
+        if "user_id" in record:
+            entry["user_id"] = str(record["user_id"])
+        formatted_entries.append(entry)
+
     existing: list[dict[str, Any]] = []
     if target.exists():
         try:
@@ -938,22 +958,42 @@ def append_bandit_feedback(
                 f"'{target}' is not a bandit feedback journal (JSON list)."
             )
 
-    entry = {
-        "context": [float(value) for value in _feedback_record_context(record)],
-        "arm": str(record["arm"]),
-        "reward": float(record["reward"]),
-    }
-    if "occurred_at" in record:
-        entry["occurred_at"] = str(record["occurred_at"])
-    if "user_id" in record:
-        entry["user_id"] = str(record["user_id"])
-    target.parent.mkdir(parents=True, exist_ok=True)
-    existing.append(entry)
-    target.write_text(
-        json.dumps(existing, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    target_dir = target.parent if str(target.parent) else Path(".")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    existing.extend(formatted_entries)
+
+    content = json.dumps(existing, indent=2, sort_keys=True) + "\n"
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=target_dir,
+            delete=False,
+            encoding="utf-8",
+            suffix=".tmp",
+        ) as tmp_file:
+            tmp_file.write(content)
+            tmp_path = Path(tmp_file.name)
+        os.replace(tmp_path, target)
+    except Exception:
+        if tmp_path is not None and tmp_path.exists():
+            with contextlib.suppress(OSError):
+                tmp_path.unlink()
+        raise
     return target
+
+
+def append_bandit_feedback(
+    record: dict[str, Any],
+    path: Path | str,
+) -> Path:
+    """Append a served-request observation to the feedback journal.
+
+    The journal is a JSON list of ``{context, arm, reward}`` records, matching
+    the per-round observations recorded by the simulation, so live serving
+    feedback and offline report rounds can be folded into a state together.
+    """
+    return append_bandit_feedback_batch([record], path)
 
 
 def load_bandit_feedback(path: Path | str) -> list[dict[str, Any]]:

@@ -22,6 +22,7 @@ from music_recommender.bandit import (
     LinUCBContextualBandit,
     ThompsonSamplingContextualBandit,
     append_bandit_feedback,
+    append_bandit_feedback_batch,
     build_cold_start_context,
     compare_bandit_simulation_policies,
     compute_off_policy_evaluation,
@@ -925,6 +926,46 @@ class TestFeedbackJournal:
         assert records[0]["arm"] == "popular"
         assert records[1]["arm"] == "long_tail"
         assert records[1]["reward"] == 1.0
+
+    def test_append_batch_and_load(self, tmp_path: Path) -> None:
+        journal = tmp_path / "nested" / "feedback.json"
+        entries = [
+            {"context": [1.0, 0.5], "arm": "popular", "reward": 0.5, "user_id": "u1"},
+            {"context": [0.2, 0.8], "arm": "long_tail", "reward": 1.0, "user_id": "u2"},
+        ]
+        res = append_bandit_feedback_batch(entries, journal)
+        assert res == journal
+        assert journal.exists()
+
+        records = load_bandit_feedback(journal)
+        assert len(records) == 2
+        assert records[0]["user_id"] == "u1"
+        assert records[1]["user_id"] == "u2"
+
+        # Append another batch to existing journal
+        more_entries = [
+            {"context": [0.0, 0.0], "arm": "balanced", "reward": 0.25},
+        ]
+        append_bandit_feedback_batch(more_entries, journal)
+        updated = load_bandit_feedback(journal)
+        assert len(updated) == 3
+        assert updated[2]["arm"] == "balanced"
+
+    def test_append_batch_empty_noop(self, tmp_path: Path) -> None:
+        journal = tmp_path / "nonexistent.json"
+        res = append_bandit_feedback_batch([], journal)
+        assert res == journal
+        assert not journal.exists()
+
+    def test_append_batch_validates_all_records(self, tmp_path: Path) -> None:
+        journal = tmp_path / "feedback.json"
+        entries = [
+            {"context": [1.0], "arm": "popular", "reward": 1.0},
+            {"context": [1.0], "arm": "invalid_arm", "reward": 1.0},
+        ]
+        with pytest.raises(ValueError, match="Unknown arm"):
+            append_bandit_feedback_batch(entries, journal)
+        assert not journal.exists()
 
     def test_append_preserves_optional_fields(self, tmp_path: Path) -> None:
         journal = tmp_path / "feedback.json"
