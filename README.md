@@ -738,6 +738,35 @@ and the plain `popular_fallback` branch never record. The same lifecycle is
 exposed over the API (`GET /bandit/status`, `POST /bandit/update`) and as a
 "Cold-Start Bandit" tab in the dashboard with a one-click fold action.
 
+### Real-Time Streaming Feedback Ingestion and Non-Blocking Buffering
+
+In high-throughput environments, appending feedback synchronously to disk during request serving introduces I/O latency and contention. The system provides `StreamingFeedbackQueue` to decouple feedback collection from the request serving thread:
+
+1. **Non-Blocking Ingestion**: Served feedback records are validated and pushed onto an in-memory bounded queue without blocking the calling thread.
+2. **Backpressure Strategies**: Under burst traffic, configurable backpressure policies protect system memory:
+   - `drop_oldest`: Evicts the oldest unwritten feedback items when queue reaches `max_queue_size`.
+   - `reject`: Rejects new records without modifying existing queue items (with optional `FeedbackQueueFullError`).
+   - `block`: Pauses enqueueing threads up to `enqueue_timeout` before rejecting.
+3. **Background Batch Flusher**: A daemon worker flushes accumulated records to disk atomically in chunks (`batch_size`) or when `flush_interval_seconds` elapses.
+4. **Service Integration**: Enable via `RecommenderService(enable_streaming_feedback=True)` or pass a custom `feedback_queue`. When active, `recommend_user` returns `"queued": True` along with real-time `"queue_depth"`, and metrics are exposed in `bandit_status()["streaming_queue"]`.
+
+```python
+from music_recommender.bandit import BackpressureStrategy, StreamingFeedbackQueue
+from music_recommender.service import RecommenderService
+
+# Run service with non-blocking streaming feedback queue
+with StreamingFeedbackQueue(
+    max_queue_size=10_000,
+    batch_size=50,
+    flush_interval_seconds=1.0,
+    backpressure=BackpressureStrategy.DROP_OLDEST,
+) as feedback_queue:
+    service = RecommenderService.from_artifacts(feedback_queue=feedback_queue)
+    response = service.recommend_user("unknown_user", top_k=5, record_feedback=True)
+    # response["feedback"]["queued"] is True
+    # response["feedback"]["queue_depth"] reports current buffered records
+```
+
 ### Automated Online Sweeping, State Snapshots, and Policy Drift
 
 To operationalize the cold-start bandit in production environments:
