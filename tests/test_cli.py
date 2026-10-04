@@ -2748,7 +2748,8 @@ def test_bandit_policy_cli_from_state(tmp_path: Path) -> None:
         ],
     )
     assert res.exit_code == 0
-    assert "Learned cold-start policy arm weights (from state" in res.output
+    assert "Learned cold-start policy arm weights:" in res.output
+    assert "Source: state" in res.output
     assert (tmp_path / "derived_policy.json").exists()
 
 

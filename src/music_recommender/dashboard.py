@@ -10,7 +10,10 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from music_recommender.config import ARTIFACT_BUNDLE_PATH
+from music_recommender.config import (
+    ARTIFACT_BUNDLE_PATH,
+    COLD_START_POLICY_PATH,
+)
 from music_recommender.service import RecommenderService
 
 DASHBOARD_ARTIFACT_ENV_VAR = "MUSIC_RECOMMENDER_ARTIFACT_PATH"
@@ -954,6 +957,214 @@ def _render_bandit_tab(service: RecommenderService) -> None:
             "No snapshots found in `reports/bandit_snapshots/`. "
             "Create a snapshot above to begin tracking policy drift."
         )
+
+    st.divider()
+    st.subheader("Cold-Start Policy Derivation")
+    st.caption(
+        "Derive serving softmax arm weights from the active bandit state with "
+        "optional temperature annealing."
+    )
+    p_col1, p_col2, p_col3 = st.columns(3)
+    with p_col1:
+        temp_input = st.slider(
+            "Temperature (tau_0)",
+            min_value=0.1,
+            max_value=3.0,
+            value=1.0,
+            step=0.05,
+            key="bandit_derive_temperature",
+            help="Higher temperature yields more uniform exploration.",
+        )
+    with p_col2:
+        decay_input = st.slider(
+            "Temperature decay rate",
+            min_value=0.0,
+            max_value=0.1,
+            value=0.0,
+            step=0.005,
+            key="bandit_derive_temp_decay",
+            help="Annealing schedule decay lambda: tau(t) = max(min_t, tau_0/(1+l*t)).",
+        )
+    with p_col3:
+        min_temp_input = st.slider(
+            "Min temperature floor",
+            min_value=0.01,
+            max_value=0.5,
+            value=0.05,
+            step=0.01,
+            key="bandit_derive_min_temp",
+            help="Minimum temperature boundary under annealing schedule.",
+        )
+    persist_check = st.checkbox(
+        "Persist derived weights to active serving policy location",
+        value=True,
+        key="bandit_derive_persist_check",
+    )
+    if st.button("Derive Policy", key="btn_bandit_derive_policy"):
+        try:
+            derived_weights = service.derive_cold_start_policy_from_state(
+                temperature=temp_input,
+                temperature_decay=decay_input,
+                min_temperature=min_temp_input,
+                persist_path=COLD_START_POLICY_PATH if persist_check else None,
+                update_active_policy=persist_check,
+            )
+            st.success("Derived cold-start serving weights successfully.")
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {"Arm": arm, "Weight": weight}
+                        for arm, weight in sorted(
+                            derived_weights.items(), key=lambda x: -x[1]
+                        )
+                    ]
+                ),
+                hide_index=True,
+                width="stretch",
+            )
+        except (FileNotFoundError, ValueError) as error:
+            st.error(f"Derivation failed: {error}")
+
+    st.divider()
+    st.subheader("Offline Evaluation & Policy Benchmarking")
+
+    with st.expander("Offline Policy Evaluation (OPE) on Logged Feedback"):
+        st.caption(
+            "Evaluate candidate policies counterfactually using Inverse Propensity "
+            "Scoring (IPS), SnIPS, Direct Method (DM), and Doubly Robust (DR)."
+        )
+        ope_col1, ope_col2 = st.columns(2)
+        with ope_col1:
+            candidate_policy = st.selectbox(
+                "Candidate Target Policy",
+                options=[
+                    "linucb",
+                    "thompson_sampling",
+                    "epsilon_greedy",
+                    "active_state",
+                    "popular",
+                ],
+                index=0,
+                key="bandit_ope_candidate_policy",
+            )
+        with ope_col2:
+            propensity_clip = st.slider(
+                "Min Propensity Clip Threshold",
+                min_value=0.01,
+                max_value=0.20,
+                value=0.01,
+                step=0.01,
+                key="bandit_ope_propensity_clip",
+            )
+        if st.button("Run Off-Policy Evaluation", key="btn_run_bandit_ope"):
+            try:
+                target_arg: Any = (
+                    candidate_policy if candidate_policy != "active_state" else None
+                )
+                ope_res = service.evaluate_bandit_off_policy(
+                    target_policy=target_arg,
+                    min_propensity=propensity_clip,
+                )
+                ope_summary = ope_res["summary"]
+                ope_metrics = ope_res["metrics"]
+                m_cols = st.columns(4)
+                m_cols[0].metric(
+                    "Records Evaluated", ope_summary["records_evaluated"]
+                )
+                m_cols[1].metric("Match Rate", f"{ope_summary['match_rate']:.1%}")
+                m_cols[2].metric(
+                    "Effective Sample Size",
+                    f"{ope_summary['effective_sample_size']:.1f}",
+                )
+                m_cols[3].metric(
+                    "Logged Mean Reward",
+                    f"{ope_summary['logging_mean_reward']:.4f}",
+                )
+
+                est_rows = [
+                    {
+                        "Estimator": "Inverse Propensity (IPS)",
+                        "Estimated Value": ope_metrics["ips"]["value"],
+                        "Std Error": ope_metrics["ips"].get("standard_error", "-"),
+                    },
+                    {
+                        "Estimator": "Self-Normalized (SnIPS)",
+                        "Estimated Value": ope_metrics["snips"]["value"],
+                        "Std Error": "-",
+                    },
+                    {
+                        "Estimator": "Direct Method (DM)",
+                        "Estimated Value": ope_metrics["direct_method"]["value"],
+                        "Std Error": ope_metrics["direct_method"].get(
+                            "standard_error", "-"
+                        ),
+                    },
+                    {
+                        "Estimator": "Doubly Robust (DR)",
+                        "Estimated Value": ope_metrics["doubly_robust"]["value"],
+                        "Std Error": ope_metrics["doubly_robust"].get(
+                            "standard_error", "-"
+                        ),
+                    },
+                ]
+                st.dataframe(pd.DataFrame(est_rows), hide_index=True, width="stretch")
+            except (FileNotFoundError, ValueError) as error:
+                st.error(f"Off-policy evaluation failed: {error}")
+
+    with st.expander("Multi-Policy Comparative Simulation Benchmark"):
+        st.caption(
+            "Benchmark candidate policies side-by-side across identical holdout splits."
+        )
+        bench_col1, bench_col2 = st.columns(2)
+        with bench_col1:
+            bench_rounds = st.number_input(
+                "Simulation Rounds",
+                min_value=5,
+                max_value=100,
+                value=20,
+                step=5,
+                key="bandit_bench_rounds",
+            )
+        with bench_col2:
+            bench_policies = st.multiselect(
+                "Benchmark Policies",
+                options=["linucb", "thompson_sampling", "epsilon_greedy"],
+                default=["linucb", "thompson_sampling", "epsilon_greedy"],
+                key="bandit_bench_policies",
+            )
+        if st.button("Run Policy Benchmark", key="btn_run_bandit_bench"):
+            if not bench_policies:
+                st.warning("Select at least one policy to benchmark.")
+            else:
+                try:
+                    bench_res = service.compare_bandit_policies(
+                        policies=bench_policies,
+                        rounds=int(bench_rounds),
+                    )
+                    champ = bench_res["summary"]["champion"]
+                    st.success(f"Benchmark completed! Champion: **{champ}**")
+                    board_items = bench_res["summary"]["leaderboard"]
+                    leaderboard_rows = []
+                    for rank, b_item in enumerate(board_items, start=1):
+                        p_name = b_item["name"]
+                        p_stats = bench_res["policies"][p_name]
+                        leaderboard_rows.append(
+                            {
+                                "Rank": rank,
+                                "Policy": p_name,
+                                "Cum. Reward": round(p_stats["cumulative_reward"], 4),
+                                "Mean Reward": round(p_stats["mean_reward"], 4),
+                                "Regret": round(p_stats["regret"], 4),
+                                "Win Rate": f"{b_item['win_rate']:.1%}",
+                            }
+                        )
+                    st.dataframe(
+                        pd.DataFrame(leaderboard_rows),
+                        hide_index=True,
+                        width="stretch",
+                    )
+                except (FileNotFoundError, ValueError) as error:
+                    st.error(f"Policy benchmark failed: {error}")
 
 
 def render_dashboard(service: RecommenderService) -> None:

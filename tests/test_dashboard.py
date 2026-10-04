@@ -172,6 +172,83 @@ class FakeDashboardService:
         status["journal"]["pending"] = 0
         return status
 
+    def evaluate_bandit_off_policy(
+        self,
+        *,
+        target_policy: Any = None,
+        min_propensity: float = 0.01,
+        ridge_lambda: float = 1.0,
+    ) -> dict[str, Any]:
+        return {
+            "target_policy": str(target_policy or "linucb"),
+            "summary": {
+                "records_evaluated": 15,
+                "match_rate": 0.85,
+                "effective_sample_size": 12.4,
+                "logging_mean_reward": 0.62,
+            },
+            "metrics": {
+                "ips": {"value": 0.72, "standard_error": 0.05},
+                "snips": {"value": 0.69},
+                "direct_method": {"value": 0.71, "standard_error": 0.04},
+                "doubly_robust": {"value": 0.73, "standard_error": 0.04},
+            },
+        }
+
+    def compare_bandit_policies(
+        self,
+        *,
+        policies: Any = None,
+        rounds: int = 20,
+    ) -> dict[str, Any]:
+        return {
+            "config": {"rounds": rounds},
+            "policies": {
+                "linucb": {
+                    "cumulative_reward": 10.0,
+                    "mean_reward": 0.5,
+                    "regret": 2.0,
+                },
+                "thompson_sampling": {
+                    "cumulative_reward": 12.0,
+                    "mean_reward": 0.6,
+                    "regret": 1.0,
+                },
+                "epsilon_greedy": {
+                    "cumulative_reward": 9.5,
+                    "mean_reward": 0.475,
+                    "regret": 2.5,
+                },
+            },
+            "summary": {
+                "champion": "thompson_sampling",
+                "leaderboard": [
+                    {
+                        "name": "thompson_sampling",
+                        "mean_reward": 0.6,
+                        "win_rate": 0.55,
+                    },
+                    {"name": "linucb", "mean_reward": 0.5, "win_rate": 0.30},
+                    {
+                        "name": "epsilon_greedy",
+                        "mean_reward": 0.475,
+                        "win_rate": 0.15,
+                    },
+                ],
+            },
+        }
+
+    def derive_cold_start_policy_from_state(
+        self,
+        *,
+        temperature: float = 1.0,
+        temperature_decay: float = 0.0,
+        min_temperature: float = 0.05,
+        persist_path: Any = None,
+        update_active_policy: bool = True,
+    ) -> dict[str, float]:
+        return {"popular": 0.65, "long_tail": 0.35}
+
     def browse_artists(
         self,
         *,
@@ -662,6 +739,49 @@ def test_dashboard_bandit_tab_surfaces_snapshot_errors() -> None:
     assert any(
         error.value.startswith("Snapshot creation failed:") for error in app.error
     )
+
+
+def test_dashboard_bandit_tab_derivation_ope_and_benchmark() -> None:
+    service = FakeDashboardService()
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+
+    # 1. Derive policy
+    derive_button = next(
+        button for button in app.button if button.label == "Derive Policy"
+    )
+    derive_button.click().run()
+    assert not app.exception
+    assert any(
+        "Derived cold-start serving weights successfully." in s.value
+        for s in app.success
+    )
+
+    # 2. Run OPE
+    ope_button = next(
+        button
+        for button in app.button
+        if button.label == "Run Off-Policy Evaluation"
+    )
+    ope_button.click().run()
+    assert not app.exception
+    assert any(metric.label == "Records Evaluated" for metric in app.metric)
+    assert any(metric.label == "Match Rate" for metric in app.metric)
+
+    # 3. Run Benchmark
+    bench_button = next(
+        button
+        for button in app.button
+        if button.label == "Run Policy Benchmark"
+    )
+    bench_button.click().run()
+    assert not app.exception
+    assert any("Benchmark completed! Champion:" in s.value for s in app.success)
 
 
 def test_ablation_ranking_rows_shapes_summary_data() -> None:

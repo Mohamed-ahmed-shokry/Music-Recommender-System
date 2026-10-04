@@ -2370,7 +2370,8 @@ def bandit_policy(
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
-    typer.echo(f"Learned cold-start policy arm weights (from {source_desc}):")
+    typer.echo("Learned cold-start policy arm weights:")
+    typer.echo(f"Source: {source_desc}")
     typer.echo(f"{'Arm':<12} {'Weight':>12}")
     typer.echo("-" * 26)
     for arm, weight in sorted(policy.items(), key=lambda item: (-item[1], item[0])):
