@@ -7,6 +7,36 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-04
+
+### Added
+
+- Contextual Bandit Off-Policy Evaluation (OPE), Epsilon-Greedy Exploration, and Multi-Policy Comparative Benchmarking:
+  - Contextual Epsilon-Greedy exploration policy (`EpsilonGreedyContextualBandit` extending `BaseContextualBandit` alongside `LinUCB` and `ThompsonSampling`), featuring ridge regression state updates, dynamic exploration cooling schedule $\epsilon(t) = \max(0, \epsilon_0 / (1 + \lambda t))$, and reproducible arm selection.
+  - Off-Policy Evaluation (OPE) engine: `compute_off_policy_evaluation` implementing Inverse Propensity Scoring (IPS), Self-Normalized IPS (SnIPS), Direct Method (DM) with regularized ridge regression, and Doubly Robust (DR) estimation with standard errors, match rates, and Effective Sample Size (ESS) metrics.
+  - Multi-policy comparative simulation benchmarking: `compare_bandit_simulation_policies` testing LinUCB, Thompson Sampling, and Epsilon-Greedy across identical holdout splits, reporting side-by-side rewards, regrets, win rates, and arm distributions.
+  - Cold-start policy derivation from state snapshots: `derive_cold_start_policy` and `derive_cold_start_policy_from_state` supporting dynamic temperature annealing schedule $\tau(t) = \max(\tau_{\min}, \tau_0 / (1 + \lambda_{\text{temp}} t))$ with softmax arm weights.
+  - Persistence helpers: `write_bandit_comparison_report`, `load_bandit_comparison_report`, `write_ope_report`, and `load_ope_report`.
+  - Service integration: `RecommenderService.evaluate_bandit_off_policy`, `RecommenderService.compare_bandit_policies`, `RecommenderService.derive_cold_start_policy_from_state`, and `supported_policies` metadata in `bandit_status()`.
+  - CLI commands & options:
+    - `simulate-bandit` supports `--compare-policies` and `--policies` benchmarking flags, with formatted comparative leaderboard tables, as well as `policy_type="epsilon_greedy"`.
+    - `bandit-policy` supports direct state derivation via `--from-state`, with annealing options `--temperature-decay` and `--min-temperature`.
+    - New `bandit-eval-offline` command computing IPS, SnIPS, DM, and DR estimators over feedback journals with candidate state or policy targets and optional report persistence.
+  - API endpoints:
+    - `POST /bandit/evaluate/off-policy`: counterfactual policy evaluation on feedback journals.
+    - `POST /bandit/evaluate/compare`: multi-policy comparative simulation benchmarking.
+    - `POST /bandit/policy/derive`: cold-start policy derivation from state or simulation reports with temperature annealing.
+  - Dashboard integration: Cold-Start Bandit tab features interactive policy derivation with temperature annealing sliders, an Off-Policy Evaluation (OPE) explorer with estimator tables and sample size metrics, and a Multi-Policy Comparative Benchmark runner with leaderboard visualization.
+
+### Tests
+
+- 994 automated tests passing with 95.02% total code coverage (well above the required 75%):
+  - `tests/test_bandit.py`: full unit coverage for `EpsilonGreedyContextualBandit`, state-driven `derive_cold_start_policy` with temperature annealing, `compute_off_policy_evaluation` (IPS/SnIPS/DM/DR/ESS/edge cases), and `compare_bandit_simulation_policies`.
+  - `tests/test_service.py`: integration tests for `evaluate_bandit_off_policy`, `compare_bandit_policies`, `derive_cold_start_policy_from_state`, and `supported_policies` status.
+  - `tests/test_cli.py`: end-to-end CLI tests for `simulate-bandit --compare-policies`, `bandit-policy --from-state`, and `bandit-eval-offline`.
+  - `tests/test_api.py`: FastAPI routes for `/bandit/evaluate/off-policy`, `/bandit/evaluate/compare`, and `/bandit/policy/derive` with success, not found, and validation error paths.
+  - `tests/test_dashboard.py`: Streamlit dashboard testing for cold-start derivation, OPE evaluation, and comparative benchmarking.
+
 ## [0.27.0] - 2026-09-30
 
 ### Added

@@ -775,6 +775,26 @@ To operationalize the cold-start bandit in production environments:
    uv run python -m music_recommender.cli bandit-drift --reference bandit_state_20260927T000000Z_baseline.json
    ```
 
+### Multi-Policy Benchmarking, State Derivation, and Off-Policy Evaluation (OPE)
+
+1. **Comparative Multi-Policy Benchmarking**:
+   Benchmark LinUCB, Thompson Sampling, and Epsilon-Greedy policies side-by-side across identical user holdouts:
+   ```bash
+   uv run python -m music_recommender.cli simulate-bandit --compare-policies --rounds 50
+   ```
+
+2. **State-Driven Policy Derivation with Temperature Annealing**:
+   Derive serving softmax weights directly from a learned state snapshot:
+   ```bash
+   uv run python -m music_recommender.cli bandit-policy --from-state reports/bandit_state.json --temperature 1.2 --temperature-decay 0.01 --min-temperature 0.05
+   ```
+
+3. **Offline Policy Evaluation (OPE)**:
+   Evaluate candidate policies counterfactually using Inverse Propensity Scoring (IPS), SnIPS, Direct Method (DM), and Doubly Robust (DR) estimation on logged feedback journals:
+   ```bash
+   uv run python -m music_recommender.cli bandit-eval-offline --feedback-path data/bandit_feedback.jsonl --policy-type epsilon_greedy --alpha 0.1 --write-report
+   ```
+
 Track evaluation reports land in `reports/` as JSON (`track_evaluation.json`
 by default), recording the run configuration and per-arm metrics. Specify
 `--report-dir` to customize the output directory.
@@ -813,6 +833,9 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/bandit/snapshots` | List persisted bandit state snapshots sorted newest first |
 | `POST` | `/bandit/snapshots` | Create a timestamped bandit state snapshot (optional `{"label": "..."}` body) |
 | `GET` | `/bandit/drift` | Parameter and reward drift between current state and reference snapshot (optional `?reference=...`) |
+| `POST` | `/bandit/evaluate/off-policy` | Offline policy evaluation (IPS, SnIPS, DM, DR) on logged feedback |
+| `POST` | `/bandit/evaluate/compare` | Multi-policy comparative simulation benchmarking |
+| `POST` | `/bandit/policy/derive` | Cold-start policy derivation from state or report with temperature annealing |
 | `POST` | `/recommend/profile` | Onboarding recommendations from artists, genres, and moods |
 | `POST` | `/recommend/session` | Short-term session recommendations from seeds, exclusions, and optional user taste |
 | `GET` | `/similar-artists/{artist_id}?method=hybrid&top_k=10` | ALS, content, or hybrid similar artists |
@@ -1548,8 +1571,13 @@ See [PLAN.md](PLAN.md) for the full phased plan.
   exponential recency reward discounting ($\gamma \in (0, 1]$), dynamic exploration cooling
   schedules ($\alpha(t) = \alpha_0 / (1 + \lambda t)$), and comprehensive CLI, service, API,
   and dashboard policy controls. ✓ (0.27.0)
-- Next: exponential reward discounting / recency weighting, Thompson Sampling
-  contextual bandit exploration policy, and dynamic temperature annealing.
+- Contextual Bandit Off-Policy Evaluation (OPE), Epsilon-Greedy Exploration, and Multi-Policy Comparative Benchmarking:
+  `EpsilonGreedyContextualBandit` contextual exploration policy with dynamic cooling schedules,
+  OPE counterfactual evaluation engine (IPS, SnIPS, DM, DR, ESS), multi-policy comparative simulation
+  benchmarking (`simulate-bandit --compare-policies`), state-driven cold-start policy derivation with
+  dynamic temperature annealing $\tau(t) = \max(\tau_{\min}, \tau_0 / (1 + \lambda t))$, and end-to-end
+  CLI (`bandit-eval-offline`, `bandit-policy --from-state`), API, and dashboard integrations. ✓ (0.28.0)
+- Next: Streaming real-time feedback ingestion and asynchronous event-driven policy updates.
 - Deferred: two-tower neural candidate retrieval (PyTorch / ONNX runtime) until
   a real-scale catalog is available; the sample dataset cannot validate a
   neural retrieval model.

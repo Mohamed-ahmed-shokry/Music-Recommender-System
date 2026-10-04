@@ -3,10 +3,29 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.28.0) — in progress
+## Current milestone (0.29.0) — planned
+
+Real-Time Streaming Feedback Ingestion and Asynchronous Policy Maintenance Worker.
+High-throughput production serving benefits from decoupling feedback journaling and policy update sweeps from synchronous request-response threads:
+1. Buffered in-memory feedback queue with non-blocking async flush worker to disk/stream.
+2. Background daemon maintenance thread within `RecommenderService` for automatic periodic sweeping and snapshot rotation without external CLI dependencies.
+3. Sliding-window drift alerts and automatic rollback to champion snapshots when policy divergence exceeds safety thresholds.
+4. Health & observability endpoints exposing real-time queue depth, sweep latency, and OPE confidence intervals.
+
+- Phase 130 — Streaming feedback ingestion queue & worker:
+  `StreamingFeedbackQueue` with non-blocking enqueue, batch worker, and backpressure handling.
+- Phase 131 — Service async maintenance daemon:
+  Integrated background maintenance thread in `RecommenderService` with graceful shutdown.
+- Phase 132 — Automated drift guardrails & rollback:
+  `evaluate_drift_safety` and automatic fallback/restore to known good snapshot.
+- Phase 133 — Observability tooling & CLI/API instrumentation:
+  Metrics for queue depth, sweep timing, and streaming health endpoints.
+- Phase 134 — Dashboard, testing, and 0.29.0 release.
+
+## Previous milestone (0.28.0) — shipped
 
 Contextual Bandit Off-Policy Evaluation (OPE), Epsilon-Greedy Exploration, and Multi-Policy Comparative Benchmarking.
-Production cold-start recommendation requires evaluating and benchmarking bandit policies safely before live deployment. Previously, operators could only simulate one policy at a time in isolation, had no mechanism to evaluate candidate policies on historical logged feedback without live traffic risk, could only derive serving policies from offline simulation reports rather than production state snapshots, and lacked the classic epsilon-greedy contextual exploration baseline. This milestone introduces:
+Production cold-start recommendation requires evaluating and benchmarking bandit policies safely before live deployment. Previously, operators could only simulate one policy at a time in isolation, had no mechanism to evaluate candidate policies on historical logged feedback without live traffic risk, could only derive serving policies from offline simulation reports rather than production state snapshots, and lacked the classic epsilon-greedy contextual exploration baseline. This milestone delivered:
 1. Epsilon-Greedy contextual bandit policy (`EpsilonGreedyContextualBandit`) with dynamic epsilon cooling schedule $\epsilon(t) = \epsilon_0 / (1 + \lambda t)$ and reproducible seeded exploration.
 2. State-driven policy derivation with dynamic temperature annealing: `derive_cold_start_policy` accepts either simulation reports or persisted bandit states / snapshots, applying temperature annealing $\tau(t) = \max(\tau_{min}, \tau_0 / (1 + \lambda_{temp} t))$.
 3. Off-Policy Evaluation (OPE) engine: Inverse Propensity Scoring (IPS), Self-Normalized IPS (SnIPS), Direct Method (DM), and Doubly Robust (DR) estimation with standard errors and effective sample sizes on logged feedback.
@@ -15,20 +34,20 @@ Production cold-start recommendation requires evaluating and benchmarking bandit
 
 - Phase 124 — Epsilon-Greedy contextual bandit engine & dynamic temperature annealing:
   `EpsilonGreedyContextualBandit` extending `BaseContextualBandit`, state snapshot/restore support,
-  and state/snapshot-driven policy derivation in `derive_cold_start_policy` with temperature annealing.
+  and state/snapshot-driven policy derivation in `derive_cold_start_policy` with temperature annealing. ✓
 - Phase 125 — Off-Policy Evaluation (OPE) & multi-policy benchmarking engine:
   `compute_off_policy_evaluation` (IPS, SnIPS, DM, DR), `compare_bandit_simulation_policies`,
-  report serializers `write_bandit_comparison_report` and `write_ope_report`.
+  report serializers `write_bandit_comparison_report` and `write_ope_report`. ✓
 - Phase 126 — Service integration:
   `RecommenderService.evaluate_bandit_off_policy`, `compare_bandit_policies`, and
-  `derive_cold_start_policy_from_state`, with `bandit_status()` and `metadata()` exposure.
+  `derive_cold_start_policy_from_state`, with `bandit_status()` and `metadata()` exposure. ✓
 - Phase 127 — CLI tooling for OPE and multi-policy comparison:
-  `simulate-bandit --compare-policies`, `bandit-eval-offline`, and `bandit-policy --from-state`.
+  `simulate-bandit --compare-policies`, `bandit-eval-offline`, and `bandit-policy --from-state`. ✓
 - Phase 128 — API endpoints for OPE and policy derivation:
-  `POST /bandit/evaluate/off-policy`, `POST /bandit/evaluate/compare`, and `POST /bandit/policy/derive`.
+  `POST /bandit/evaluate/off-policy`, `POST /bandit/evaluate/compare`, and `POST /bandit/policy/derive`. ✓
 - Phase 129 — Dashboard, testing, documentation, and 0.28.0 release:
-  Cold-Start Bandit tab OPE and comparison views, full test suite pass, version bump to 0.28.0 in
-  `pyproject.toml`, updated `README.md`, `CHANGELOG.md`, `PLAN.md`.
+  Cold-Start Bandit tab OPE and comparison views, full test suite pass (994 tests, 95.02% coverage), version bump to 0.28.0 in
+  `pyproject.toml`, updated `README.md`, `CHANGELOG.md`, `PLAN.md`. ✓
 
 ## Previous milestone (0.27.0) — shipped
 
