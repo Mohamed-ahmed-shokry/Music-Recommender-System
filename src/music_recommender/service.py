@@ -14,7 +14,8 @@ from music_recommender.artifacts import RecommenderArtifact, load_artifact
 from music_recommender.bandit import (
     SUPPORTED_BANDIT_POLICIES,
     BaseContextualBandit,
-    append_bandit_feedback,
+    StreamingFeedbackQueue,
+    append_bandit_feedback_batch,
     compare_bandit_simulation_policies,
     compute_bandit_drift,
     compute_off_policy_evaluation,
@@ -106,9 +107,17 @@ class RecommenderService:
         bandit_policy_type: str | None = None,
         bandit_alpha_decay: float | None = None,
         bandit_gamma: float | None = None,
+        feedback_queue: StreamingFeedbackQueue | None = None,
+        enable_streaming_feedback: bool = False,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
+        if feedback_queue is not None:
+            self.feedback_queue: StreamingFeedbackQueue | None = feedback_queue
+        elif enable_streaming_feedback:
+            self.feedback_queue = StreamingFeedbackQueue(auto_start=True)
+        else:
+            self.feedback_queue = None
         self.context_features = resolve_context_features(
             features=context_features,
             env=os.getenv(CONTEXT_FEATURES_ENV_VAR),
@@ -215,6 +224,8 @@ class RecommenderService:
         bandit_policy_type: str | None = None,
         bandit_alpha_decay: float | None = None,
         bandit_gamma: float | None = None,
+        feedback_queue: StreamingFeedbackQueue | None = None,
+        enable_streaming_feedback: bool = False,
     ) -> RecommenderService:
         """Load a service from a saved artifact bundle.
 
@@ -228,6 +239,8 @@ class RecommenderService:
             bandit_policy_type=bandit_policy_type,
             bandit_alpha_decay=bandit_alpha_decay,
             bandit_gamma=bandit_gamma,
+            feedback_queue=feedback_queue,
+            enable_streaming_feedback=enable_streaming_feedback,
         )
         if cold_start_policy_path is not None and Path(cold_start_policy_path).exists():
             service.cold_start_policy = load_cold_start_policy(cold_start_policy_path)
@@ -302,7 +315,30 @@ class RecommenderService:
         status["gamma"] = self.bandit_gamma
         status["snapshots_count"] = len(self.list_bandit_snapshots())
         status["supported_policies"] = list(SUPPORTED_BANDIT_POLICIES)
+        if self.feedback_queue is not None:
+            status["streaming_queue"] = self.feedback_queue.get_metrics().to_dict()
         return status
+
+    def flush_feedback(self, timeout: float | None = 5.0) -> None:
+        """Flush any pending records in the streaming feedback queue."""
+        if self.feedback_queue is not None:
+            self.feedback_queue.flush(timeout=timeout)
+
+    def close(self, timeout: float | None = 5.0) -> None:
+        """Release background resources including the streaming feedback queue."""
+        if self.feedback_queue is not None:
+            self.feedback_queue.close(timeout=timeout)
+
+    def __enter__(self) -> RecommenderService:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
+        self.close()
 
     def sweep_bandit_feedback(
         self,
@@ -641,42 +677,56 @@ class RecommenderService:
                     user_id=user_id,
                     features=self.context_features,
                 )
-                for record in feedback:
-                    append_bandit_feedback(
-                        record,
-                        Path(feedback_journal_path),
-                    )
-                auto_swept = False
-                if self.auto_sweep_threshold > 0:
-                    journal_p = Path(feedback_journal_path)
-                    st_p = BANDIT_STATE_PATH
-                    if st_p.exists() and journal_p.exists():
-                        current_feedback = load_bandit_feedback(journal_p)
-                        current_state = load_bandit_state(st_p)
-                        pending = pending_feedback_count(
-                            current_state, current_feedback
-                        )
-                        if pending >= self.auto_sweep_threshold:
-                            self.sweep_bandit_feedback(
-                                state_path=st_p,
-                                feedback_journal_path=journal_p,
-                                context_features=self.context_features,
-                            )
-                            auto_swept = True
-
                 dominant_arm = dominant_policy_arm(self.cold_start_policy)
                 dominant = next(
                     record for record in feedback if record["arm"] == dominant_arm
                 )
-                response["feedback"] = {
-                    "recorded": True,
-                    "journal_path": str(feedback_journal_path),
-                    "arm": str(dominant["arm"]),
-                    "reward": float(dominant["reward"]),
-                    "arms": [str(record["arm"]) for record in feedback],
-                    "context": list(feedback[0]["context"]),
-                    "auto_swept": auto_swept,
-                }
+                if self.feedback_queue is not None and self.feedback_queue.is_running:
+                    self.feedback_queue.enqueue_batch(feedback)
+                    response["feedback"] = {
+                        "recorded": True,
+                        "queued": True,
+                        "queue_depth": self.feedback_queue.queue_depth,
+                        "journal_path": str(self.feedback_queue.journal_path),
+                        "arm": str(dominant["arm"]),
+                        "reward": float(dominant["reward"]),
+                        "arms": [str(record["arm"]) for record in feedback],
+                        "context": list(feedback[0]["context"]),
+                        "auto_swept": False,
+                    }
+                else:
+                    append_bandit_feedback_batch(
+                        feedback,
+                        Path(feedback_journal_path),
+                    )
+                    auto_swept = False
+                    if self.auto_sweep_threshold > 0:
+                        journal_p = Path(feedback_journal_path)
+                        st_p = BANDIT_STATE_PATH
+                        if st_p.exists() and journal_p.exists():
+                            current_feedback = load_bandit_feedback(journal_p)
+                            current_state = load_bandit_state(st_p)
+                            pending = pending_feedback_count(
+                                current_state, current_feedback
+                            )
+                            if pending >= self.auto_sweep_threshold:
+                                self.sweep_bandit_feedback(
+                                    state_path=st_p,
+                                    feedback_journal_path=journal_p,
+                                    context_features=self.context_features,
+                                )
+                                auto_swept = True
+
+                    response["feedback"] = {
+                        "recorded": True,
+                        "queued": False,
+                        "journal_path": str(feedback_journal_path),
+                        "arm": str(dominant["arm"]),
+                        "reward": float(dominant["reward"]),
+                        "arms": [str(record["arm"]) for record in feedback],
+                        "context": list(feedback[0]["context"]),
+                        "auto_swept": auto_swept,
+                    }
             return response
 
         recommendations = popular_artists(self.artifact.artist_stats, top_k=top_k)

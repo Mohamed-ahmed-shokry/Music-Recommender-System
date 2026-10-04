@@ -16,6 +16,7 @@ from music_recommender.bandit import (
     DEFAULT_COLD_START_ARMS,
     DEFAULT_CONTEXT_FEATURES,
     LinUCBContextualBandit,
+    StreamingFeedbackQueue,
     append_bandit_feedback,
     load_bandit_feedback,
     save_bandit_context_features,
@@ -69,6 +70,8 @@ def create_service(
     bandit_policy_type: str | None = None,
     bandit_alpha_decay: float | None = None,
     bandit_gamma: float | None = None,
+    feedback_queue: StreamingFeedbackQueue | None = None,
+    enable_streaming_feedback: bool = False,
 ) -> RecommenderService:
     df = service_dataframe()
     mappings = create_id_mappings(df)
@@ -120,6 +123,8 @@ def create_service(
         bandit_policy_type=bandit_policy_type,
         bandit_alpha_decay=bandit_alpha_decay,
         bandit_gamma=bandit_gamma,
+        feedback_queue=feedback_queue,
+        enable_streaming_feedback=enable_streaming_feedback,
     )
 
 
@@ -1625,3 +1630,69 @@ def test_service_derive_cold_start_policy_from_state(tmp_path: Path) -> None:
     assert set(policy.keys()) == {"popular", "balanced", "long_tail"}
     assert persist_path.exists()
     assert service.cold_start_policy == policy
+
+
+def test_service_streaming_feedback_queue_init(tmp_path: Path) -> None:
+    service = create_service(tmp_path, enable_streaming_feedback=True)
+    assert service.feedback_queue is not None
+    assert isinstance(service.feedback_queue, StreamingFeedbackQueue)
+    assert service.feedback_queue.is_running
+
+    status = service.bandit_status()
+    assert "streaming_queue" in status
+    assert status["streaming_queue"]["is_running"] is True
+    assert status["streaming_queue"]["queue_depth"] == 0
+
+    meta = service.metadata()
+    assert "streaming_queue" in meta["bandit"]
+
+    service.close()
+    assert not service.feedback_queue.is_running
+    assert service.feedback_queue.is_closed
+
+
+def test_service_recommend_user_with_streaming_queue(tmp_path: Path) -> None:
+    journal = tmp_path / "streaming_journal.json"
+    queue = StreamingFeedbackQueue(journal, max_queue_size=100, auto_start=False)
+    service = create_service(tmp_path, feedback_queue=queue)
+    service.cold_start_policy = {"popular": 0.6, "balanced": 0.4}
+
+    queue.start()
+    assert queue.is_running
+
+    response = service.recommend_user(
+        "unknown_stream_user",
+        top_k=2,
+        record_feedback=True,
+        context=[1.0, 0.0, 0.5],
+    )
+    assert response["strategy"] == "bandit_fallback"
+    assert "feedback" in response
+    fb = response["feedback"]
+    assert fb["recorded"] is True
+    assert fb["queued"] is True
+    assert fb["queue_depth"] > 0
+    assert fb["auto_swept"] is False
+    assert fb["journal_path"] == str(journal)
+
+    # Flush through service method
+    service.flush_feedback()
+    assert queue.queue_depth == 0
+    assert journal.exists()
+    records = load_bandit_feedback(journal)
+    assert len(records) == 2  # popular and balanced arms credited
+
+    status = service.bandit_status()
+    assert status["streaming_queue"]["flushed_count"] == 2
+
+    service.close()
+    assert queue.is_closed
+
+
+def test_service_streaming_feedback_context_manager(tmp_path: Path) -> None:
+    with create_service(tmp_path, enable_streaming_feedback=True) as service:
+        assert service.feedback_queue is not None
+        assert service.feedback_queue.is_running
+
+    assert service.feedback_queue.is_closed
+
