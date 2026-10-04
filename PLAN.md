@@ -13,7 +13,23 @@ High-throughput production serving benefits from decoupling feedback journaling 
 4. Health & observability endpoints exposing real-time queue depth, sweep latency, and OPE confidence intervals.
 
 - Phase 130 — Streaming feedback ingestion queue & worker:
-  `StreamingFeedbackQueue` with non-blocking enqueue, batch worker, and backpressure handling.
+  `StreamingFeedbackQueue` with non-blocking enqueue, batch worker, and backpressure handling. [IN PROGRESS]
+  - Objective: Decouple feedback collection from request-response serving latency by buffering feedback records in a thread-safe, bounded memory queue and asynchronously flushing them in atomic batches to disk.
+  - Acceptance Criteria:
+    - AC-1: `append_bandit_feedback_batch` atomically persists batches of validated feedback records to the feedback journal.
+    - AC-2: `StreamingFeedbackQueue` provides thread-safe non-blocking ingestion with bounded memory (`max_queue_size`).
+    - AC-3: Backpressure strategies (`drop_oldest`, `reject`, `block`) prevent runaway memory usage under burst load.
+    - AC-4: Background worker flushes on batch size threshold or elapsed flush interval, handling I/O errors gracefully.
+    - AC-5: Manual `flush()` and `close()` ensure zero record loss on planned shutdown or service teardown.
+    - AC-6: `RecommenderService` supports optional `feedback_queue` to route cold-start bandit feedback non-blockingly, reporting queue metrics in `bandit_status()` and `metadata()`.
+    - AC-7: Comprehensive test suite for queue concurrency, backpressure, batch writing, and service integration.
+  - Implementation Tasks:
+    - Task 1: Atomic batch journal append helper (`append_bandit_feedback_batch`) in `bandit.py`.
+    - Task 2: Core `StreamingFeedbackQueue` class with worker daemon and backpressure policies in `bandit.py`.
+    - Task 3: Unit tests for `append_bandit_feedback_batch` and `StreamingFeedbackQueue` in `tests/test_bandit.py`.
+    - Task 4: Service integration in `RecommenderService` (`service.py`) and status exposure.
+    - Task 5: Integration tests in `tests/test_service.py`.
+    - Task 6: Documentation updates in `README.md` and `PLAN.md`.
 - Phase 131 — Service async maintenance daemon:
   Integrated background maintenance thread in `RecommenderService` with graceful shutdown.
 - Phase 132 — Automated drift guardrails & rollback:
