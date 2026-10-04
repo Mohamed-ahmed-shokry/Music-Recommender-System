@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import copy
 import json
+import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -17,9 +19,13 @@ from music_recommender.bandit import (
     DEFAULT_COLD_START_ARMS,
     DEFAULT_CONTEXT_FEATURES,
     SUPPORTED_CONTEXT_FEATURES,
+    BackpressureStrategy,
     BaseContextualBandit,
     EpsilonGreedyContextualBandit,
+    FeedbackQueueFullError,
     LinUCBContextualBandit,
+    StreamingFeedbackQueue,
+    StreamingQueueMetrics,
     ThompsonSamplingContextualBandit,
     append_bandit_feedback,
     append_bandit_feedback_batch,
@@ -1013,6 +1019,282 @@ class TestFeedbackJournal:
 
         with pytest.raises(FileNotFoundError, match="not found"):
             load_bandit_feedback(tmp_path / "missing.json")
+
+
+class TestStreamingFeedbackQueue:
+    def test_init_validation(self, tmp_path: Path) -> None:
+        journal = tmp_path / "journal.json"
+        with pytest.raises(ValueError, match="max_queue_size must be positive"):
+            StreamingFeedbackQueue(journal, max_queue_size=0, auto_start=False)
+        with pytest.raises(ValueError, match="batch_size must be positive"):
+            StreamingFeedbackQueue(journal, batch_size=0, auto_start=False)
+        with pytest.raises(
+            ValueError, match="flush_interval_seconds must be positive"
+        ):
+            StreamingFeedbackQueue(
+                journal, flush_interval_seconds=0.0, auto_start=False
+            )
+        with pytest.raises(ValueError, match="enqueue_timeout must be non-negative"):
+            StreamingFeedbackQueue(journal, enqueue_timeout=-1.0, auto_start=False)
+        with pytest.raises(ValueError, match="Invalid backpressure strategy"):
+            StreamingFeedbackQueue(journal, backpressure="unknown", auto_start=False)
+        with pytest.raises(
+            TypeError, match="backpressure must be BackpressureStrategy"
+        ):
+            StreamingFeedbackQueue(
+                journal, backpressure=123, auto_start=False  # type: ignore[arg-type]
+            )
+
+    def test_enqueue_validates_record(self, tmp_path: Path) -> None:
+        journal = tmp_path / "journal.json"
+        with StreamingFeedbackQueue(journal) as queue:
+            with pytest.raises(ValueError, match="arm"):
+                queue.enqueue({"context": [1.0], "reward": 0.5})
+            with pytest.raises(ValueError, match="finite"):
+                queue.enqueue(
+                    {"context": [1.0], "arm": "popular", "reward": float("nan")}
+                )
+
+    def test_enqueue_and_batch_flushing(self, tmp_path: Path) -> None:
+        journal = tmp_path / "journal.json"
+        with StreamingFeedbackQueue(
+            journal,
+            batch_size=3,
+            flush_interval_seconds=60.0,
+        ) as queue:
+            assert queue.is_running
+            records = [
+                {"context": [1.0, 0.0], "arm": "popular", "reward": 0.5},
+                {"context": [0.0, 1.0], "arm": "long_tail", "reward": 1.0},
+            ]
+            for r in records:
+                assert queue.enqueue(r)
+
+            time.sleep(0.05)
+            assert not journal.exists()
+
+            assert queue.enqueue(
+                {"context": [0.5, 0.5], "arm": "balanced", "reward": 0.75}
+            )
+
+            for _ in range(50):
+                if journal.exists() and len(load_bandit_feedback(journal)) == 3:
+                    break
+                time.sleep(0.05)
+
+            flushed = load_bandit_feedback(journal)
+            assert len(flushed) == 3
+            assert flushed[0]["arm"] == "popular"
+            assert flushed[1]["arm"] == "long_tail"
+            assert flushed[2]["arm"] == "balanced"
+
+    def test_enqueue_time_based_flushing(self, tmp_path: Path) -> None:
+        journal = tmp_path / "journal.json"
+        with StreamingFeedbackQueue(
+            journal,
+            batch_size=100,
+            flush_interval_seconds=0.1,
+        ) as queue:
+            queue.enqueue({"context": [1.0], "arm": "popular", "reward": 0.5})
+            for _ in range(40):
+                if journal.exists() and len(load_bandit_feedback(journal)) == 1:
+                    break
+                time.sleep(0.05)
+
+            assert journal.exists()
+            assert len(load_bandit_feedback(journal)) == 1
+
+    def test_enqueue_batch_and_manual_flush(self, tmp_path: Path) -> None:
+        journal = tmp_path / "journal.json"
+        with StreamingFeedbackQueue(journal, auto_start=False) as queue:
+            assert not queue.is_running
+            records = [
+                {"context": [1.0], "arm": "popular", "reward": 0.1},
+                {"context": [2.0], "arm": "long_tail", "reward": 0.2},
+                {"context": [3.0], "arm": "balanced", "reward": 0.3},
+            ]
+            accepted = queue.enqueue_batch(records)
+            assert accepted == 3
+            assert queue.queue_depth == 3
+            assert not journal.exists()
+
+            queue.flush()
+            assert queue.queue_depth == 0
+            assert journal.exists()
+            assert len(load_bandit_feedback(journal)) == 3
+
+    def test_backpressure_drop_oldest(self, tmp_path: Path) -> None:
+        journal = tmp_path / "journal.json"
+        with StreamingFeedbackQueue(
+            journal,
+            max_queue_size=2,
+            backpressure=BackpressureStrategy.DROP_OLDEST,
+            auto_start=False,
+        ) as queue:
+            queue.enqueue(
+                {
+                    "context": [1.0],
+                    "arm": "popular",
+                    "reward": 1.0,
+                    "user_id": "u1",
+                }
+            )
+            queue.enqueue(
+                {
+                    "context": [2.0],
+                    "arm": "long_tail",
+                    "reward": 2.0,
+                    "user_id": "u2",
+                }
+            )
+            queue.enqueue(
+                {
+                    "context": [3.0],
+                    "arm": "balanced",
+                    "reward": 3.0,
+                    "user_id": "u3",
+                }
+            )
+
+            metrics = queue.get_metrics()
+            assert metrics.enqueued_count == 3
+            assert metrics.dropped_count == 1
+            assert metrics.queue_depth == 2
+
+            queue.flush()
+            records = load_bandit_feedback(journal)
+            assert len(records) == 2
+            assert records[0]["user_id"] == "u2"
+            assert records[1]["user_id"] == "u3"
+
+    def test_backpressure_reject(self, tmp_path: Path) -> None:
+        journal = tmp_path / "journal.json"
+        with StreamingFeedbackQueue(
+            journal,
+            max_queue_size=2,
+            backpressure=BackpressureStrategy.REJECT,
+            auto_start=False,
+        ) as queue:
+            assert queue.enqueue({"context": [1.0], "arm": "popular", "reward": 1.0})
+            assert queue.enqueue({"context": [2.0], "arm": "long_tail", "reward": 2.0})
+
+            assert not queue.enqueue(
+                {"context": [3.0], "arm": "balanced", "reward": 3.0}
+            )
+            assert queue.get_metrics().dropped_count == 1
+
+            with pytest.raises(FeedbackQueueFullError, match="full"):
+                queue.enqueue(
+                    {"context": [4.0], "arm": "balanced", "reward": 4.0},
+                    raise_on_drop=True,
+                )
+
+    def test_backpressure_block_timeout(self, tmp_path: Path) -> None:
+        journal = tmp_path / "journal.json"
+        with StreamingFeedbackQueue(
+            journal,
+            max_queue_size=1,
+            backpressure=BackpressureStrategy.BLOCK,
+            enqueue_timeout=0.05,
+            auto_start=False,
+        ) as queue:
+            assert queue.enqueue({"context": [1.0], "arm": "popular", "reward": 1.0})
+            assert not queue.enqueue(
+                {"context": [2.0], "arm": "long_tail", "reward": 2.0}
+            )
+            assert queue.get_metrics().dropped_count == 1
+
+            with pytest.raises(FeedbackQueueFullError, match="timeout"):
+                queue.enqueue(
+                    {"context": [3.0], "arm": "balanced", "reward": 3.0},
+                    raise_on_drop=True,
+                )
+
+    def test_graceful_close_and_post_close_error(self, tmp_path: Path) -> None:
+        journal = tmp_path / "journal.json"
+        queue = StreamingFeedbackQueue(journal, max_queue_size=10, auto_start=True)
+        queue.enqueue({"context": [1.0], "arm": "popular", "reward": 0.5})
+        queue.close()
+
+        assert queue.is_closed
+        assert not queue.is_running
+        assert journal.exists()
+        assert len(load_bandit_feedback(journal)) == 1
+
+        with pytest.raises(RuntimeError, match="closed"):
+            queue.enqueue({"context": [2.0], "arm": "popular", "reward": 0.5})
+
+    def test_metrics_snapshot_to_dict(self, tmp_path: Path) -> None:
+        journal = tmp_path / "journal.json"
+        with StreamingFeedbackQueue(journal, auto_start=False) as queue:
+            queue.enqueue({"context": [1.0], "arm": "popular", "reward": 0.5})
+            queue.flush()
+            metrics = queue.get_metrics()
+            assert isinstance(metrics, StreamingQueueMetrics)
+            data = metrics.to_dict()
+            assert data["queue_depth"] == 0
+            assert data["enqueued_count"] == 1
+            assert data["flushed_count"] == 1
+            assert data["dropped_count"] == 0
+            assert data["flush_errors"] == 0
+            assert data["last_flush_at"] is not None
+
+    def test_concurrent_enqueue_thread_safety(self, tmp_path: Path) -> None:
+        import concurrent.futures
+
+        journal = tmp_path / "concurrent_journal.json"
+        with StreamingFeedbackQueue(
+            journal,
+            batch_size=20,
+            flush_interval_seconds=0.05,
+        ) as queue:
+            num_threads = 8
+            records_per_thread = 25
+
+            def worker(thread_idx: int) -> None:
+                for i in range(records_per_thread):
+                    queue.enqueue(
+                        {
+                            "context": [float(thread_idx), float(i)],
+                            "arm": "popular",
+                            "reward": 1.0,
+                            "user_id": f"t{thread_idx}_r{i}",
+                        }
+                    )
+
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=num_threads
+            ) as executor:
+                futures = [
+                    executor.submit(worker, idx) for idx in range(num_threads)
+                ]
+                concurrent.futures.wait(futures)
+
+            queue.flush()
+
+        records = load_bandit_feedback(journal)
+        assert len(records) == num_threads * records_per_thread
+
+    def test_flush_error_handling(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        journal = tmp_path / "journal.json"
+        with StreamingFeedbackQueue(journal, auto_start=False) as queue:
+            queue.enqueue({"context": [1.0], "arm": "popular", "reward": 0.5})
+
+            def failing_append(records: Any, path: Any) -> Any:
+                raise OSError("Disk full")
+
+            monkeypatch.setattr(
+                "music_recommender.bandit.append_bandit_feedback_batch",
+                failing_append,
+            )
+
+            queue.flush()
+            metrics = queue.get_metrics()
+            assert metrics.flush_errors == 1
+            assert metrics.dropped_count == 1
+            assert metrics.last_error == "Disk full"
 
 
 class TestFoldBanditState:

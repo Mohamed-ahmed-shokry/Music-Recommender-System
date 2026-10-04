@@ -21,10 +21,16 @@ served traffic contributes directly to the next policy.
 
 from __future__ import annotations
 
+import collections
 import contextlib
+import dataclasses
+import enum
 import json
+import logging
 import os
 import tempfile
+import threading
+import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,12 +43,15 @@ from music_recommender.artifacts import build_artist_stats
 from music_recommender.baselines import popular_artists
 from music_recommender.config import (
     BANDIT_CONTEXT_FEATURES_PATH,
+    BANDIT_FEEDBACK_PATH,
     BANDIT_SNAPSHOTS_DIR,
     BANDIT_STATE_PATH,
 )
 from music_recommender.data import normalize_interactions
 from music_recommender.evaluate import precision_at_k
 from music_recommender.ranking import validate_ranking_parameters
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_COLD_START_ARMS: tuple[str, ...] = ("popular", "balanced", "long_tail")
 DEFAULT_CONTEXT_FEATURES = ("log_plays", "log_unique_artists", "mean_popularity_rank")
@@ -1012,6 +1021,394 @@ def load_bandit_feedback(path: Path | str) -> list[dict[str, Any]]:
     for record in records:
         _validate_feedback_record(record)
     return records
+
+
+class BackpressureStrategy(enum.StrEnum):
+    """Backpressure strategies when the streaming feedback queue is full."""
+
+    DROP_OLDEST = "drop_oldest"
+    REJECT = "reject"
+    BLOCK = "block"
+
+
+class FeedbackQueueFullError(RuntimeError):
+    """Raised when the streaming feedback queue is full and cannot accept records."""
+
+
+@dataclasses.dataclass(frozen=True)
+class StreamingQueueMetrics:
+    """Snapshot of streaming feedback queue metrics."""
+
+    queue_depth: int
+    enqueued_count: int
+    dropped_count: int
+    flushed_count: int
+    flush_errors: int
+    is_running: bool
+    last_flush_at: str | None = None
+    last_error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert metrics to a dictionary representation."""
+        return {
+            "queue_depth": self.queue_depth,
+            "enqueued_count": self.enqueued_count,
+            "dropped_count": self.dropped_count,
+            "flushed_count": self.flushed_count,
+            "flush_errors": self.flush_errors,
+            "is_running": self.is_running,
+            "last_flush_at": self.last_flush_at,
+            "last_error": self.last_error,
+        }
+
+
+class StreamingFeedbackQueue:
+    """Buffered in-memory feedback queue with asynchronous batch disk flush worker.
+
+    Decouples synchronous recommendation serving from disk I/O when recording
+    live cold-start feedback. Feedback records are validated on ingestion and
+    enqueued non-blockingly. A background daemon thread periodically sweeps and
+    flushes accumulated records in atomic batches to the feedback journal.
+    """
+
+    def __init__(
+        self,
+        journal_path: Path | str = BANDIT_FEEDBACK_PATH,
+        *,
+        max_queue_size: int = 10_000,
+        batch_size: int = 50,
+        flush_interval_seconds: float = 1.0,
+        backpressure: BackpressureStrategy | str = BackpressureStrategy.DROP_OLDEST,
+        enqueue_timeout: float = 0.5,
+        auto_start: bool = True,
+    ) -> None:
+        if max_queue_size <= 0:
+            raise ValueError(f"max_queue_size must be positive, got {max_queue_size}.")
+        if batch_size <= 0:
+            raise ValueError(f"batch_size must be positive, got {batch_size}.")
+        if flush_interval_seconds <= 0.0:
+            raise ValueError(
+                "flush_interval_seconds must be positive, "
+                f"got {flush_interval_seconds}."
+            )
+        if enqueue_timeout < 0.0:
+            raise ValueError(
+                f"enqueue_timeout must be non-negative, got {enqueue_timeout}."
+            )
+
+        if isinstance(backpressure, str):
+            try:
+                self.backpressure = BackpressureStrategy(backpressure.lower())
+            except ValueError as error:
+                valid = [s.value for s in BackpressureStrategy]
+                raise ValueError(
+                    f"Invalid backpressure strategy '{backpressure}'. "
+                    f"Valid strategies: {valid}."
+                ) from error
+        elif isinstance(backpressure, BackpressureStrategy):
+            self.backpressure = backpressure
+        else:
+            raise TypeError(
+                "backpressure must be BackpressureStrategy or str, "
+                f"got {type(backpressure)}."
+            )
+
+        self.journal_path = Path(journal_path)
+        self.max_queue_size = int(max_queue_size)
+        self.batch_size = int(batch_size)
+        self.flush_interval_seconds = float(flush_interval_seconds)
+        self.enqueue_timeout = float(enqueue_timeout)
+
+        self._lock = threading.RLock()
+        self._not_empty = threading.Condition(self._lock)
+        self._not_full = threading.Condition(self._lock)
+        self._flush_done = threading.Condition(self._lock)
+        self._stop_event = threading.Event()
+        self._flush_event = threading.Event()
+        self._queue: collections.deque[dict[str, Any]] = collections.deque()
+
+        self._enqueued_count: int = 0
+        self._dropped_count: int = 0
+        self._flushed_count: int = 0
+        self._flush_errors: int = 0
+        self._last_flush_at: str | None = None
+        self._last_error: str | None = None
+        self._worker_thread: threading.Thread | None = None
+        self._closed: bool = False
+
+        if auto_start:
+            self.start()
+
+    @property
+    def queue_depth(self) -> int:
+        """Current number of items waiting in the in-memory queue."""
+        with self._lock:
+            return len(self._queue)
+
+    @property
+    def is_running(self) -> bool:
+        """Whether the background worker thread is actively running."""
+        with self._lock:
+            return (
+                self._worker_thread is not None
+                and self._worker_thread.is_alive()
+                and not self._stop_event.is_set()
+            )
+
+    @property
+    def is_closed(self) -> bool:
+        """Whether the queue has been closed."""
+        with self._lock:
+            return self._closed
+
+    def start(self) -> None:
+        """Start the background worker thread if not already running."""
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Cannot start a closed StreamingFeedbackQueue.")
+            if self._worker_thread is not None and self._worker_thread.is_alive():
+                return
+            self._stop_event.clear()
+            self._worker_thread = threading.Thread(
+                target=self._worker_loop,
+                name="streaming-feedback-worker",
+                daemon=True,
+            )
+            self._worker_thread.start()
+
+    def enqueue(
+        self,
+        record: dict[str, Any],
+        *,
+        raise_on_drop: bool = False,
+    ) -> bool:
+        """Enqueue a single feedback record non-blockingly.
+
+        Returns True if accepted into the queue, or False if dropped/rejected
+        under backpressure.
+        """
+        _validate_feedback_record(record)
+        entry: dict[str, Any] = {
+            "context": [float(value) for value in _feedback_record_context(record)],
+            "arm": str(record["arm"]),
+            "reward": float(record["reward"]),
+        }
+        if "occurred_at" in record:
+            entry["occurred_at"] = str(record["occurred_at"])
+        if "user_id" in record:
+            entry["user_id"] = str(record["user_id"])
+
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Cannot enqueue to a closed StreamingFeedbackQueue.")
+
+            if len(self._queue) >= self.max_queue_size:
+                if self.backpressure == BackpressureStrategy.DROP_OLDEST:
+                    self._queue.popleft()
+                    self._dropped_count += 1
+                    logger.warning(
+                        "StreamingFeedbackQueue full (%d items); "
+                        "dropped oldest record.",
+                        self.max_queue_size,
+                    )
+                elif self.backpressure == BackpressureStrategy.REJECT:
+                    self._dropped_count += 1
+                    logger.warning(
+                        "StreamingFeedbackQueue full (%d items); "
+                        "rejected new record.",
+                        self.max_queue_size,
+                    )
+                    if raise_on_drop:
+                        raise FeedbackQueueFullError(
+                            "Streaming feedback queue full "
+                            f"({self.max_queue_size} items)."
+                        )
+                    return False
+                elif self.backpressure == BackpressureStrategy.BLOCK:
+                    deadline = time.monotonic() + self.enqueue_timeout
+                    while (
+                        len(self._queue) >= self.max_queue_size
+                        and not self._closed
+                    ):
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            break
+                        self._not_full.wait(timeout=remaining)
+                    if self._closed:
+                        raise RuntimeError(
+                            "StreamingFeedbackQueue was closed while waiting to "
+                            "enqueue."
+                        )
+                    if len(self._queue) >= self.max_queue_size:
+                        self._dropped_count += 1
+                        logger.warning(
+                            "StreamingFeedbackQueue timeout (%.2fs); "
+                            "rejected new record.",
+                            self.enqueue_timeout,
+                        )
+                        if raise_on_drop:
+                            raise FeedbackQueueFullError(
+                                "Streaming feedback queue full after "
+                                f"{self.enqueue_timeout}s timeout."
+                            )
+                        return False
+
+            self._queue.append(entry)
+            self._enqueued_count += 1
+            self._not_empty.notify()
+            return True
+
+    def enqueue_batch(
+        self,
+        records: Sequence[dict[str, Any]],
+        *,
+        raise_on_drop: bool = False,
+    ) -> int:
+        """Enqueue a batch of feedback records.
+
+        Returns the number of records successfully accepted into the queue.
+        """
+        for record in records:
+            _validate_feedback_record(record)
+        accepted = 0
+        for record in records:
+            if self.enqueue(record, raise_on_drop=raise_on_drop):
+                accepted += 1
+        return accepted
+
+    def flush(self, timeout: float | None = 5.0) -> None:
+        """Flush all queued records to disk immediately, waiting for completion."""
+        with self._lock:
+            if not self.is_running:
+                self._drain_and_flush()
+                return
+
+            self._flush_event.set()
+            self._not_empty.notify()
+            deadline = (time.monotonic() + timeout) if timeout is not None else None
+            while len(self._queue) > 0 and self.is_running:
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    self._flush_done.wait(timeout=remaining)
+                else:
+                    self._flush_done.wait()
+
+    def close(self, timeout: float | None = 5.0) -> None:
+        """Gracefully shut down the queue and flush remaining records to disk."""
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._stop_event.set()
+            self._not_empty.notify_all()
+            self._not_full.notify_all()
+            self._flush_done.notify_all()
+            worker = self._worker_thread
+
+        if worker is not None and worker.is_alive():
+            worker.join(timeout=timeout)
+
+        # Ensure everything remaining is flushed
+        self._drain_and_flush()
+
+    def get_metrics(self) -> StreamingQueueMetrics:
+        """Return a snapshot of current queue metrics."""
+        with self._lock:
+            return StreamingQueueMetrics(
+                queue_depth=len(self._queue),
+                enqueued_count=self._enqueued_count,
+                dropped_count=self._dropped_count,
+                flushed_count=self._flushed_count,
+                flush_errors=self._flush_errors,
+                is_running=self.is_running,
+                last_flush_at=self._last_flush_at,
+                last_error=self._last_error,
+            )
+
+    def _worker_loop(self) -> None:
+        """Daemon loop for periodic and batch disk flushing."""
+        while not self._stop_event.is_set():
+            batch: list[dict[str, Any]] = []
+            with self._lock:
+                deadline = time.monotonic() + self.flush_interval_seconds
+                while (
+                    len(self._queue) < self.batch_size
+                    and not self._stop_event.is_set()
+                    and not self._flush_event.is_set()
+                ):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    self._not_empty.wait(timeout=remaining)
+
+                if self._queue:
+                    max_batch = max(self.batch_size * 4, self.batch_size)
+                    count = min(len(self._queue), max_batch)
+                    for _ in range(count):
+                        batch.append(self._queue.popleft())
+                    self._not_full.notify_all()
+
+            if batch:
+                self._write_batch(batch)
+
+            with self._lock:
+                if not self._queue:
+                    self._flush_event.clear()
+                    self._flush_done.notify_all()
+
+        self._drain_and_flush()
+
+    def _write_batch(self, batch: list[dict[str, Any]]) -> bool:
+        """Write a batch to the journal, recording metrics."""
+        try:
+            append_bandit_feedback_batch(batch, self.journal_path)
+            with self._lock:
+                self._flushed_count += len(batch)
+                self._last_flush_at = datetime.now(UTC).isoformat()
+                self._last_error = None
+            return True
+        except Exception as error:
+            logger.error(
+                "StreamingFeedbackQueue failed to write batch of %d records to %s: %s",
+                len(batch),
+                self.journal_path,
+                error,
+            )
+            with self._lock:
+                self._flush_errors += 1
+                self._dropped_count += len(batch)
+                self._last_error = str(error)
+            return False
+
+    def _drain_and_flush(self) -> None:
+        """Drain and flush all remaining items in the queue."""
+        while True:
+            batch: list[dict[str, Any]] = []
+            with self._lock:
+                if not self._queue:
+                    self._flush_event.clear()
+                    self._flush_done.notify_all()
+                    break
+                max_batch = max(self.batch_size * 4, self.batch_size)
+                count = min(len(self._queue), max_batch)
+                for _ in range(count):
+                    batch.append(self._queue.popleft())
+                self._not_full.notify_all()
+            if batch:
+                self._write_batch(batch)
+
+    def __enter__(self) -> StreamingFeedbackQueue:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
+        self.close()
 
 
 def fold_bandit_state(
