@@ -767,6 +767,35 @@ with StreamingFeedbackQueue(
     # response["feedback"]["queue_depth"] reports current buffered records
 ```
 
+### Asynchronous Background Maintenance Daemon and Policy Hot-Reloading
+
+For continuous online learning without manual operator intervention or external cron jobs, `BanditMaintenanceWorker` runs as an integrated background daemon thread inside `RecommenderService`:
+
+1. **Periodic Sweeping**: Automatically wakes up at a configured interval (`interval_seconds` or `MUSIC_RECOMMENDER_BANDIT_MAINTENANCE_INTERVAL`, default `60.0`s) to check pending feedback in the journal. When pending records reach `min_pending_records` (default `50`), it folds them into `reports/bandit_state.json`.
+2. **Streaming Queue Coordination**: If `StreamingFeedbackQueue` is configured, the maintenance worker flushes pending in-memory records to disk before inspecting the journal, ensuring zero record lag.
+3. **Automated Snapshot Rotation**: With `snapshot_on_sweep=True` (or `MUSIC_RECOMMENDER_BANDIT_SNAPSHOT_ON_SWEEP=1`), each successful sweep creates a timestamped state snapshot and prunes older snapshots to retain the latest `N` (default `10`).
+4. **Dynamic Policy Hot-Reloading**: With `auto_update_policy=True` (or `MUSIC_RECOMMENDER_BANDIT_AUTO_UPDATE_POLICY=1`, default `True`), the worker derives an updated cold-start policy vector from folded bandit states and dynamically hot-reloads `service.cold_start_policy` in-memory without service restart or downtime.
+5. **Thread Safety & Lifecycle**: Uses reentrant locking to synchronize sweeps with serving threads. Shuts down cleanly during service context exit, `service.close()`, or FastAPI lifespan termination.
+6. **Telemetry & Observability**: Real-time worker metrics (`sweeps_count`, `records_folded_count`, `last_sweep_duration_seconds`, `last_error`, `is_running`) are exposed in `service.maintenance_status()` and `service.bandit_status()["maintenance_worker"]`.
+
+```python
+from music_recommender.service import RecommenderService
+
+# Enable background maintenance worker with automatic snapshotting
+with RecommenderService.from_artifacts(
+    enable_maintenance=True,
+    maintenance_interval_seconds=30.0,
+    snapshot_on_sweep=True,
+    auto_update_policy=True,
+) as service:
+    # Trigger an immediate manual sweep on demand
+    sweep_outcome = service.trigger_maintenance_sweep()
+
+    # Inspect worker status and telemetry
+    metrics = service.maintenance_status()
+    # {"is_running": True, "sweeps_count": 1, "records_folded_count": 52, ...}
+```
+
 ### Automated Online Sweeping, State Snapshots, and Policy Drift
 
 To operationalize the cold-start bandit in production environments:
