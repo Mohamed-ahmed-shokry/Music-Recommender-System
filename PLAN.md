@@ -32,6 +32,25 @@ High-throughput production serving benefits from decoupling feedback journaling 
     - Task 6: Documentation updates in `README.md` and `PLAN.md`. ✓
 - Phase 131 — Service async maintenance daemon:
   Integrated background maintenance thread in `RecommenderService` with graceful shutdown.
+  - Objective: Automate background bandit state maintenance and policy hot-reloading within `RecommenderService` using an asynchronous daemon worker that periodically sweeps feedback without blocking serving threads, coordinates with `StreamingFeedbackQueue`, supports snapshot rotation, and ensures clean lifecycle teardown.
+  - Acceptance Criteria:
+    - AC-1: `BanditMaintenanceWorker` provides a dedicated background daemon thread executing periodic sweeps on configurable intervals (`interval_seconds`) when pending feedback reaches `min_pending_records`.
+    - AC-2: Worker coordinates with `StreamingFeedbackQueue` by flushing buffered in-memory feedback prior to checking pending feedback counts.
+    - AC-3: Snapshot rotation support (`snapshot_on_sweep`) automatically creates state snapshots upon successful folding and prunes historical snapshots according to retention limits.
+    - AC-4: Policy hot-reloading (`auto_update_policy`) derives fresh cold-start policy weights and dynamically refreshes `RecommenderService.cold_start_policy` in-memory.
+    - AC-5: Thread synchronization locks prevent race conditions between background sweeps, explicit service operations, and request-serving paths.
+    - AC-6: Maintenance telemetry and health metrics (`cycles_count`, `sweeps_count`, `records_folded_count`, `last_sweep_at`, `last_sweep_duration_seconds`, `last_error`) are exposed in `BanditMaintenanceWorker.get_metrics()`, `service.maintenance_status()`, and `service.bandit_status()`.
+    - AC-7: Clean lifecycle management (`start`, `stop`, `trigger_sweep`, `close`) integrated into `RecommenderService.close()`, service context manager, and FastAPI `lifespan`.
+    - AC-8: Environment variable and constructor configuration support across `service.py` and `config.py`.
+    - AC-9: Comprehensive unit and integration test coverage for worker loops, flushing, hot-reloading, snapshot rotation, and teardown.
+  - Implementation Tasks:
+    - Task 1: Add configuration constants and environment variables in `config.py`.
+    - Task 2: Implement `MaintenanceWorkerMetrics` and `BanditMaintenanceWorker` in `bandit.py`.
+    - Task 3: Unit tests for `BanditMaintenanceWorker` in `tests/test_bandit.py`.
+    - Task 4: Integrate maintenance daemon into `RecommenderService` in `service.py`.
+    - Task 5: Integrate service teardown in `api/main.py` lifespan.
+    - Task 6: Integration tests in `tests/test_service.py` and `tests/test_api.py`.
+    - Task 7: Documentation in `README.md` and mark Phase 131 complete in `PLAN.md`.
 - Phase 132 — Automated drift guardrails & rollback:
   `evaluate_drift_safety` and automatic fallback/restore to known good snapshot.
 - Phase 133 — Observability tooling & CLI/API instrumentation:
