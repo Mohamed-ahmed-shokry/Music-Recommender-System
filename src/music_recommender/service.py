@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import threading
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -13,6 +15,7 @@ import numpy as np
 from music_recommender.artifacts import RecommenderArtifact, load_artifact
 from music_recommender.bandit import (
     SUPPORTED_BANDIT_POLICIES,
+    BanditMaintenanceWorker,
     BaseContextualBandit,
     StreamingFeedbackQueue,
     append_bandit_feedback_batch,
@@ -44,10 +47,14 @@ from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
     BANDIT_ALPHA_DECAY_ENV_VAR,
     BANDIT_AUTO_SWEEP_THRESHOLD_ENV_VAR,
+    BANDIT_AUTO_UPDATE_POLICY_ENV_VAR,
     BANDIT_CONTEXT_FEATURES_PATH,
+    BANDIT_ENABLE_MAINTENANCE_ENV_VAR,
     BANDIT_FEEDBACK_PATH,
     BANDIT_GAMMA_ENV_VAR,
+    BANDIT_MAINTENANCE_INTERVAL_ENV_VAR,
     BANDIT_POLICY_TYPE_ENV_VAR,
+    BANDIT_SNAPSHOT_ON_SWEEP_ENV_VAR,
     BANDIT_SNAPSHOTS_DIR,
     BANDIT_STATE_PATH,
     COLD_START_POLICY_PATH,
@@ -55,6 +62,7 @@ from music_recommender.config import (
     DEFAULT_BANDIT_ALPHA_DECAY,
     DEFAULT_BANDIT_AUTO_SWEEP_THRESHOLD,
     DEFAULT_BANDIT_GAMMA,
+    DEFAULT_BANDIT_MAINTENANCE_INTERVAL,
     DEFAULT_BANDIT_POLICY_TYPE,
     DEFAULT_CONTENT_WEIGHT,
     RAW_DATA_PATH,
@@ -94,6 +102,8 @@ from music_recommender.tracks import (
     recommend_tracks_for_user,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class RecommenderService:
     """Thin serving layer around a loaded recommender artifact."""
@@ -109,9 +119,15 @@ class RecommenderService:
         bandit_gamma: float | None = None,
         feedback_queue: StreamingFeedbackQueue | None = None,
         enable_streaming_feedback: bool = False,
+        maintenance_worker: BanditMaintenanceWorker | None = None,
+        enable_maintenance: bool = False,
+        maintenance_interval_seconds: float | None = None,
+        snapshot_on_sweep: bool | None = None,
+        auto_update_policy: bool | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
+        self._sweep_lock = threading.RLock()
         if feedback_queue is not None:
             self.feedback_queue: StreamingFeedbackQueue | None = feedback_queue
         elif enable_streaming_feedback:
@@ -215,6 +231,121 @@ class RecommenderService:
             else:
                 self.bandit_gamma = DEFAULT_BANDIT_GAMMA
 
+        if not enable_maintenance:
+            env_enable_m = os.getenv(BANDIT_ENABLE_MAINTENANCE_ENV_VAR)
+            if env_enable_m is not None and env_enable_m.strip().lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            ):
+                enable_maintenance = True
+
+        if maintenance_interval_seconds is not None:
+            if (
+                not np.isfinite(maintenance_interval_seconds)
+                or maintenance_interval_seconds <= 0.0
+            ):
+                raise ValueError(
+                    "maintenance_interval_seconds must be a positive finite number, "
+                    f"got {maintenance_interval_seconds}."
+                )
+            self.maintenance_interval_seconds = float(maintenance_interval_seconds)
+        else:
+            env_m_interval = os.getenv(BANDIT_MAINTENANCE_INTERVAL_ENV_VAR)
+            if env_m_interval is not None and env_m_interval.strip():
+                try:
+                    parsed_m_int = float(env_m_interval.strip())
+                    if not np.isfinite(parsed_m_int) or parsed_m_int <= 0.0:
+                        raise ValueError
+                    self.maintenance_interval_seconds = parsed_m_int
+                except ValueError as error:
+                    raise ValueError(
+                        f"Environment variable {BANDIT_MAINTENANCE_INTERVAL_ENV_VAR} "
+                        "must be a positive finite number, "
+                        f"got '{env_m_interval}'."
+                    ) from error
+            else:
+                self.maintenance_interval_seconds = DEFAULT_BANDIT_MAINTENANCE_INTERVAL
+
+        if snapshot_on_sweep is not None:
+            self.snapshot_on_sweep = bool(snapshot_on_sweep)
+        else:
+            env_snap = os.getenv(BANDIT_SNAPSHOT_ON_SWEEP_ENV_VAR)
+            if env_snap is not None and env_snap.strip():
+                self.snapshot_on_sweep = env_snap.strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+            else:
+                self.snapshot_on_sweep = False
+
+        if auto_update_policy is not None:
+            self.auto_update_policy = bool(auto_update_policy)
+        else:
+            env_auto_pol = os.getenv(BANDIT_AUTO_UPDATE_POLICY_ENV_VAR)
+            if env_auto_pol is not None and env_auto_pol.strip():
+                self.auto_update_policy = env_auto_pol.strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+            else:
+                self.auto_update_policy = True
+
+        if maintenance_worker is not None:
+            self.maintenance_worker: BanditMaintenanceWorker | None = maintenance_worker
+        elif enable_maintenance:
+            self.maintenance_worker = BanditMaintenanceWorker(
+                interval_seconds=self.maintenance_interval_seconds,
+                context_features=self.context_features,
+                gamma=self.bandit_gamma,
+                feedback_queue=self.feedback_queue,
+                snapshot_on_sweep=self.snapshot_on_sweep,
+                auto_update_policy=self.auto_update_policy,
+                on_policy_updated=self._on_maintenance_policy_updated,
+                lock=self._sweep_lock,
+                auto_start=True,
+            )
+        else:
+            self.maintenance_worker = None
+
+    def _on_maintenance_policy_updated(self, new_policy: dict[str, float]) -> None:
+        """Callback invoked by maintenance worker when a sweep derives a new policy."""
+        self.cold_start_policy = new_policy
+        logger.info(
+            "Cold-start serving policy updated by maintenance worker: %s",
+            new_policy,
+        )
+
+    def start_maintenance(self) -> None:
+        """Start the background maintenance worker thread if configured."""
+        if self.maintenance_worker is not None:
+            self.maintenance_worker.start()
+
+    def stop_maintenance(self, timeout: float | None = 5.0) -> None:
+        """Stop the background maintenance worker thread."""
+        if self.maintenance_worker is not None:
+            self.maintenance_worker.close(timeout=timeout)
+
+    def trigger_maintenance_sweep(self) -> dict[str, Any]:
+        """Trigger an immediate maintenance sweep and return its outcome."""
+        if self.maintenance_worker is not None:
+            return self.maintenance_worker.trigger_sweep()
+        return self.sweep_bandit_feedback(
+            context_features=self.context_features,
+            gamma=self.bandit_gamma,
+        )
+
+    def maintenance_status(self) -> dict[str, Any] | None:
+        """Return current metrics of the maintenance worker if active."""
+        if self.maintenance_worker is not None:
+            return self.maintenance_worker.get_metrics().to_dict()
+        return None
+
     @classmethod
     def from_artifacts(
         cls,
@@ -226,6 +357,11 @@ class RecommenderService:
         bandit_gamma: float | None = None,
         feedback_queue: StreamingFeedbackQueue | None = None,
         enable_streaming_feedback: bool = False,
+        maintenance_worker: BanditMaintenanceWorker | None = None,
+        enable_maintenance: bool = False,
+        maintenance_interval_seconds: float | None = None,
+        snapshot_on_sweep: bool | None = None,
+        auto_update_policy: bool | None = None,
     ) -> RecommenderService:
         """Load a service from a saved artifact bundle.
 
@@ -241,6 +377,11 @@ class RecommenderService:
             bandit_gamma=bandit_gamma,
             feedback_queue=feedback_queue,
             enable_streaming_feedback=enable_streaming_feedback,
+            maintenance_worker=maintenance_worker,
+            enable_maintenance=enable_maintenance,
+            maintenance_interval_seconds=maintenance_interval_seconds,
+            snapshot_on_sweep=snapshot_on_sweep,
+            auto_update_policy=auto_update_policy,
         )
         if cold_start_policy_path is not None and Path(cold_start_policy_path).exists():
             service.cold_start_policy = load_cold_start_policy(cold_start_policy_path)
@@ -317,6 +458,10 @@ class RecommenderService:
         status["supported_policies"] = list(SUPPORTED_BANDIT_POLICIES)
         if self.feedback_queue is not None:
             status["streaming_queue"] = self.feedback_queue.get_metrics().to_dict()
+        if self.maintenance_worker is not None:
+            status["maintenance_worker"] = (
+                self.maintenance_worker.get_metrics().to_dict()
+            )
         return status
 
     def flush_feedback(self, timeout: float | None = 5.0) -> None:
@@ -325,7 +470,9 @@ class RecommenderService:
             self.feedback_queue.flush(timeout=timeout)
 
     def close(self, timeout: float | None = 5.0) -> None:
-        """Release background resources including the streaming feedback queue."""
+        """Release background resources (maintenance worker and feedback queue)."""
+        if self.maintenance_worker is not None:
+            self.maintenance_worker.close(timeout=timeout)
         if self.feedback_queue is not None:
             self.feedback_queue.close(timeout=timeout)
 
@@ -357,35 +504,42 @@ class RecommenderService:
         ``context_features`` is supplied, it is cross-checked against the
         state's recorded feature set before folding.
         """
-        state_path = Path(state_path) if state_path is not None else BANDIT_STATE_PATH
-        journal_path = (
-            Path(feedback_journal_path)
-            if feedback_journal_path is not None
-            else BANDIT_FEEDBACK_PATH
-        )
-        state = load_bandit_state(state_path)
-        if context_features is not None:
-            validate_state_context_features(state, context_features)
-        feedback = load_bandit_feedback(journal_path) if journal_path.exists() else []
-        effective_gamma = float(gamma) if gamma is not None else self.bandit_gamma
-        if (
-            not np.isfinite(effective_gamma)
-            or effective_gamma <= 0.0
-            or effective_gamma > 1.0
-        ):
-            raise ValueError(
-                f"gamma must be in the range (0, 1], got {effective_gamma}."
+        with self._sweep_lock:
+            if self.feedback_queue is not None and not self.feedback_queue.is_closed:
+                self.feedback_queue.flush(timeout=2.0)
+            state_path = (
+                Path(state_path) if state_path is not None else BANDIT_STATE_PATH
             )
-        updated, _ = sweep_bandit_journal(state, feedback, gamma=effective_gamma)
-        state_path.parent.mkdir(parents=True, exist_ok=True)
-        state_path.write_text(
-            json.dumps(updated, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        return self.bandit_status(
-            state_path=state_path,
-            feedback_journal_path=journal_path,
-        )
+            journal_path = (
+                Path(feedback_journal_path)
+                if feedback_journal_path is not None
+                else BANDIT_FEEDBACK_PATH
+            )
+            state = load_bandit_state(state_path)
+            if context_features is not None:
+                validate_state_context_features(state, context_features)
+            feedback = (
+                load_bandit_feedback(journal_path) if journal_path.exists() else []
+            )
+            effective_gamma = float(gamma) if gamma is not None else self.bandit_gamma
+            if (
+                not np.isfinite(effective_gamma)
+                or effective_gamma <= 0.0
+                or effective_gamma > 1.0
+            ):
+                raise ValueError(
+                    f"gamma must be in the range (0, 1], got {effective_gamma}."
+                )
+            updated, _ = sweep_bandit_journal(state, feedback, gamma=effective_gamma)
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(
+                json.dumps(updated, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            return self.bandit_status(
+                state_path=state_path,
+                feedback_journal_path=journal_path,
+            )
 
     def create_bandit_snapshot(
         self,
@@ -395,12 +549,13 @@ class RecommenderService:
         snapshot_dir: str | Path | None = None,
     ) -> Path:
         """Create a timestamped snapshot of the current bandit state."""
-        st_path = Path(state_path) if state_path is not None else BANDIT_STATE_PATH
-        sn_dir = (
-            Path(snapshot_dir) if snapshot_dir is not None else BANDIT_SNAPSHOTS_DIR
-        )
-        state = load_bandit_state(st_path)
-        return save_bandit_snapshot(state, snapshot_dir=sn_dir, label=label)
+        with self._sweep_lock:
+            st_path = Path(state_path) if state_path is not None else BANDIT_STATE_PATH
+            sn_dir = (
+                Path(snapshot_dir) if snapshot_dir is not None else BANDIT_SNAPSHOTS_DIR
+            )
+            state = load_bandit_state(st_path)
+            return save_bandit_snapshot(state, snapshot_dir=sn_dir, label=label)
 
     def list_bandit_snapshots(
         self,
@@ -418,12 +573,13 @@ class RecommenderService:
         target_state_path: str | Path | None = None,
     ) -> Path:
         """Restore a snapshot into the active bandit state."""
-        target = (
-            Path(target_state_path)
-            if target_state_path is not None
-            else BANDIT_STATE_PATH
-        )
-        return restore_bandit_snapshot(snapshot_path, target_state_path=target)
+        with self._sweep_lock:
+            target = (
+                Path(target_state_path)
+                if target_state_path is not None
+                else BANDIT_STATE_PATH
+            )
+            return restore_bandit_snapshot(snapshot_path, target_state_path=target)
 
     def prune_bandit_snapshots(
         self,

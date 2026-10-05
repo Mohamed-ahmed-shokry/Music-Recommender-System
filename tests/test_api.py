@@ -18,6 +18,10 @@ class FakeService:
             "mean_popularity_rank",
         ]
         self.cold_start_policy: dict[str, float] = {"popular": 1.0}
+        self.closed: bool = False
+
+    def close(self, timeout: float | None = 5.0) -> None:
+        self.closed = True
 
     def health(self) -> dict[str, object]:
         return {"status": "ok", "artifact_version": "4.0"}
@@ -1416,6 +1420,9 @@ def test_recommendation_routes_reject_coerced_or_unknown_fields(
 
 
 class RaisingService:
+    def close(self, timeout: float | None = 5.0) -> None:
+        pass
+
     def __getattr__(self, _name: str) -> object:
         def raise_value_error(*_args: object, **_kwargs: object) -> None:
             raise ValueError("service operation failed")
@@ -1911,4 +1918,18 @@ def test_bandit_policy_derive_route_invalid_temperature() -> None:
             json={"temperature": -1.0},
         )
     assert response.status_code == 422
+
+
+def test_api_lifespan_closes_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_service = FakeService()
+
+    def mock_load_service() -> None:
+        api_main.service = fake_service
+        api_main.service_load_error = None
+
+    monkeypatch.setattr(api_main, "load_service", mock_load_service)
+    with TestClient(api_main.app):
+        assert fake_service.closed is False
+    assert fake_service.closed is True
+
 

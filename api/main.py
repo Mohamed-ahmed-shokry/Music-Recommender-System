@@ -130,7 +130,17 @@ def load_service() -> None:
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Initialize the recommender service once for the API process."""
     load_service()
-    yield
+    try:
+        yield
+    finally:
+        if service is not None:
+            try:
+                service.close()
+            except Exception as err:
+                logger.warning(
+                    "Error closing service during API lifespan shutdown: %s",
+                    err,
+                )
 
 
 app = FastAPI(

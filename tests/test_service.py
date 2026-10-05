@@ -15,15 +15,21 @@ from music_recommender.artifacts import (
 from music_recommender.bandit import (
     DEFAULT_COLD_START_ARMS,
     DEFAULT_CONTEXT_FEATURES,
+    BanditMaintenanceWorker,
     LinUCBContextualBandit,
     StreamingFeedbackQueue,
     append_bandit_feedback,
+    append_bandit_feedback_batch,
     load_bandit_feedback,
     save_bandit_context_features,
     snapshot_bandit_state,
     write_bandit_state,
 )
-from music_recommender.config import CONTEXT_FEATURES_ENV_VAR
+from music_recommender.config import (
+    BANDIT_ENABLE_MAINTENANCE_ENV_VAR,
+    BANDIT_MAINTENANCE_INTERVAL_ENV_VAR,
+    CONTEXT_FEATURES_ENV_VAR,
+)
 from music_recommender.content import build_content_artifacts
 from music_recommender.ltr import train_ltr_ranker
 from music_recommender.model import train_als_model
@@ -72,6 +78,11 @@ def create_service(
     bandit_gamma: float | None = None,
     feedback_queue: StreamingFeedbackQueue | None = None,
     enable_streaming_feedback: bool = False,
+    maintenance_worker: BanditMaintenanceWorker | None = None,
+    enable_maintenance: bool = False,
+    maintenance_interval_seconds: float | None = None,
+    snapshot_on_sweep: bool | None = None,
+    auto_update_policy: bool | None = None,
 ) -> RecommenderService:
     df = service_dataframe()
     mappings = create_id_mappings(df)
@@ -125,6 +136,11 @@ def create_service(
         bandit_gamma=bandit_gamma,
         feedback_queue=feedback_queue,
         enable_streaming_feedback=enable_streaming_feedback,
+        maintenance_worker=maintenance_worker,
+        enable_maintenance=enable_maintenance,
+        maintenance_interval_seconds=maintenance_interval_seconds,
+        snapshot_on_sweep=snapshot_on_sweep,
+        auto_update_policy=auto_update_policy,
     )
 
 
@@ -1695,4 +1711,137 @@ def test_service_streaming_feedback_context_manager(tmp_path: Path) -> None:
         assert service.feedback_queue.is_running
 
     assert service.feedback_queue.is_closed
+
+
+def test_service_maintenance_worker_init(tmp_path: Path) -> None:
+    service = create_service(tmp_path, enable_maintenance=True)
+    assert service.maintenance_worker is not None
+    assert isinstance(service.maintenance_worker, BanditMaintenanceWorker)
+    assert service.maintenance_worker.is_running
+
+    status = service.bandit_status()
+    assert "maintenance_worker" in status
+    assert status["maintenance_worker"]["is_running"] is True
+
+    meta = service.metadata()
+    assert "maintenance_worker" in meta["bandit"]
+
+    m_status = service.maintenance_status()
+    assert m_status is not None
+    assert m_status["is_running"] is True
+
+    service.close()
+    assert not service.maintenance_worker.is_running
+    assert service.maintenance_worker.is_closed
+
+
+def test_service_maintenance_env_var_init(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(BANDIT_ENABLE_MAINTENANCE_ENV_VAR, "1")
+    monkeypatch.setenv(BANDIT_MAINTENANCE_INTERVAL_ENV_VAR, "15.0")
+    service = create_service(tmp_path)
+    assert service.maintenance_worker is not None
+    assert service.maintenance_interval_seconds == 15.0
+    service.close()
+
+
+def test_service_trigger_maintenance_sweep(tmp_path: Path) -> None:
+    bandit = LinUCBContextualBandit(
+        DEFAULT_COLD_START_ARMS,
+        len(DEFAULT_CONTEXT_FEATURES),
+        context_features=DEFAULT_CONTEXT_FEATURES,
+    )
+    state = snapshot_bandit_state(bandit)
+    st_p = tmp_path / "bandit_state.json"
+    st_p.write_text(json.dumps(state) + "\n", encoding="utf-8")
+    j_p = tmp_path / "bandit_feedback.json"
+    records = [
+        {"context": [1.0, 0.0, 0.5], "arm": "popular", "reward": 0.8},
+        {"context": [0.0, 1.0, 0.5], "arm": "balanced", "reward": 0.4},
+    ]
+    append_bandit_feedback_batch(records, j_p)
+
+    worker = BanditMaintenanceWorker(
+        state_path=st_p,
+        journal_path=j_p,
+        min_pending_records=1,
+        auto_start=False,
+    )
+    service = create_service(tmp_path, maintenance_worker=worker)
+    res = service.trigger_maintenance_sweep()
+    assert res["swept"] is True
+    assert res["records_folded"] == 2
+
+    status = service.bandit_status(state_path=st_p, feedback_journal_path=j_p)
+    assert status["maintenance_worker"]["sweeps_count"] == 1
+    assert status["maintenance_worker"]["records_folded_count"] == 2
+
+    service.close()
+    assert worker.is_closed
+
+
+def test_service_maintenance_policy_hot_reloading(tmp_path: Path) -> None:
+    bandit = LinUCBContextualBandit(
+        DEFAULT_COLD_START_ARMS,
+        len(DEFAULT_CONTEXT_FEATURES),
+        context_features=DEFAULT_CONTEXT_FEATURES,
+    )
+    state = snapshot_bandit_state(bandit)
+    st_p = tmp_path / "bandit_state.json"
+    st_p.write_text(json.dumps(state) + "\n", encoding="utf-8")
+    j_p = tmp_path / "bandit_feedback.json"
+    records = [
+        {"context": [0.0, 0.0, 1.0], "arm": "long_tail", "reward": 1.0},
+        {"context": [0.0, 0.0, 1.0], "arm": "long_tail", "reward": 1.0},
+    ]
+    append_bandit_feedback_batch(records, j_p)
+
+    service = create_service(tmp_path)
+    service.cold_start_policy = {"popular": 1.0, "balanced": 0.0, "long_tail": 0.0}
+
+    worker = BanditMaintenanceWorker(
+        state_path=st_p,
+        journal_path=j_p,
+        min_pending_records=1,
+        auto_update_policy=True,
+        on_policy_updated=service._on_maintenance_policy_updated,
+        auto_start=False,
+    )
+    service.maintenance_worker = worker
+
+    res = service.trigger_maintenance_sweep()
+    assert res["swept"] is True
+    assert res["policy_updated"] is True
+    # The serving policy was dynamically refreshed in-memory
+    assert service.cold_start_policy != {
+        "popular": 1.0,
+        "balanced": 0.0,
+        "long_tail": 0.0,
+    }
+    assert "long_tail" in service.cold_start_policy
+    assert service.cold_start_policy["long_tail"] > 0.0
+
+    # Serving unknown user utilizes the hot-reloaded policy
+    rec = service.recommend_user("unknown_user", top_k=2)
+    assert rec["strategy"] == "bandit_fallback"
+
+    service.close()
+
+
+def test_service_maintenance_context_manager_teardown(tmp_path: Path) -> None:
+    with create_service(tmp_path, enable_maintenance=True) as service:
+        assert service.maintenance_worker is not None
+        assert service.maintenance_worker.is_running
+
+    assert not service.maintenance_worker.is_running
+    assert service.maintenance_worker.is_closed
+
+
+def test_service_maintenance_fallback_without_worker(tmp_path: Path) -> None:
+    service = create_service(tmp_path, enable_maintenance=False)
+    assert service.maintenance_worker is None
+    assert service.maintenance_status() is None
+    service.close()
+
 
