@@ -20,10 +20,12 @@ from music_recommender.bandit import (
     DEFAULT_CONTEXT_FEATURES,
     SUPPORTED_CONTEXT_FEATURES,
     BackpressureStrategy,
+    BanditMaintenanceWorker,
     BaseContextualBandit,
     EpsilonGreedyContextualBandit,
     FeedbackQueueFullError,
     LinUCBContextualBandit,
+    MaintenanceWorkerMetrics,
     StreamingFeedbackQueue,
     StreamingQueueMetrics,
     ThompsonSamplingContextualBandit,
@@ -2671,3 +2673,279 @@ class TestPhase125Reports:
             load_bandit_comparison_report(bad_json)
         with pytest.raises(ValueError, match="not a valid OPE report"):
             load_ope_report(bad_json)
+
+
+class TestBanditMaintenanceWorker:
+    def _create_state_and_journal(
+        self, tmp_path: Path
+    ) -> tuple[Path, Path, Path]:
+        bandit = LinUCBContextualBandit(
+            DEFAULT_COLD_START_ARMS,
+            len(DEFAULT_CONTEXT_FEATURES),
+            context_features=DEFAULT_CONTEXT_FEATURES,
+        )
+        state = snapshot_bandit_state(bandit)
+        state_file = tmp_path / "bandit_state.json"
+        state_file.write_text(json.dumps(state) + "\n", encoding="utf-8")
+        journal_file = tmp_path / "bandit_feedback.json"
+        snapshot_dir = tmp_path / "snapshots"
+        return state_file, journal_file, snapshot_dir
+
+    def test_init_validation(self, tmp_path: Path) -> None:
+        state_f, journal_f, snap_d = self._create_state_and_journal(tmp_path)
+        with pytest.raises(ValueError, match="interval_seconds must be a positive"):
+            BanditMaintenanceWorker(
+                state_path=state_f,
+                journal_path=journal_f,
+                interval_seconds=0.0,
+                auto_start=False,
+            )
+        with pytest.raises(ValueError, match="min_pending_records must be an integer"):
+            BanditMaintenanceWorker(
+                state_path=state_f,
+                journal_path=journal_f,
+                min_pending_records=0,
+                auto_start=False,
+            )
+        with pytest.raises(ValueError, match="gamma must be in the range"):
+            BanditMaintenanceWorker(
+                state_path=state_f,
+                journal_path=journal_f,
+                gamma=0.0,
+                auto_start=False,
+            )
+        with pytest.raises(ValueError, match="snapshot_retention must be"):
+            BanditMaintenanceWorker(
+                state_path=state_f,
+                journal_path=journal_f,
+                snapshot_retention=-1,
+                auto_start=False,
+            )
+        with pytest.raises(ValueError, match="policy_temperature must be a positive"):
+            BanditMaintenanceWorker(
+                state_path=state_f,
+                journal_path=journal_f,
+                policy_temperature=0.0,
+                auto_start=False,
+            )
+        with pytest.raises(
+            ValueError, match="policy_temperature_decay must be a non-negative"
+        ):
+            BanditMaintenanceWorker(
+                state_path=state_f,
+                journal_path=journal_f,
+                policy_temperature_decay=-0.5,
+                auto_start=False,
+            )
+        with pytest.raises(
+            ValueError, match="policy_min_temperature must be a positive"
+        ):
+            BanditMaintenanceWorker(
+                state_path=state_f,
+                journal_path=journal_f,
+                policy_min_temperature=0.0,
+                auto_start=False,
+            )
+
+    def test_cycle_no_files_noop(self, tmp_path: Path) -> None:
+        worker = BanditMaintenanceWorker(
+            state_path=tmp_path / "missing_state.json",
+            journal_path=tmp_path / "missing_journal.json",
+            auto_start=False,
+        )
+        res = worker.run_maintenance_cycle()
+        assert res["executed"] is True
+        assert res["swept"] is False
+        assert "does not exist" in res["reason"]
+        assert worker.get_metrics().cycles_count == 1
+        assert worker.get_metrics().sweeps_count == 0
+
+    def test_cycle_below_threshold(self, tmp_path: Path) -> None:
+        state_f, journal_f, snap_d = self._create_state_and_journal(tmp_path)
+        records = [{"context": [1.0, 0.0, 0.5], "arm": "popular", "reward": 0.8}]
+        append_bandit_feedback_batch(records, journal_f)
+
+        worker = BanditMaintenanceWorker(
+            state_path=state_f,
+            journal_path=journal_f,
+            min_pending_records=5,
+            auto_start=False,
+        )
+        res = worker.run_maintenance_cycle()
+        assert res["executed"] is True
+        assert res["swept"] is False
+        assert res["pending"] == 1
+        assert res["threshold"] == 5
+        assert worker.get_metrics().sweeps_count == 0
+
+    def test_trigger_sweep_and_policy_update(self, tmp_path: Path) -> None:
+        state_f, journal_f, snap_d = self._create_state_and_journal(tmp_path)
+        records = [
+            {"context": [1.0, 0.0, 0.5], "arm": "popular", "reward": 0.8},
+            {"context": [0.5, 1.0, 0.0], "arm": "balanced", "reward": 0.4},
+            {"context": [0.0, 0.5, 1.0], "arm": "long_tail", "reward": 0.6},
+        ]
+        append_bandit_feedback_batch(records, journal_f)
+
+        updated_policies: list[dict[str, float]] = []
+
+        def on_update(policy: dict[str, float]) -> None:
+            updated_policies.append(policy)
+
+        worker = BanditMaintenanceWorker(
+            state_path=state_f,
+            journal_path=journal_f,
+            min_pending_records=1,
+            auto_update_policy=True,
+            on_policy_updated=on_update,
+            auto_start=False,
+        )
+        res = worker.trigger_sweep()
+        assert res["executed"] is True
+        assert res["swept"] is True
+        assert res["records_folded"] == 3
+        assert res["policy_updated"] is True
+        assert len(updated_policies) == 1
+        assert set(updated_policies[0].keys()) == {"popular", "balanced", "long_tail"}
+
+        metrics = worker.get_metrics()
+        assert isinstance(metrics, MaintenanceWorkerMetrics)
+        assert metrics.sweeps_count == 1
+        assert metrics.records_folded_count == 3
+        assert metrics.last_sweep_records_folded == 3
+        assert metrics.last_sweep_at is not None
+        assert metrics.last_sweep_duration_seconds is not None
+
+        d = metrics.to_dict()
+        assert d["sweeps_count"] == 1
+        assert d["records_folded_count"] == 3
+
+    def test_snapshot_on_sweep_and_retention(self, tmp_path: Path) -> None:
+        state_f, journal_f, snap_d = self._create_state_and_journal(tmp_path)
+
+        worker = BanditMaintenanceWorker(
+            state_path=state_f,
+            journal_path=journal_f,
+            snapshot_dir=snap_d,
+            min_pending_records=1,
+            snapshot_on_sweep=True,
+            snapshot_retention=2,
+            auto_start=False,
+        )
+
+        for i in range(3):
+            records = [
+                {"context": [1.0, 0.0, float(i)], "arm": "popular", "reward": 0.5}
+            ]
+            append_bandit_feedback_batch(records, journal_f)
+            res = worker.trigger_sweep()
+            assert res["swept"] is True
+            assert res["snapshot_path"] is not None
+
+        snapshots = list(snap_d.glob("bandit_state_*.json"))
+        assert len(snapshots) == 2  # pruned to 2
+        metrics = worker.get_metrics()
+        assert metrics.snapshots_created_count == 3
+        assert metrics.last_snapshot_at is not None
+
+    def test_coordination_with_streaming_queue(self, tmp_path: Path) -> None:
+        state_f, journal_f, snap_d = self._create_state_and_journal(tmp_path)
+        queue = StreamingFeedbackQueue(
+            journal_f, max_queue_size=100, auto_start=False
+        )
+        queue.enqueue({"context": [1.0, 0.0, 0.5], "arm": "popular", "reward": 0.9})
+        queue.enqueue({"context": [0.0, 1.0, 0.5], "arm": "balanced", "reward": 0.3})
+        assert queue.queue_depth == 2
+
+        worker = BanditMaintenanceWorker(
+            state_path=state_f,
+            journal_path=journal_f,
+            feedback_queue=queue,
+            min_pending_records=1,
+            auto_start=False,
+        )
+        res = worker.trigger_sweep()
+        assert res["swept"] is True
+        assert res["records_folded"] == 2
+        assert queue.queue_depth == 0
+
+        # Subsequent sweep has 0 pending
+        res2 = worker.trigger_sweep()
+        assert res2["swept"] is False
+        assert res2["pending"] == 0
+
+    def test_periodic_sweep_worker_thread(self, tmp_path: Path) -> None:
+        state_f, journal_f, snap_d = self._create_state_and_journal(tmp_path)
+        records = [{"context": [1.0, 0.0, 0.5], "arm": "popular", "reward": 0.7}]
+        append_bandit_feedback_batch(records, journal_f)
+
+        worker = BanditMaintenanceWorker(
+            state_path=state_f,
+            journal_path=journal_f,
+            interval_seconds=0.05,
+            min_pending_records=1,
+            auto_start=True,
+        )
+        assert worker.is_running
+        time.sleep(0.15)
+        worker.close()
+
+        assert not worker.is_running
+        assert worker.is_closed
+        assert worker.get_metrics().sweeps_count >= 1
+
+    def test_graceful_shutdown_and_context_manager(self, tmp_path: Path) -> None:
+        state_f, journal_f, snap_d = self._create_state_and_journal(tmp_path)
+        with BanditMaintenanceWorker(
+            state_path=state_f,
+            journal_path=journal_f,
+            auto_start=True,
+        ) as worker:
+            assert worker.is_running
+            assert not worker.is_closed
+
+        assert not worker.is_running
+        assert worker.is_closed
+
+        with pytest.raises(RuntimeError, match="closed"):
+            worker.trigger_sweep()
+        with pytest.raises(RuntimeError, match="closed"):
+            worker.start()
+
+    def test_cycle_error_handling(self, tmp_path: Path) -> None:
+        state_f, journal_f, snap_d = self._create_state_and_journal(tmp_path)
+        state_f.write_text("invalid json content!", encoding="utf-8")
+        records = [{"context": [1.0, 0.0, 0.5], "arm": "popular", "reward": 0.5}]
+        append_bandit_feedback_batch(records, journal_f)
+
+        worker = BanditMaintenanceWorker(
+            state_path=state_f,
+            journal_path=journal_f,
+            auto_start=False,
+        )
+        res = worker.run_maintenance_cycle()
+        assert res["executed"] is True
+        assert res["swept"] is False
+        assert "error" in res
+        metrics = worker.get_metrics()
+        assert metrics.errors_count == 1
+        assert metrics.last_error is not None
+
+    def test_context_features_mismatch_error(self, tmp_path: Path) -> None:
+        state_f, journal_f, snap_d = self._create_state_and_journal(tmp_path)
+        records = [{"context": [1.0, 0.0, 0.5], "arm": "popular", "reward": 0.5}]
+        append_bandit_feedback_batch(records, journal_f)
+
+        worker = BanditMaintenanceWorker(
+            state_path=state_f,
+            journal_path=journal_f,
+            context_features=["log_plays"],
+            auto_start=False,
+        )
+        res = worker.run_maintenance_cycle()
+        assert res["executed"] is True
+        assert res["swept"] is False
+        assert "error" in res
+        assert "do not match the state's recorded feature set" in str(res["error"])
+        assert worker.get_metrics().errors_count == 1
+

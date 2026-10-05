@@ -46,6 +46,10 @@ from music_recommender.config import (
     BANDIT_FEEDBACK_PATH,
     BANDIT_SNAPSHOTS_DIR,
     BANDIT_STATE_PATH,
+    DEFAULT_BANDIT_GAMMA,
+    DEFAULT_BANDIT_MAINTENANCE_INTERVAL,
+    DEFAULT_BANDIT_MAINTENANCE_THRESHOLD,
+    DEFAULT_BANDIT_SNAPSHOT_RETENTION,
 )
 from music_recommender.data import normalize_interactions
 from music_recommender.evaluate import precision_at_k
@@ -1214,8 +1218,7 @@ class StreamingFeedbackQueue:
                 elif self.backpressure == BackpressureStrategy.REJECT:
                     self._dropped_count += 1
                     logger.warning(
-                        "StreamingFeedbackQueue full (%d items); "
-                        "rejected new record.",
+                        "StreamingFeedbackQueue full (%d items); rejected new record.",
                         self.max_queue_size,
                     )
                     if raise_on_drop:
@@ -1226,10 +1229,7 @@ class StreamingFeedbackQueue:
                     return False
                 elif self.backpressure == BackpressureStrategy.BLOCK:
                     deadline = time.monotonic() + self.enqueue_timeout
-                    while (
-                        len(self._queue) >= self.max_queue_size
-                        and not self._closed
-                    ):
+                    while len(self._queue) >= self.max_queue_size and not self._closed:
                         remaining = deadline - time.monotonic()
                         if remaining <= 0:
                             break
@@ -2520,9 +2520,7 @@ def compare_bandit_simulation_policies(
     for spec in policy_specs:
         p_name = str(spec["name"])
         p_type = str(spec["policy_type"])
-        alpha_val = float(
-            spec.get("alpha", 1.0 if p_type != "epsilon_greedy" else 0.2)
-        )
+        alpha_val = float(spec.get("alpha", 1.0 if p_type != "epsilon_greedy" else 0.2))
         alpha_decay_val = float(spec.get("alpha_decay", 0.0))
         gamma_val = float(spec.get("gamma", 1.0))
 
@@ -2702,9 +2700,7 @@ def load_ope_report(report_path: Path | str) -> dict[str, Any]:
     try:
         report = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
-        raise ValueError(
-            f"Failed to parse OPE report '{path}': {error}"
-        ) from error
+        raise ValueError(f"Failed to parse OPE report '{path}': {error}") from error
     if (
         not isinstance(report, dict)
         or "metrics" not in report
@@ -2714,3 +2710,366 @@ def load_ope_report(report_path: Path | str) -> dict[str, Any]:
             f"'{path}' is not a valid OPE report (missing 'metrics' or 'summary')."
         )
     return report
+
+
+@dataclasses.dataclass(frozen=True)
+class MaintenanceWorkerMetrics:
+    """Snapshot of bandit maintenance worker metrics."""
+
+    is_running: bool
+    is_closed: bool
+    cycles_count: int
+    sweeps_count: int
+    errors_count: int
+    records_folded_count: int
+    snapshots_created_count: int
+    interval_seconds: float
+    min_pending_records: int
+    snapshot_on_sweep: bool
+    auto_update_policy: bool
+    last_sweep_at: str | None = None
+    last_sweep_duration_seconds: float | None = None
+    last_sweep_records_folded: int = 0
+    last_snapshot_at: str | None = None
+    last_error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert metrics to a dictionary representation."""
+        return {
+            "is_running": self.is_running,
+            "is_closed": self.is_closed,
+            "cycles_count": self.cycles_count,
+            "sweeps_count": self.sweeps_count,
+            "errors_count": self.errors_count,
+            "records_folded_count": self.records_folded_count,
+            "snapshots_created_count": self.snapshots_created_count,
+            "interval_seconds": self.interval_seconds,
+            "min_pending_records": self.min_pending_records,
+            "snapshot_on_sweep": self.snapshot_on_sweep,
+            "auto_update_policy": self.auto_update_policy,
+            "last_sweep_at": self.last_sweep_at,
+            "last_sweep_duration_seconds": self.last_sweep_duration_seconds,
+            "last_sweep_records_folded": self.last_sweep_records_folded,
+            "last_snapshot_at": self.last_snapshot_at,
+            "last_error": self.last_error,
+        }
+
+
+class BanditMaintenanceWorker:
+    """Integrated asynchronous maintenance worker for bandit state sweeps and snapshots.
+
+    Runs a background daemon thread that periodically checks for pending feedback
+    records in the feedback journal (or flushes the in-memory StreamingFeedbackQueue),
+    executes an idempotent sweep folding new records into the persisted bandit state,
+    optionally rotates state snapshots with retention limits, and optionally re-derives
+    and hot-reloads the active cold-start serving policy.
+    """
+
+    def __init__(
+        self,
+        *,
+        state_path: Path | str = BANDIT_STATE_PATH,
+        journal_path: Path | str = BANDIT_FEEDBACK_PATH,
+        snapshot_dir: Path | str = BANDIT_SNAPSHOTS_DIR,
+        interval_seconds: float = DEFAULT_BANDIT_MAINTENANCE_INTERVAL,
+        min_pending_records: int = DEFAULT_BANDIT_MAINTENANCE_THRESHOLD,
+        gamma: float = DEFAULT_BANDIT_GAMMA,
+        context_features: Sequence[str] | None = None,
+        feedback_queue: StreamingFeedbackQueue | None = None,
+        snapshot_on_sweep: bool = False,
+        snapshot_retention: int = DEFAULT_BANDIT_SNAPSHOT_RETENTION,
+        auto_update_policy: bool = True,
+        on_policy_updated: Callable[[dict[str, float]], None] | None = None,
+        policy_temperature: float = 1.0,
+        policy_temperature_decay: float = 0.0,
+        policy_min_temperature: float = 0.05,
+        lock: threading.Lock | threading.RLock | None = None,
+        auto_start: bool = True,
+    ) -> None:
+        if not np.isfinite(interval_seconds) or interval_seconds <= 0.0:
+            raise ValueError(
+                "interval_seconds must be a positive finite number, "
+                f"got {interval_seconds}."
+            )
+        if type(min_pending_records) is not int or min_pending_records < 1:
+            raise ValueError(
+                "min_pending_records must be an integer >= 1, "
+                f"got {min_pending_records}."
+            )
+        if not np.isfinite(gamma) or gamma <= 0.0 or gamma > 1.0:
+            raise ValueError(f"gamma must be in the range (0, 1], got {gamma}.")
+        if type(snapshot_retention) is not int or snapshot_retention < 0:
+            raise ValueError(
+                "snapshot_retention must be a non-negative integer, "
+                f"got {snapshot_retention}."
+            )
+        if not np.isfinite(policy_temperature) or policy_temperature <= 0.0:
+            raise ValueError(
+                "policy_temperature must be a positive finite number, "
+                f"got {policy_temperature}."
+            )
+        if not np.isfinite(policy_temperature_decay) or policy_temperature_decay < 0.0:
+            raise ValueError(
+                "policy_temperature_decay must be a non-negative finite number, "
+                f"got {policy_temperature_decay}."
+            )
+        if not np.isfinite(policy_min_temperature) or policy_min_temperature <= 0.0:
+            raise ValueError(
+                "policy_min_temperature must be a positive finite number, "
+                f"got {policy_min_temperature}."
+            )
+
+        self.state_path = Path(state_path)
+        self.journal_path = Path(journal_path)
+        self.snapshot_dir = Path(snapshot_dir)
+        self.interval_seconds = float(interval_seconds)
+        self.min_pending_records = int(min_pending_records)
+        self.gamma = float(gamma)
+        self.context_features = (
+            tuple(context_features) if context_features is not None else None
+        )
+        self.feedback_queue = feedback_queue
+        self.snapshot_on_sweep = bool(snapshot_on_sweep)
+        self.snapshot_retention = int(snapshot_retention)
+        self.auto_update_policy = bool(auto_update_policy)
+        self.on_policy_updated = on_policy_updated
+        self.policy_temperature = float(policy_temperature)
+        self.policy_temperature_decay = float(policy_temperature_decay)
+        self.policy_min_temperature = float(policy_min_temperature)
+
+        self._lock: threading.Lock | threading.RLock = (
+            lock if lock is not None else threading.RLock()
+        )
+        self._stop_event = threading.Event()
+        self._trigger_event = threading.Event()
+        self._worker_thread: threading.Thread | None = None
+        self._closed: bool = False
+
+        self._cycles_count: int = 0
+        self._sweeps_count: int = 0
+        self._errors_count: int = 0
+        self._records_folded_count: int = 0
+        self._snapshots_created_count: int = 0
+        self._last_sweep_at: str | None = None
+        self._last_sweep_duration_seconds: float | None = None
+        self._last_sweep_records_folded: int = 0
+        self._last_snapshot_at: str | None = None
+        self._last_error: str | None = None
+
+        if auto_start:
+            self.start()
+
+    @property
+    def is_running(self) -> bool:
+        """Whether the background worker thread is actively running."""
+        with self._lock:
+            return (
+                self._worker_thread is not None
+                and self._worker_thread.is_alive()
+                and not self._stop_event.is_set()
+            )
+
+    @property
+    def is_closed(self) -> bool:
+        """Whether the maintenance worker has been closed."""
+        with self._lock:
+            return self._closed
+
+    def start(self) -> None:
+        """Start the background maintenance worker thread if not already running."""
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Cannot start a closed BanditMaintenanceWorker.")
+            if self._worker_thread is not None and self._worker_thread.is_alive():
+                return
+            self._stop_event.clear()
+            self._worker_thread = threading.Thread(
+                target=self._worker_loop,
+                name="bandit-maintenance-worker",
+                daemon=True,
+            )
+            self._worker_thread.start()
+
+    def run_maintenance_cycle(self) -> dict[str, Any]:
+        """Execute one maintenance cycle synchronously.
+
+        Flushes feedback_queue if present, checks pending feedback count,
+        and folds pending records into bandit_state if threshold is met.
+        Optionally creates a snapshot and updates the active policy.
+
+        Returns a dictionary summarizing the actions taken and metrics.
+        """
+        with self._lock:
+            if self._closed:
+                return {"executed": False, "swept": False, "reason": "worker is closed"}
+
+            self._cycles_count += 1
+
+            try:
+                if (
+                    self.feedback_queue is not None
+                    and not self.feedback_queue.is_closed
+                ):
+                    self.feedback_queue.flush(timeout=2.0)
+
+                if not self.state_path.exists():
+                    return {
+                        "executed": True,
+                        "swept": False,
+                        "reason": f"State file does not exist: {self.state_path}",
+                    }
+
+                feedback = (
+                    load_bandit_feedback(self.journal_path)
+                    if self.journal_path.exists()
+                    else []
+                )
+                state = load_bandit_state(self.state_path)
+                pending = pending_feedback_count(state, feedback)
+
+                if pending < self.min_pending_records:
+                    return {
+                        "executed": True,
+                        "swept": False,
+                        "pending": pending,
+                        "threshold": self.min_pending_records,
+                    }
+
+                t0 = time.perf_counter()
+                if self.context_features is not None:
+                    validate_state_context_features(state, self.context_features)
+
+                updated, sweep_summary = sweep_bandit_journal(
+                    state, feedback, gamma=self.gamma
+                )
+                folded_count = int(sweep_summary["folded_count"])
+                self.state_path.parent.mkdir(parents=True, exist_ok=True)
+                self.state_path.write_text(
+                    json.dumps(updated, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+
+                duration = time.perf_counter() - t0
+                now_iso = datetime.now(UTC).isoformat()
+                self._last_sweep_at = now_iso
+                self._last_sweep_duration_seconds = round(duration, 4)
+                self._last_sweep_records_folded = folded_count
+                self._records_folded_count += folded_count
+                self._sweeps_count += 1
+                self._last_error = None
+
+                snapshot_path: str | None = None
+                if self.snapshot_on_sweep and folded_count > 0:
+                    sn_p = save_bandit_snapshot(
+                        updated,
+                        snapshot_dir=self.snapshot_dir,
+                        label=f"auto_sweep_{self._sweeps_count}",
+                    )
+                    snapshot_path = str(sn_p)
+                    self._last_snapshot_at = now_iso
+                    self._snapshots_created_count += 1
+                    if self.snapshot_retention > 0:
+                        prune_bandit_snapshots(
+                            snapshot_dir=self.snapshot_dir,
+                            max_keep=self.snapshot_retention,
+                        )
+
+                policy: dict[str, float] | None = None
+                if self.auto_update_policy and folded_count > 0:
+                    policy = derive_cold_start_policy(
+                        updated,
+                        temperature=self.policy_temperature,
+                        temperature_decay=self.policy_temperature_decay,
+                        min_temperature=self.policy_min_temperature,
+                    )
+                    if self.on_policy_updated is not None:
+                        try:
+                            self.on_policy_updated(policy)
+                        except Exception as cb_err:
+                            logger.warning(
+                                "on_policy_updated callback failed: %s", cb_err
+                            )
+
+                return {
+                    "executed": True,
+                    "swept": True,
+                    "records_folded": folded_count,
+                    "duration_seconds": self._last_sweep_duration_seconds,
+                    "snapshot_path": snapshot_path,
+                    "policy_updated": policy is not None,
+                    "policy": policy,
+                }
+            except Exception as error:
+                logger.exception("BanditMaintenanceWorker cycle failed: %s", error)
+                self._errors_count += 1
+                self._last_error = str(error)
+                return {
+                    "executed": True,
+                    "swept": False,
+                    "error": str(error),
+                }
+
+    def trigger_sweep(self) -> dict[str, Any]:
+        """Trigger an immediate maintenance cycle and return its result."""
+        with self._lock:
+            if self._closed:
+                raise RuntimeError(
+                    "Cannot trigger sweep on a closed BanditMaintenanceWorker."
+                )
+        return self.run_maintenance_cycle()
+
+    def close(self, timeout: float | None = 5.0) -> None:
+        """Gracefully shut down the background maintenance worker thread."""
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._stop_event.set()
+            self._trigger_event.set()
+            worker = self._worker_thread
+
+        if worker is not None and worker.is_alive():
+            worker.join(timeout=timeout)
+
+    def get_metrics(self) -> MaintenanceWorkerMetrics:
+        """Return a snapshot of current maintenance worker metrics."""
+        with self._lock:
+            return MaintenanceWorkerMetrics(
+                is_running=self.is_running,
+                is_closed=self._closed,
+                cycles_count=self._cycles_count,
+                sweeps_count=self._sweeps_count,
+                errors_count=self._errors_count,
+                records_folded_count=self._records_folded_count,
+                snapshots_created_count=self._snapshots_created_count,
+                interval_seconds=self.interval_seconds,
+                min_pending_records=self.min_pending_records,
+                snapshot_on_sweep=self.snapshot_on_sweep,
+                auto_update_policy=self.auto_update_policy,
+                last_sweep_at=self._last_sweep_at,
+                last_sweep_duration_seconds=self._last_sweep_duration_seconds,
+                last_sweep_records_folded=self._last_sweep_records_folded,
+                last_snapshot_at=self._last_snapshot_at,
+                last_error=self._last_error,
+            )
+
+    def _worker_loop(self) -> None:
+        """Background daemon loop running periodic maintenance cycles."""
+        while not self._stop_event.is_set():
+            triggered = self._trigger_event.wait(timeout=self.interval_seconds)
+            if self._stop_event.is_set():
+                break
+            if triggered:
+                self._trigger_event.clear()
+            self.run_maintenance_cycle()
+
+    def __enter__(self) -> BanditMaintenanceWorker:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
+        self.close()
