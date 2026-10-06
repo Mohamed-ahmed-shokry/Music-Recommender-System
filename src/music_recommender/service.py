@@ -17,6 +17,8 @@ from music_recommender.bandit import (
     SUPPORTED_BANDIT_POLICIES,
     BanditMaintenanceWorker,
     BaseContextualBandit,
+    DriftSafetyResult,
+    DriftSafetyThresholds,
     StreamingFeedbackQueue,
     append_bandit_feedback_batch,
     compare_bandit_simulation_policies,
@@ -24,7 +26,9 @@ from music_recommender.bandit import (
     compute_off_policy_evaluation,
     derive_cold_start_policy,
     dominant_policy_arm,
+    evaluate_drift_safety,
     feedback_records_from_bandit_serve,
+    get_champion_snapshot,
     list_bandit_snapshots,
     load_bandit_feedback,
     load_bandit_snapshot,
@@ -35,9 +39,11 @@ from music_recommender.bandit import (
     rank_cold_start_bandit,
     resolve_context_features,
     restore_bandit_snapshot,
+    rollback_bandit_state,
     save_bandit_snapshot,
     summarize_bandit_lifecycle,
     sweep_bandit_journal,
+    tag_champion_snapshot,
     validate_serve_context,
     validate_state_context_features,
     write_cold_start_policy,
@@ -46,9 +52,14 @@ from music_recommender.baselines import popular_artists
 from music_recommender.config import (
     ARTIFACT_BUNDLE_PATH,
     BANDIT_ALPHA_DECAY_ENV_VAR,
+    BANDIT_AUTO_ROLLBACK_ON_DRIFT_ENV_VAR,
     BANDIT_AUTO_SWEEP_THRESHOLD_ENV_VAR,
     BANDIT_AUTO_UPDATE_POLICY_ENV_VAR,
     BANDIT_CONTEXT_FEATURES_PATH,
+    BANDIT_DRIFT_MAX_L2_ENV_VAR,
+    BANDIT_DRIFT_MAX_REWARD_DROP_ENV_VAR,
+    BANDIT_DRIFT_MIN_COSINE_ENV_VAR,
+    BANDIT_ENABLE_DRIFT_GUARDRAILS_ENV_VAR,
     BANDIT_ENABLE_MAINTENANCE_ENV_VAR,
     BANDIT_FEEDBACK_PATH,
     BANDIT_GAMMA_ENV_VAR,
@@ -60,7 +71,12 @@ from music_recommender.config import (
     COLD_START_POLICY_PATH,
     CONTEXT_FEATURES_ENV_VAR,
     DEFAULT_BANDIT_ALPHA_DECAY,
+    DEFAULT_BANDIT_AUTO_ROLLBACK_ON_DRIFT,
     DEFAULT_BANDIT_AUTO_SWEEP_THRESHOLD,
+    DEFAULT_BANDIT_DRIFT_MAX_L2,
+    DEFAULT_BANDIT_DRIFT_MAX_REWARD_DROP,
+    DEFAULT_BANDIT_DRIFT_MIN_COSINE,
+    DEFAULT_BANDIT_ENABLE_DRIFT_GUARDRAILS,
     DEFAULT_BANDIT_GAMMA,
     DEFAULT_BANDIT_MAINTENANCE_INTERVAL,
     DEFAULT_BANDIT_POLICY_TYPE,
@@ -124,6 +140,13 @@ class RecommenderService:
         maintenance_interval_seconds: float | None = None,
         snapshot_on_sweep: bool | None = None,
         auto_update_policy: bool | None = None,
+        drift_guardrails_enabled: bool | None = None,
+        drift_max_l2: float | None = None,
+        drift_min_cosine: float | None = None,
+        drift_max_reward_drop: float | None = None,
+        auto_rollback_on_drift: bool | None = None,
+        champion_snapshot_path: Path | str | None = None,
+        drift_thresholds: DriftSafetyThresholds | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -296,8 +319,91 @@ class RecommenderService:
             else:
                 self.auto_update_policy = True
 
+        if drift_guardrails_enabled is not None:
+            self.drift_guardrails_enabled = bool(drift_guardrails_enabled)
+        else:
+            env_g = os.getenv(BANDIT_ENABLE_DRIFT_GUARDRAILS_ENV_VAR)
+            if env_g is not None and env_g.strip():
+                self.drift_guardrails_enabled = env_g.strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+            else:
+                self.drift_guardrails_enabled = (
+                    DEFAULT_BANDIT_ENABLE_DRIFT_GUARDRAILS
+                )
+
+        if drift_max_l2 is not None:
+            self.drift_max_l2: float | None = float(drift_max_l2)
+        else:
+            env_l2 = os.getenv(BANDIT_DRIFT_MAX_L2_ENV_VAR)
+            self.drift_max_l2 = (
+                float(env_l2.strip())
+                if env_l2 is not None and env_l2.strip()
+                else DEFAULT_BANDIT_DRIFT_MAX_L2
+            )
+
+        if drift_min_cosine is not None:
+            self.drift_min_cosine: float | None = float(drift_min_cosine)
+        else:
+            env_cos = os.getenv(BANDIT_DRIFT_MIN_COSINE_ENV_VAR)
+            self.drift_min_cosine = (
+                float(env_cos.strip())
+                if env_cos is not None and env_cos.strip()
+                else DEFAULT_BANDIT_DRIFT_MIN_COSINE
+            )
+
+        if drift_max_reward_drop is not None:
+            self.drift_max_reward_drop: float | None = float(
+                drift_max_reward_drop
+            )
+        else:
+            env_drop = os.getenv(BANDIT_DRIFT_MAX_REWARD_DROP_ENV_VAR)
+            self.drift_max_reward_drop = (
+                float(env_drop.strip())
+                if env_drop is not None and env_drop.strip()
+                else DEFAULT_BANDIT_DRIFT_MAX_REWARD_DROP
+            )
+
+        if auto_rollback_on_drift is not None:
+            self.auto_rollback_on_drift = bool(auto_rollback_on_drift)
+        else:
+            env_rb = os.getenv(BANDIT_AUTO_ROLLBACK_ON_DRIFT_ENV_VAR)
+            if env_rb is not None and env_rb.strip():
+                self.auto_rollback_on_drift = env_rb.strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+            else:
+                self.auto_rollback_on_drift = (
+                    DEFAULT_BANDIT_AUTO_ROLLBACK_ON_DRIFT
+                )
+
+        self.champion_snapshot_path = (
+            Path(champion_snapshot_path)
+            if champion_snapshot_path is not None
+            else None
+        )
+        if drift_thresholds is not None:
+            self.drift_thresholds = drift_thresholds
+            self.drift_max_l2 = drift_thresholds.max_l2_drift
+            self.drift_min_cosine = drift_thresholds.min_cosine_similarity
+            self.drift_max_reward_drop = drift_thresholds.max_reward_drop
+        else:
+            self.drift_thresholds = DriftSafetyThresholds(
+                max_l2_drift=self.drift_max_l2,
+                min_cosine_similarity=self.drift_min_cosine,
+                max_reward_drop=self.drift_max_reward_drop,
+            )
+
         if maintenance_worker is not None:
-            self.maintenance_worker: BanditMaintenanceWorker | None = maintenance_worker
+            self.maintenance_worker: BanditMaintenanceWorker | None = (
+                maintenance_worker
+            )
         elif enable_maintenance:
             self.maintenance_worker = BanditMaintenanceWorker(
                 interval_seconds=self.maintenance_interval_seconds,
@@ -306,6 +412,10 @@ class RecommenderService:
                 feedback_queue=self.feedback_queue,
                 snapshot_on_sweep=self.snapshot_on_sweep,
                 auto_update_policy=self.auto_update_policy,
+                drift_guardrails_enabled=self.drift_guardrails_enabled,
+                drift_thresholds=self.drift_thresholds,
+                auto_rollback_on_drift=self.auto_rollback_on_drift,
+                champion_snapshot_path=self.champion_snapshot_path,
                 on_policy_updated=self._on_maintenance_policy_updated,
                 lock=self._sweep_lock,
                 auto_start=True,
@@ -362,6 +472,13 @@ class RecommenderService:
         maintenance_interval_seconds: float | None = None,
         snapshot_on_sweep: bool | None = None,
         auto_update_policy: bool | None = None,
+        drift_guardrails_enabled: bool | None = None,
+        drift_max_l2: float | None = None,
+        drift_min_cosine: float | None = None,
+        drift_max_reward_drop: float | None = None,
+        auto_rollback_on_drift: bool | None = None,
+        champion_snapshot_path: Path | str | None = None,
+        drift_thresholds: DriftSafetyThresholds | None = None,
     ) -> RecommenderService:
         """Load a service from a saved artifact bundle.
 
@@ -382,6 +499,13 @@ class RecommenderService:
             maintenance_interval_seconds=maintenance_interval_seconds,
             snapshot_on_sweep=snapshot_on_sweep,
             auto_update_policy=auto_update_policy,
+            drift_guardrails_enabled=drift_guardrails_enabled,
+            drift_max_l2=drift_max_l2,
+            drift_min_cosine=drift_min_cosine,
+            drift_max_reward_drop=drift_max_reward_drop,
+            auto_rollback_on_drift=auto_rollback_on_drift,
+            champion_snapshot_path=champion_snapshot_path,
+            drift_thresholds=drift_thresholds,
         )
         if cold_start_policy_path is not None and Path(cold_start_policy_path).exists():
             service.cold_start_policy = load_cold_start_policy(cold_start_policy_path)
@@ -428,6 +552,7 @@ class RecommenderService:
         *,
         state_path: str | Path | None = None,
         feedback_journal_path: str | Path | None = None,
+        snapshot_dir: str | Path | None = None,
     ) -> dict[str, Any]:
         """Return a readable snapshot of the cold-start bandit lifecycle.
 
@@ -443,6 +568,9 @@ class RecommenderService:
             if feedback_journal_path is not None
             else BANDIT_FEEDBACK_PATH
         )
+        sn_dir = (
+            Path(snapshot_dir) if snapshot_dir is not None else BANDIT_SNAPSHOTS_DIR
+        )
         state = load_bandit_state(state_path) if state_path.exists() else None
         feedback = load_bandit_feedback(journal_path) if journal_path.exists() else []
         status = summarize_bandit_lifecycle(
@@ -454,8 +582,14 @@ class RecommenderService:
         status["policy_type"] = self.bandit_policy_type
         status["alpha_decay"] = self.bandit_alpha_decay
         status["gamma"] = self.bandit_gamma
-        status["snapshots_count"] = len(self.list_bandit_snapshots())
+        status["snapshots_count"] = len(self.list_bandit_snapshots(snapshot_dir=sn_dir))
         status["supported_policies"] = list(SUPPORTED_BANDIT_POLICIES)
+        status["champion_snapshot"] = self.get_champion_snapshot(snapshot_dir=sn_dir)
+        status["drift_guardrails"] = {
+            "enabled": self.drift_guardrails_enabled,
+            "auto_rollback": self.auto_rollback_on_drift,
+            "thresholds": self.drift_thresholds.to_dict(),
+        }
         if self.feedback_queue is not None:
             status["streaming_queue"] = self.feedback_queue.get_metrics().to_dict()
         if self.maintenance_worker is not None:
@@ -492,6 +626,7 @@ class RecommenderService:
         *,
         state_path: str | Path | None = None,
         feedback_journal_path: str | Path | None = None,
+        snapshot_dir: str | Path | None = None,
         context_features: Sequence[str] | None = None,
         gamma: float | None = None,
     ) -> dict[str, Any]:
@@ -515,6 +650,11 @@ class RecommenderService:
                 if feedback_journal_path is not None
                 else BANDIT_FEEDBACK_PATH
             )
+            sn_dir = (
+                Path(snapshot_dir)
+                if snapshot_dir is not None
+                else BANDIT_SNAPSHOTS_DIR
+            )
             state = load_bandit_state(state_path)
             if context_features is not None:
                 validate_state_context_features(state, context_features)
@@ -530,16 +670,56 @@ class RecommenderService:
                 raise ValueError(
                     f"gamma must be in the range (0, 1], got {effective_gamma}."
                 )
-            updated, _ = sweep_bandit_journal(state, feedback, gamma=effective_gamma)
+            updated, sweep_summary = sweep_bandit_journal(
+                state, feedback, gamma=effective_gamma
+            )
+            folded_count = int(sweep_summary.get("folded_count", 0))
+
+            drift_res: DriftSafetyResult | None = None
+            if self.drift_guardrails_enabled and folded_count > 0:
+                champ = get_champion_snapshot(sn_dir)
+                if champ and champ.is_file():
+                    baseline_st = load_bandit_snapshot(champ)
+                    ref_label = champ.name
+                else:
+                    baseline_st = state
+                    ref_label = "prior_state"
+                drift_res = evaluate_drift_safety(
+                    target=updated,
+                    baseline=baseline_st,
+                    thresholds=self.drift_thresholds,
+                    reference_snapshot=ref_label,
+                )
+                if not drift_res.is_safe and self.auto_rollback_on_drift:
+                    logger.warning(
+                        "sweep_bandit_feedback: drift violation: %s. "
+                        "Reverting to prior state.",
+                        drift_res.violations,
+                    )
+                    status = self.bandit_status(
+                        state_path=state_path,
+                        feedback_journal_path=journal_path,
+                        snapshot_dir=sn_dir,
+                    )
+                    status["drift_safety"] = drift_res.to_dict()
+                    status["drift_safe"] = False
+                    status["rolled_back"] = True
+                    return status
+
             state_path.parent.mkdir(parents=True, exist_ok=True)
             state_path.write_text(
                 json.dumps(updated, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
-            return self.bandit_status(
+            status = self.bandit_status(
                 state_path=state_path,
                 feedback_journal_path=journal_path,
+                snapshot_dir=sn_dir,
             )
+            if drift_res is not None:
+                status["drift_safety"] = drift_res.to_dict()
+                status["drift_safe"] = drift_res.is_safe
+            return status
 
     def create_bandit_snapshot(
         self,
@@ -614,6 +794,157 @@ class RecommenderService:
                 )
         state_a = load_bandit_snapshot(ref_p)
         return compute_bandit_drift(state_a, state_b)
+
+    def tag_champion_snapshot(
+        self,
+        snapshot_path: str | Path,
+        snapshot_dir: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Tag a persisted bandit snapshot as the verified champion."""
+        with self._sweep_lock:
+            sn_dir = (
+                Path(snapshot_dir)
+                if snapshot_dir is not None
+                else BANDIT_SNAPSHOTS_DIR
+            )
+            tagged = tag_champion_snapshot(snapshot_path, snapshot_dir=sn_dir)
+            loaded = load_bandit_snapshot(tagged)
+            return {
+                "tagged": True,
+                "path": str(tagged.resolve()),
+                "filename": tagged.name,
+                "is_champion": True,
+                "label": loaded.get("snapshot", {}).get("label"),
+                "total_selections": sum(
+                    int(arm.get("selections", 0))
+                    for arm in loaded.get("arms", {}).values()
+                    if isinstance(arm, dict)
+                ),
+            }
+
+    def get_champion_snapshot(
+        self,
+        snapshot_dir: str | Path | None = None,
+    ) -> dict[str, Any] | None:
+        """Resolve and return metadata of the active champion snapshot, if any."""
+        sn_dir = (
+            Path(snapshot_dir)
+            if snapshot_dir is not None
+            else BANDIT_SNAPSHOTS_DIR
+        )
+        found = get_champion_snapshot(sn_dir)
+        if found is None or not found.is_file():
+            return None
+        loaded = load_bandit_snapshot(found)
+        snap_meta = loaded.get("snapshot", {})
+        return {
+            "path": str(found.resolve()),
+            "filename": found.name,
+            "label": snap_meta.get("label"),
+            "is_champion": bool(snap_meta.get("is_champion", False)),
+            "created_at": (
+                snap_meta.get("created_at") or loaded.get("generated_at")
+            ),
+            "total_selections": sum(
+                int(arm.get("selections", 0))
+                for arm in loaded.get("arms", {}).values()
+                if isinstance(arm, dict)
+            ),
+        }
+
+    def rollback_bandit_state(
+        self,
+        snapshot_path: str | Path | None = None,
+        target_state_path: str | Path | None = None,
+        snapshot_dir: str | Path | None = None,
+        *,
+        update_active_policy: bool = True,
+    ) -> dict[str, Any]:
+        """Roll back active bandit state to a snapshot and refresh serving policy."""
+        with self._sweep_lock:
+            target = (
+                Path(target_state_path)
+                if target_state_path is not None
+                else BANDIT_STATE_PATH
+            )
+            sn_dir = (
+                Path(snapshot_dir)
+                if snapshot_dir is not None
+                else BANDIT_SNAPSHOTS_DIR
+            )
+            rollback_meta = rollback_bandit_state(
+                target_state_path=target,
+                snapshot_path=snapshot_path,
+                snapshot_dir=sn_dir,
+            )
+
+            policy: dict[str, float] | None = None
+            if update_active_policy:
+                restored_state = load_bandit_state(target)
+                policy = derive_cold_start_policy(restored_state)
+                self.cold_start_policy = policy
+                logger.info(
+                    "Cold-start serving policy updated after rollback: %s",
+                    policy,
+                )
+
+            rollback_meta["policy_updated"] = policy is not None
+            rollback_meta["policy"] = policy
+            return rollback_meta
+
+    def evaluate_bandit_drift_safety(
+        self,
+        reference_path: str | Path | None = None,
+        state_path: str | Path | None = None,
+        snapshot_dir: str | Path | None = None,
+        thresholds: DriftSafetyThresholds | dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Evaluate drift safety between current state and a reference snapshot."""
+        st_path = (
+            Path(state_path) if state_path is not None else BANDIT_STATE_PATH
+        )
+        sn_dir = (
+            Path(snapshot_dir)
+            if snapshot_dir is not None
+            else BANDIT_SNAPSHOTS_DIR
+        )
+        current_state = load_bandit_state(st_path)
+
+        if reference_path is not None:
+            ref_p = Path(reference_path)
+            if not ref_p.is_file():
+                candidate = sn_dir / ref_p.name
+                if candidate.is_file():
+                    ref_p = candidate
+                else:
+                    raise FileNotFoundError(
+                        f"Reference snapshot not found: {reference_path}"
+                    )
+        else:
+            champ = get_champion_snapshot(sn_dir)
+            if champ is not None and champ.is_file():
+                ref_p = champ
+            else:
+                snapshots = self.list_bandit_snapshots(snapshot_dir=sn_dir)
+                if snapshots:
+                    ref_p = Path(snapshots[0]["path"])
+                else:
+                    raise FileNotFoundError(
+                        "No reference_path provided and no snapshots found to "
+                        "evaluate drift safety against."
+                    )
+
+        ref_state = load_bandit_snapshot(ref_p)
+        effective_thresh = (
+            thresholds if thresholds is not None else self.drift_thresholds
+        )
+        safety_result = evaluate_drift_safety(
+            target=current_state,
+            baseline=ref_state,
+            thresholds=effective_thresh,
+            reference_snapshot=ref_p.name,
+        )
+        return safety_result.to_dict()
 
     def evaluate_bandit_off_policy(
         self,

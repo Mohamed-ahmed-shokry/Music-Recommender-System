@@ -16,6 +16,7 @@ from music_recommender.bandit import (
     DEFAULT_COLD_START_ARMS,
     DEFAULT_CONTEXT_FEATURES,
     BanditMaintenanceWorker,
+    DriftSafetyThresholds,
     LinUCBContextualBandit,
     StreamingFeedbackQueue,
     append_bandit_feedback,
@@ -26,6 +27,11 @@ from music_recommender.bandit import (
     write_bandit_state,
 )
 from music_recommender.config import (
+    BANDIT_AUTO_ROLLBACK_ON_DRIFT_ENV_VAR,
+    BANDIT_DRIFT_MAX_L2_ENV_VAR,
+    BANDIT_DRIFT_MAX_REWARD_DROP_ENV_VAR,
+    BANDIT_DRIFT_MIN_COSINE_ENV_VAR,
+    BANDIT_ENABLE_DRIFT_GUARDRAILS_ENV_VAR,
     BANDIT_ENABLE_MAINTENANCE_ENV_VAR,
     BANDIT_MAINTENANCE_INTERVAL_ENV_VAR,
     CONTEXT_FEATURES_ENV_VAR,
@@ -83,6 +89,12 @@ def create_service(
     maintenance_interval_seconds: float | None = None,
     snapshot_on_sweep: bool | None = None,
     auto_update_policy: bool | None = None,
+    drift_guardrails_enabled: bool | None = None,
+    drift_max_l2: float | None = None,
+    drift_min_cosine: float | None = None,
+    drift_max_reward_drop: float | None = None,
+    auto_rollback_on_drift: bool | None = None,
+    drift_thresholds: DriftSafetyThresholds | None = None,
 ) -> RecommenderService:
     df = service_dataframe()
     mappings = create_id_mappings(df)
@@ -141,6 +153,12 @@ def create_service(
         maintenance_interval_seconds=maintenance_interval_seconds,
         snapshot_on_sweep=snapshot_on_sweep,
         auto_update_policy=auto_update_policy,
+        drift_guardrails_enabled=drift_guardrails_enabled,
+        drift_max_l2=drift_max_l2,
+        drift_min_cosine=drift_min_cosine,
+        drift_max_reward_drop=drift_max_reward_drop,
+        auto_rollback_on_drift=auto_rollback_on_drift,
+        drift_thresholds=drift_thresholds,
     )
 
 
@@ -1843,5 +1861,211 @@ def test_service_maintenance_fallback_without_worker(tmp_path: Path) -> None:
     assert service.maintenance_worker is None
     assert service.maintenance_status() is None
     service.close()
+
+
+def test_service_drift_guardrails_init_and_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 1. Direct arguments
+    service = create_service(
+        tmp_path,
+        drift_guardrails_enabled=True,
+        drift_max_l2=0.4,
+        drift_min_cosine=0.9,
+        drift_max_reward_drop=0.15,
+        auto_rollback_on_drift=True,
+    )
+    assert service.drift_guardrails_enabled is True
+    assert service.auto_rollback_on_drift is True
+    assert service.drift_thresholds.max_l2_drift == 0.4
+    assert service.drift_thresholds.min_cosine_similarity == 0.9
+    assert service.drift_thresholds.max_reward_drop == 0.15
+
+    status = service.bandit_status()
+    assert "drift_guardrails" in status
+    assert status["drift_guardrails"]["enabled"] is True
+    assert status["drift_guardrails"]["auto_rollback"] is True
+    assert status["drift_guardrails"]["thresholds"]["max_l2_drift"] == 0.4
+    service.close()
+
+    # 2. Environment variables fallback
+    monkeypatch.setenv(BANDIT_ENABLE_DRIFT_GUARDRAILS_ENV_VAR, "true")
+    monkeypatch.setenv(BANDIT_DRIFT_MAX_L2_ENV_VAR, "0.35")
+    monkeypatch.setenv(BANDIT_DRIFT_MIN_COSINE_ENV_VAR, "0.85")
+    monkeypatch.setenv(BANDIT_DRIFT_MAX_REWARD_DROP_ENV_VAR, "0.25")
+    monkeypatch.setenv(BANDIT_AUTO_ROLLBACK_ON_DRIFT_ENV_VAR, "1")
+
+    service_env = create_service(tmp_path / "env_test")
+    assert service_env.drift_guardrails_enabled is True
+    assert service_env.auto_rollback_on_drift is True
+    assert service_env.drift_thresholds.max_l2_drift == 0.35
+    assert service_env.drift_thresholds.min_cosine_similarity == 0.85
+    assert service_env.drift_thresholds.max_reward_drop == 0.25
+    service_env.close()
+
+
+def test_service_tag_champion_and_get_champion(tmp_path: Path) -> None:
+    st_p = tmp_path / "bandit_state.json"
+    sn_dir = tmp_path / "snapshots"
+    bandit = LinUCBContextualBandit(
+        arms=DEFAULT_COLD_START_ARMS, context_dim=3, alpha=1.0
+    )
+    st_p.write_text(json.dumps(snapshot_bandit_state(bandit)) + "\n", encoding="utf-8")
+
+    service = create_service(tmp_path)
+    assert service.get_champion_snapshot(snapshot_dir=sn_dir) is None
+
+    snap1 = service.create_bandit_snapshot(
+        label="initial_champion",
+        state_path=st_p,
+        snapshot_dir=sn_dir,
+    )
+    champ_before = service.get_champion_snapshot(snapshot_dir=sn_dir)
+    assert champ_before is not None
+    assert champ_before["is_champion"] is False
+    assert champ_before["filename"] == snap1.name
+
+    tagged = service.tag_champion_snapshot(snap1, snapshot_dir=sn_dir)
+    assert tagged["tagged"] is True
+    assert tagged["is_champion"] is True
+    assert tagged["label"] == "initial_champion"
+    assert tagged["filename"] == snap1.name
+
+    champ = service.get_champion_snapshot(snapshot_dir=sn_dir)
+    assert champ is not None
+    assert champ["filename"] == snap1.name
+    assert champ["is_champion"] is True
+    assert champ["label"] == "initial_champion"
+
+    status = service.bandit_status(state_path=st_p, snapshot_dir=sn_dir)
+    assert status["champion_snapshot"] is not None
+    assert status["champion_snapshot"]["filename"] == snap1.name
+    service.close()
+
+
+def test_service_rollback_bandit_state(tmp_path: Path) -> None:
+    st_p = tmp_path / "bandit_state.json"
+    sn_dir = tmp_path / "snapshots"
+    bandit = LinUCBContextualBandit(
+        arms=DEFAULT_COLD_START_ARMS, context_dim=3, alpha=1.0
+    )
+    # Give "popular" initial weight
+    bandit.update("popular", np.array([1.0, 0.0, 0.0]), 1.0)
+    st_p.write_text(json.dumps(snapshot_bandit_state(bandit)) + "\n", encoding="utf-8")
+
+    service = create_service(tmp_path)
+    snap1 = service.create_bandit_snapshot(
+        label="champ_v1",
+        state_path=st_p,
+        snapshot_dir=sn_dir,
+    )
+    service.tag_champion_snapshot(snap1, snapshot_dir=sn_dir)
+
+    # Mutate state heavily on disk and service policy
+    bandit.update("long_tail", np.array([0.0, 0.0, 1.0]), 100.0)
+    st_p.write_text(json.dumps(snapshot_bandit_state(bandit)) + "\n", encoding="utf-8")
+    service.cold_start_policy = {"popular": 0.0, "balanced": 0.0, "long_tail": 1.0}
+
+    # Perform rollback to champion snapshot
+    res = service.rollback_bandit_state(
+        target_state_path=st_p,
+        snapshot_dir=sn_dir,
+        update_active_policy=True,
+    )
+    assert res["restored"] is True
+    assert res["policy_updated"] is True
+    assert res["is_champion"] is True
+    assert Path(str(res["restored_from"])).name == snap1.name
+    # Serving policy must have hot-reloaded to champion state
+    assert service.cold_start_policy["popular"] > service.cold_start_policy["long_tail"]
+    service.close()
+
+
+def test_service_evaluate_bandit_drift_safety(tmp_path: Path) -> None:
+    st_p = tmp_path / "bandit_state.json"
+    sn_dir = tmp_path / "snapshots"
+    bandit = LinUCBContextualBandit(
+        arms=DEFAULT_COLD_START_ARMS, context_dim=3, alpha=1.0
+    )
+    st_p.write_text(json.dumps(snapshot_bandit_state(bandit)) + "\n", encoding="utf-8")
+
+    service = create_service(
+        tmp_path,
+        drift_guardrails_enabled=True,
+        drift_max_l2=0.5,
+    )
+    snap = service.create_bandit_snapshot(
+        label="ref_snap",
+        state_path=st_p,
+        snapshot_dir=sn_dir,
+    )
+    service.tag_champion_snapshot(snap, snapshot_dir=sn_dir)
+
+    # State is identical -> drift safe
+    eval_safe = service.evaluate_bandit_drift_safety(
+        state_path=st_p,
+        snapshot_dir=sn_dir,
+    )
+    assert eval_safe["is_safe"] is True
+    assert eval_safe["violations"] == []
+
+    # Induce massive drift on active state
+    for _ in range(50):
+        bandit.update("popular", np.array([10.0, 10.0, 10.0]), 50.0)
+    st_p.write_text(json.dumps(snapshot_bandit_state(bandit)) + "\n", encoding="utf-8")
+
+    eval_unsafe = service.evaluate_bandit_drift_safety(
+        state_path=st_p,
+        snapshot_dir=sn_dir,
+    )
+    assert eval_unsafe["is_safe"] is False
+    assert len(eval_unsafe["violations"]) > 0
+    service.close()
+
+
+def test_service_sweep_bandit_feedback_drift_guardrail(tmp_path: Path) -> None:
+    st_p = tmp_path / "bandit_state.json"
+    j_p = tmp_path / "feedback_journal.jsonl"
+    sn_dir = tmp_path / "snapshots"
+
+    bandit = LinUCBContextualBandit(
+        arms=DEFAULT_COLD_START_ARMS, context_dim=3, alpha=1.0
+    )
+    st_p.write_text(json.dumps(snapshot_bandit_state(bandit)) + "\n", encoding="utf-8")
+
+    service = create_service(
+        tmp_path,
+        drift_guardrails_enabled=True,
+        auto_rollback_on_drift=True,
+        drift_thresholds=DriftSafetyThresholds(max_l2_drift=0.01),
+    )
+
+    # Establish champion
+    snap = service.create_bandit_snapshot(
+        label="champ_base",
+        state_path=st_p,
+        snapshot_dir=sn_dir,
+    )
+    service.tag_champion_snapshot(snap, snapshot_dir=sn_dir)
+
+    # Append feedback that causes drift beyond max_l2_drift=0.01
+    feedback = [
+        {"context": [1.0, 1.0, 1.0], "arm": "popular", "reward": 5.0}
+        for _ in range(10)
+    ]
+    append_bandit_feedback_batch(feedback, j_p)
+
+    sweep_res = service.sweep_bandit_feedback(
+        state_path=st_p,
+        feedback_journal_path=j_p,
+        snapshot_dir=sn_dir,
+    )
+
+    assert sweep_res["drift_safe"] is False
+    assert sweep_res["rolled_back"] is True
+    assert sweep_res["drift_safety"]["is_safe"] is False
+    assert len(sweep_res["drift_safety"]["violations"]) > 0
+    service.close()
+
 
 
