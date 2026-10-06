@@ -46,9 +46,11 @@ from music_recommender.config import (
     BANDIT_FEEDBACK_PATH,
     BANDIT_SNAPSHOTS_DIR,
     BANDIT_STATE_PATH,
+    DEFAULT_BANDIT_AUTO_ROLLBACK_ON_DRIFT,
     DEFAULT_BANDIT_DRIFT_MAX_L2,
     DEFAULT_BANDIT_DRIFT_MAX_REWARD_DROP,
     DEFAULT_BANDIT_DRIFT_MIN_COSINE,
+    DEFAULT_BANDIT_ENABLE_DRIFT_GUARDRAILS,
     DEFAULT_BANDIT_GAMMA,
     DEFAULT_BANDIT_MAINTENANCE_INTERVAL,
     DEFAULT_BANDIT_MAINTENANCE_THRESHOLD,
@@ -3066,11 +3068,19 @@ class MaintenanceWorkerMetrics:
     min_pending_records: int
     snapshot_on_sweep: bool
     auto_update_policy: bool
+    drift_guardrails_enabled: bool = False
+    auto_rollback_on_drift: bool = False
+    drift_evaluations_count: int = 0
+    drift_violations_count: int = 0
+    rollbacks_count: int = 0
     last_sweep_at: str | None = None
     last_sweep_duration_seconds: float | None = None
     last_sweep_records_folded: int = 0
     last_snapshot_at: str | None = None
     last_error: str | None = None
+    last_drift_result: dict[str, Any] | None = None
+    last_rollback_at: str | None = None
+    last_rollback_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert metrics to a dictionary representation."""
@@ -3086,11 +3096,19 @@ class MaintenanceWorkerMetrics:
             "min_pending_records": self.min_pending_records,
             "snapshot_on_sweep": self.snapshot_on_sweep,
             "auto_update_policy": self.auto_update_policy,
+            "drift_guardrails_enabled": self.drift_guardrails_enabled,
+            "auto_rollback_on_drift": self.auto_rollback_on_drift,
+            "drift_evaluations_count": self.drift_evaluations_count,
+            "drift_violations_count": self.drift_violations_count,
+            "rollbacks_count": self.rollbacks_count,
             "last_sweep_at": self.last_sweep_at,
             "last_sweep_duration_seconds": self.last_sweep_duration_seconds,
             "last_sweep_records_folded": self.last_sweep_records_folded,
             "last_snapshot_at": self.last_snapshot_at,
             "last_error": self.last_error,
+            "last_drift_result": self.last_drift_result,
+            "last_rollback_at": self.last_rollback_at,
+            "last_rollback_reason": self.last_rollback_reason,
         }
 
 
@@ -3122,6 +3140,10 @@ class BanditMaintenanceWorker:
         policy_temperature: float = 1.0,
         policy_temperature_decay: float = 0.0,
         policy_min_temperature: float = 0.05,
+        drift_guardrails_enabled: bool = DEFAULT_BANDIT_ENABLE_DRIFT_GUARDRAILS,
+        drift_thresholds: DriftSafetyThresholds | dict[str, Any] | None = None,
+        auto_rollback_on_drift: bool = DEFAULT_BANDIT_AUTO_ROLLBACK_ON_DRIFT,
+        champion_snapshot_path: Path | str | None = None,
         lock: threading.Lock | threading.RLock | None = None,
         auto_start: bool = True,
     ) -> None:
@@ -3176,6 +3198,27 @@ class BanditMaintenanceWorker:
         self.policy_temperature_decay = float(policy_temperature_decay)
         self.policy_min_temperature = float(policy_min_temperature)
 
+        self.drift_guardrails_enabled = bool(drift_guardrails_enabled)
+        if drift_thresholds is None:
+            self.drift_thresholds = DriftSafetyThresholds()
+        elif isinstance(drift_thresholds, DriftSafetyThresholds):
+            self.drift_thresholds = drift_thresholds
+        elif isinstance(drift_thresholds, dict):
+            self.drift_thresholds = DriftSafetyThresholds.from_dict(
+                drift_thresholds
+            )
+        else:
+            raise TypeError(
+                "drift_thresholds must be DriftSafetyThresholds or dict, "
+                f"got {type(drift_thresholds).__name__}."
+            )
+        self.auto_rollback_on_drift = bool(auto_rollback_on_drift)
+        self.champion_snapshot_path = (
+            Path(champion_snapshot_path)
+            if champion_snapshot_path is not None
+            else None
+        )
+
         self._lock: threading.Lock | threading.RLock = (
             lock if lock is not None else threading.RLock()
         )
@@ -3189,11 +3232,17 @@ class BanditMaintenanceWorker:
         self._errors_count: int = 0
         self._records_folded_count: int = 0
         self._snapshots_created_count: int = 0
+        self._drift_evaluations_count: int = 0
+        self._drift_violations_count: int = 0
+        self._rollbacks_count: int = 0
         self._last_sweep_at: str | None = None
         self._last_sweep_duration_seconds: float | None = None
         self._last_sweep_records_folded: int = 0
         self._last_snapshot_at: str | None = None
         self._last_error: str | None = None
+        self._last_drift_result: dict[str, Any] | None = None
+        self._last_rollback_at: str | None = None
+        self._last_rollback_reason: str | None = None
 
         if auto_start:
             self.start()
@@ -3282,6 +3331,95 @@ class BanditMaintenanceWorker:
                     state, feedback, gamma=self.gamma
                 )
                 folded_count = int(sweep_summary["folded_count"])
+
+                drift_safety_result: DriftSafetyResult | None = None
+                if self.drift_guardrails_enabled and folded_count > 0:
+                    ref_name: str | None = None
+                    if (
+                        self.champion_snapshot_path is not None
+                        and self.champion_snapshot_path.is_file()
+                    ):
+                        baseline_st = load_bandit_snapshot(
+                            self.champion_snapshot_path
+                        )
+                        ref_name = self.champion_snapshot_path.name
+                    else:
+                        champ = get_champion_snapshot(self.snapshot_dir)
+                        if champ is not None and champ.is_file():
+                            baseline_st = load_bandit_snapshot(champ)
+                            ref_name = champ.name
+                        else:
+                            baseline_st = state
+                            ref_name = "prior_state"
+
+                    drift_safety_result = evaluate_drift_safety(
+                        target=updated,
+                        baseline=baseline_st,
+                        thresholds=self.drift_thresholds,
+                        reference_snapshot=ref_name,
+                    )
+                    self._drift_evaluations_count += 1
+                    self._last_drift_result = drift_safety_result.to_dict()
+
+                    if not drift_safety_result.is_safe:
+                        self._drift_violations_count += 1
+                        logger.warning(
+                            "BanditMaintenanceWorker: drift violations: %s",
+                            drift_safety_result.violations,
+                        )
+                        if self.auto_rollback_on_drift:
+                            self._rollbacks_count += 1
+                            now_iso = datetime.now(UTC).isoformat()
+                            self._last_rollback_at = now_iso
+                            self._last_rollback_reason = "; ".join(
+                                drift_safety_result.violations
+                            )
+
+                            rollback_meta = None
+                            try:
+                                rollback_meta = rollback_bandit_state(
+                                    target_state_path=self.state_path,
+                                    snapshot_path=self.champion_snapshot_path,
+                                    snapshot_dir=self.snapshot_dir,
+                                )
+                            except Exception as rb_err:
+                                logger.warning(
+                                    "Rollback failed, keeping prior state: %s",
+                                    rb_err,
+                                )
+                                self.state_path.write_text(
+                                    json.dumps(state, indent=2, sort_keys=True)
+                                    + "\n",
+                                    encoding="utf-8",
+                                )
+
+                            if self.on_policy_updated is not None:
+                                try:
+                                    restored_st = load_bandit_state(
+                                        self.state_path
+                                    )
+                                    restored_policy = derive_cold_start_policy(
+                                        restored_st,
+                                        temperature=self.policy_temperature,
+                                        temperature_decay=self.policy_temperature_decay,
+                                        min_temperature=self.policy_min_temperature,
+                                    )
+                                    self.on_policy_updated(restored_policy)
+                                except Exception as cb_err:
+                                    logger.warning(
+                                        "on_policy_updated callback failed: %s",
+                                        cb_err,
+                                    )
+
+                            return {
+                                "executed": True,
+                                "swept": False,
+                                "rolled_back": True,
+                                "violations": drift_safety_result.violations,
+                                "drift_safety": drift_safety_result.to_dict(),
+                                "rollback_meta": rollback_meta,
+                            }
+
                 self.state_path.parent.mkdir(parents=True, exist_ok=True)
                 self.state_path.write_text(
                     json.dumps(updated, indent=2, sort_keys=True) + "\n",
@@ -3337,6 +3475,16 @@ class BanditMaintenanceWorker:
                     "snapshot_path": snapshot_path,
                     "policy_updated": policy is not None,
                     "policy": policy,
+                    "drift_safe": (
+                        drift_safety_result.is_safe
+                        if drift_safety_result is not None
+                        else True
+                    ),
+                    "drift_safety": (
+                        drift_safety_result.to_dict()
+                        if drift_safety_result is not None
+                        else None
+                    ),
                 }
             except Exception as error:
                 logger.exception("BanditMaintenanceWorker cycle failed: %s", error)
@@ -3385,11 +3533,19 @@ class BanditMaintenanceWorker:
                 min_pending_records=self.min_pending_records,
                 snapshot_on_sweep=self.snapshot_on_sweep,
                 auto_update_policy=self.auto_update_policy,
+                drift_guardrails_enabled=self.drift_guardrails_enabled,
+                auto_rollback_on_drift=self.auto_rollback_on_drift,
+                drift_evaluations_count=self._drift_evaluations_count,
+                drift_violations_count=self._drift_violations_count,
+                rollbacks_count=self._rollbacks_count,
                 last_sweep_at=self._last_sweep_at,
                 last_sweep_duration_seconds=self._last_sweep_duration_seconds,
                 last_sweep_records_folded=self._last_sweep_records_folded,
                 last_snapshot_at=self._last_snapshot_at,
                 last_error=self._last_error,
+                last_drift_result=self._last_drift_result,
+                last_rollback_at=self._last_rollback_at,
+                last_rollback_reason=self._last_rollback_reason,
             )
 
     def _worker_loop(self) -> None:

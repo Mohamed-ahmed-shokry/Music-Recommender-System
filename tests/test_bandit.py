@@ -22,6 +22,7 @@ from music_recommender.bandit import (
     BackpressureStrategy,
     BanditMaintenanceWorker,
     BaseContextualBandit,
+    DriftSafetyThresholds,
     EpsilonGreedyContextualBandit,
     FeedbackQueueFullError,
     LinUCBContextualBandit,
@@ -53,10 +54,12 @@ from music_recommender.bandit import (
     rank_cold_start_bandit,
     resolve_context_features,
     save_bandit_context_features,
+    save_bandit_snapshot,
     simulate_cold_start_exploration,
     snapshot_bandit_state,
     summarize_bandit_lifecycle,
     sweep_bandit_journal,
+    tag_champion_snapshot,
     validate_context_features,
     validate_serve_context,
     write_bandit_comparison_report,
@@ -2948,4 +2951,138 @@ class TestBanditMaintenanceWorker:
         assert "error" in res
         assert "do not match the state's recorded feature set" in str(res["error"])
         assert worker.get_metrics().errors_count == 1
+
+    def test_drift_guardrails_clean_pass(self, tmp_path: Path) -> None:
+        state_f, journal_f, snap_d = self._create_state_and_journal(tmp_path)
+        records = [{"context": [1.0, 0.0, 0.5], "arm": "popular", "reward": 0.5}]
+        append_bandit_feedback_batch(records, journal_f)
+
+        worker = BanditMaintenanceWorker(
+            state_path=state_f,
+            journal_path=journal_f,
+            snapshot_dir=snap_d,
+            min_pending_records=1,
+            drift_guardrails_enabled=True,
+            drift_thresholds=DriftSafetyThresholds(max_l2_drift=2.0),
+            auto_start=False,
+        )
+        res = worker.trigger_sweep()
+        assert res["executed"] is True
+        assert res["swept"] is True
+        assert res["drift_safe"] is True
+        assert res["drift_safety"] is not None
+        assert res["drift_safety"]["is_safe"] is True
+
+        metrics = worker.get_metrics()
+        assert metrics.drift_guardrails_enabled is True
+        assert metrics.drift_evaluations_count == 1
+        assert metrics.drift_violations_count == 0
+        assert metrics.rollbacks_count == 0
+        assert metrics.last_drift_result is not None
+
+    def test_drift_guardrails_violation_with_auto_rollback(
+        self, tmp_path: Path
+    ) -> None:
+        state_f, journal_f, snap_d = self._create_state_and_journal(tmp_path)
+        # Create and tag a champion snapshot prior to feedback
+        init_st = load_bandit_state(state_f)
+        champ_snap = save_bandit_snapshot(
+            init_st, snapshot_dir=snap_d, label="champ_v1"
+        )
+        tag_champion_snapshot(champ_snap, snapshot_dir=snap_d)
+
+        # Ingest feedback that introduces parameter drift
+        records = [{"context": [1.0, 0.0, 0.5], "arm": "popular", "reward": 0.9}]
+        append_bandit_feedback_batch(records, journal_f)
+
+        # Configure worker with very strict max_l2_drift threshold
+        worker = BanditMaintenanceWorker(
+            state_path=state_f,
+            journal_path=journal_f,
+            snapshot_dir=snap_d,
+            min_pending_records=1,
+            drift_guardrails_enabled=True,
+            drift_thresholds=DriftSafetyThresholds(max_l2_drift=0.0001),
+            auto_rollback_on_drift=True,
+            auto_start=False,
+        )
+        res = worker.trigger_sweep()
+        assert res["executed"] is True
+        assert res["swept"] is False
+        assert res["rolled_back"] is True
+        assert len(res["violations"]) > 0
+
+        # Verify active state was rolled back / kept at champion state (0 selections)
+        current_st = load_bandit_state(state_f)
+        assert current_st["arms"]["popular"]["selections"] == 0
+
+        metrics = worker.get_metrics()
+        assert metrics.drift_violations_count == 1
+        assert metrics.rollbacks_count == 1
+        assert metrics.last_rollback_at is not None
+        assert metrics.last_rollback_reason is not None
+
+    def test_drift_guardrails_violation_without_auto_rollback(
+        self, tmp_path: Path
+    ) -> None:
+        state_f, journal_f, snap_d = self._create_state_and_journal(tmp_path)
+        records = [{"context": [1.0, 0.0, 0.5], "arm": "popular", "reward": 0.9}]
+        append_bandit_feedback_batch(records, journal_f)
+
+        worker = BanditMaintenanceWorker(
+            state_path=state_f,
+            journal_path=journal_f,
+            snapshot_dir=snap_d,
+            min_pending_records=1,
+            drift_guardrails_enabled=True,
+            drift_thresholds=DriftSafetyThresholds(max_l2_drift=0.0001),
+            auto_rollback_on_drift=False,
+            auto_start=False,
+        )
+        res = worker.trigger_sweep()
+        assert res["executed"] is True
+        assert res["swept"] is True
+        assert res["drift_safe"] is False
+        assert res["drift_safety"]["is_safe"] is False
+
+        # State was updated despite violation because auto_rollback_on_drift was False
+        current_st = load_bandit_state(state_f)
+        assert current_st["arms"]["popular"]["selections"] == 1
+
+        metrics = worker.get_metrics()
+        assert metrics.drift_violations_count == 1
+        assert metrics.rollbacks_count == 0
+
+    def test_drift_guardrails_rollback_triggers_policy_callback(
+        self, tmp_path: Path
+    ) -> None:
+        state_f, journal_f, snap_d = self._create_state_and_journal(tmp_path)
+        champ_snap = save_bandit_snapshot(
+            load_bandit_state(state_f), snapshot_dir=snap_d, label="champ"
+        )
+        tag_champion_snapshot(champ_snap, snapshot_dir=snap_d)
+
+        records = [{"context": [1.0, 0.0, 0.5], "arm": "popular", "reward": 0.9}]
+        append_bandit_feedback_batch(records, journal_f)
+
+        policy_updates: list[dict[str, float]] = []
+
+        def on_update(pol: dict[str, float]) -> None:
+            policy_updates.append(pol)
+
+        worker = BanditMaintenanceWorker(
+            state_path=state_f,
+            journal_path=journal_f,
+            snapshot_dir=snap_d,
+            min_pending_records=1,
+            drift_guardrails_enabled=True,
+            drift_thresholds=DriftSafetyThresholds(max_l2_drift=0.0001),
+            auto_rollback_on_drift=True,
+            on_policy_updated=on_update,
+            auto_start=False,
+        )
+        res = worker.trigger_sweep()
+        assert res["rolled_back"] is True
+        assert len(policy_updates) == 1
+
 
