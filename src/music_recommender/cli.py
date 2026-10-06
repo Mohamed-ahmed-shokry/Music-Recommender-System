@@ -16,6 +16,7 @@ from music_recommender import __version__
 from music_recommender.bandit import (
     DEFAULT_COLD_START_ARMS,
     BaseContextualBandit,
+    DriftSafetyThresholds,
     EpsilonGreedyContextualBandit,
     LinUCBContextualBandit,
     ThompsonSamplingContextualBandit,
@@ -24,8 +25,10 @@ from music_recommender.bandit import (
     compute_bandit_drift,
     compute_off_policy_evaluation,
     derive_cold_start_policy,
+    evaluate_drift_safety,
     feedback_from_report,
     fold_bandit_state,
+    get_champion_snapshot,
     list_bandit_snapshots,
     load_bandit_feedback,
     load_bandit_report,
@@ -36,12 +39,14 @@ from music_recommender.bandit import (
     prune_bandit_snapshots,
     resolve_context_features,
     restore_bandit_snapshot,
+    rollback_bandit_state,
     save_bandit_context_features,
     save_bandit_snapshot,
     simulate_cold_start_exploration,
     snapshot_bandit_state,
     summarize_bandit_lifecycle,
     sweep_bandit_journal,
+    tag_champion_snapshot,
     validate_state_context_features,
     write_bandit_comparison_report,
     write_bandit_report,
@@ -62,6 +67,9 @@ from music_recommender.config import (
     DEFAULT_ALS_FACTORS,
     DEFAULT_ALS_ITERATIONS,
     DEFAULT_ALS_REGULARIZATION,
+    DEFAULT_BANDIT_DRIFT_MAX_L2,
+    DEFAULT_BANDIT_DRIFT_MAX_REWARD_DROP,
+    DEFAULT_BANDIT_DRIFT_MIN_COSINE,
     DEFAULT_CONTENT_WEIGHT,
     DEFAULT_MIN_ARTIST_INTERACTIONS,
     DEFAULT_MIN_USER_INTERACTIONS,
@@ -2855,6 +2863,11 @@ def bandit_snapshot(
         "--prune",
         help="Prune older snapshots keeping the specified number of newest snapshots.",
     ),
+    tag_champion: str | None = typer.Option(
+        None,
+        "--tag-champion",
+        help="Path to snapshot file to pin as verified champion.",
+    ),
     state_path: str = typer.Option(
         str(BANDIT_STATE_PATH),
         "--state-path",
@@ -2875,6 +2888,11 @@ def bandit_snapshot(
             state = load_bandit_state(st_path)
             created = save_bandit_snapshot(state, snapshot_dir=sn_dir, label=label)
             typer.echo(f"Bandit state snapshot saved to: {created}")
+            return
+
+        if tag_champion is not None:
+            tagged = tag_champion_snapshot(Path(tag_champion), snapshot_dir=sn_dir)
+            typer.echo(f"Tagged snapshot as verified champion: {tagged}")
             return
 
         if restore is not None:
@@ -2898,15 +2916,76 @@ def bandit_snapshot(
 
         typer.echo(f"Bandit state snapshots ({len(snapshots)}) in {sn_dir}:")
         typer.echo(
-            f"{'Filename':<36} {'Created At':<22} {'Label':<15} {'Selections':>10}"
+            f"{'Filename':<36} {'Created At':<22} {'Label':<15} "
+            f"{'Champion':<10} {'Selections':>10}"
         )
-        typer.echo("-" * 87)
+        typer.echo("-" * 98)
         for s in snapshots:
             fn = s["filename"]
             ca = s["created_at"] or "-"
             lbl = s["label"] or "-"
+            champ = "yes" if s.get("is_champion") else "no"
             sel = s["total_selections"]
-            typer.echo(f"{fn:<36} {ca:<22} {lbl:<15} {sel:>10}")
+            typer.echo(f"{fn:<36} {ca:<22} {lbl:<15} {champ:<10} {sel:>10}")
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+
+@app.command()
+def bandit_rollback(
+    snapshot_path: str | None = typer.Option(
+        None,
+        "--snapshot-path",
+        help="Explicit snapshot file to roll back to (defaults to champion snapshot).",
+    ),
+    state_path: str = typer.Option(
+        str(BANDIT_STATE_PATH),
+        "--state-path",
+        help="Path to the active bandit state file to overwrite.",
+    ),
+    snapshot_dir: str = typer.Option(
+        str(BANDIT_SNAPSHOTS_DIR),
+        "--snapshot-dir",
+        help="Directory to search for champion snapshot.",
+    ),
+    update_policy: bool = typer.Option(
+        True,
+        "--update-policy",
+        help="Whether to derive and overwrite the active cold-start policy file.",
+    ),
+    policy_path: str = typer.Option(
+        str(COLD_START_POLICY_PATH),
+        "--policy-path",
+        help="Path to write updated policy JSON if --update-policy is set.",
+    ),
+) -> None:
+    """Roll back the active bandit state to a champion or specified snapshot."""
+    st_path = Path(state_path)
+    sn_dir = Path(snapshot_dir)
+    pol_path = Path(policy_path)
+
+    try:
+        res = rollback_bandit_state(
+            target_state_path=st_path,
+            snapshot_path=Path(snapshot_path) if snapshot_path is not None else None,
+            snapshot_dir=sn_dir,
+        )
+        is_champ_str = "yes" if res["is_champion"] else "no"
+        lbl_str = res["label"] or "none"
+        typer.echo(
+            f"Rolled back bandit state to: {res['restored_from']} "
+            f"(champion={is_champ_str}, label={lbl_str})"
+        )
+        if update_policy:
+            restored_state = load_bandit_state(st_path)
+            new_policy = derive_cold_start_policy(restored_state)
+            pol_path.parent.mkdir(parents=True, exist_ok=True)
+            pol_path.write_text(
+                json.dumps(new_policy, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            typer.echo(f"Refreshed active cold-start policy at: {pol_path}")
     except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
@@ -2917,7 +2996,7 @@ def bandit_drift(
     reference: str | None = typer.Option(
         None,
         "--reference",
-        help="Path to reference snapshot or prior state (defaults to newest snapshot).",
+        help="Reference snapshot or prior state path (defaults to champion/newest).",
     ),
     state_path: str = typer.Option(
         str(BANDIT_STATE_PATH),
@@ -2929,22 +3008,55 @@ def bandit_drift(
         "--snapshot-dir",
         help="Directory to look up snapshots when --reference is omitted.",
     ),
+    check_safety: bool = typer.Option(
+        False,
+        "--check-safety",
+        help="Evaluate drift against safety guardrails and exit 1 on violation.",
+    ),
+    max_l2: float = typer.Option(
+        DEFAULT_BANDIT_DRIFT_MAX_L2,
+        "--max-l2",
+        help="Maximum allowable L2 parameter drift threshold.",
+    ),
+    min_cosine: float = typer.Option(
+        DEFAULT_BANDIT_DRIFT_MIN_COSINE,
+        "--min-cosine",
+        help="Minimum allowable cosine similarity threshold.",
+    ),
+    max_reward_drop: float = typer.Option(
+        DEFAULT_BANDIT_DRIFT_MAX_REWARD_DROP,
+        "--max-reward-drop",
+        help="Maximum allowable mean reward drop threshold.",
+    ),
 ) -> None:
     """Compute and display parameter and metric drift between bandit states."""
     st_path = Path(state_path)
+    sn_dir = Path(snapshot_dir)
     try:
         current_state = load_bandit_state(st_path)
         if reference is not None:
             ref_path = Path(reference)
+            if not ref_path.is_file():
+                candidate = sn_dir / ref_path.name
+                if candidate.is_file():
+                    ref_path = candidate
+                else:
+                    raise FileNotFoundError(
+                        f"Reference snapshot not found: {reference}"
+                    )
         else:
-            snapshots = list_bandit_snapshots(snapshot_dir)
-            if snapshots:
-                ref_path = Path(snapshots[0]["path"])
+            champ = get_champion_snapshot(sn_dir)
+            if champ is not None and champ.is_file():
+                ref_path = champ
             else:
-                raise FileNotFoundError(
-                    "No reference state provided and no snapshots found in "
-                    f"'{snapshot_dir}' to compare against."
-                )
+                snapshots = list_bandit_snapshots(sn_dir)
+                if snapshots:
+                    ref_path = Path(snapshots[0]["path"])
+                else:
+                    raise FileNotFoundError(
+                        "No reference state provided and no snapshots found in "
+                        f"'{sn_dir}' to compare against."
+                    )
         ref_state = load_bandit_snapshot(ref_path)
         drift = compute_bandit_drift(ref_state, current_state)
     except (FileNotFoundError, ValueError) as error:
@@ -2972,6 +3084,35 @@ def bandit_drift(
         f"(changed={'yes' if summary['dominant_arm_changed'] else 'no'}), "
         f"drift detected={'yes' if summary['has_drift'] else 'no'}"
     )
+
+    if check_safety:
+        thresholds = DriftSafetyThresholds(
+            max_l2_drift=max_l2,
+            min_cosine_similarity=min_cosine,
+            max_reward_drop=max_reward_drop,
+        )
+        safety = evaluate_drift_safety(
+            target=current_state,
+            baseline=ref_state,
+            thresholds=thresholds,
+            reference_snapshot=ref_path.name,
+        )
+        typer.echo("\nDrift Safety Evaluation:")
+        if safety.is_safe:
+            typer.secho(
+                "PASSED: Drift is within safe operating thresholds.",
+                fg=typer.colors.GREEN,
+            )
+        else:
+            typer.secho(
+                f"FAILED: Drift safety guardrails violated "
+                f"({len(safety.violations)} violation(s)):",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            for v in safety.violations:
+                typer.secho(f"  - {v}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)
 
 
 @app.command()
@@ -3016,6 +3157,31 @@ def bandit_sweep(
         "--snapshot-dir",
         help="Directory where snapshots are saved if --snapshot-on-sweep is active.",
     ),
+    enable_guardrails: bool = typer.Option(
+        False,
+        "--enable-guardrails",
+        help="Enable drift safety guardrails evaluation after folding.",
+    ),
+    auto_rollback: bool = typer.Option(
+        False,
+        "--auto-rollback",
+        help="Automatically revert state if drift safety guardrails are violated.",
+    ),
+    max_l2: float = typer.Option(
+        DEFAULT_BANDIT_DRIFT_MAX_L2,
+        "--max-l2",
+        help="Maximum allowable L2 drift threshold for guardrails.",
+    ),
+    min_cosine: float = typer.Option(
+        DEFAULT_BANDIT_DRIFT_MIN_COSINE,
+        "--min-cosine",
+        help="Minimum allowable cosine similarity threshold for guardrails.",
+    ),
+    max_reward_drop: float = typer.Option(
+        DEFAULT_BANDIT_DRIFT_MAX_REWARD_DROP,
+        "--max-reward-drop",
+        help="Maximum allowable mean reward drop threshold for guardrails.",
+    ),
 ) -> None:
     """Automate online bandit journal sweeps (one-off or recurring loop)."""
     import time
@@ -3055,12 +3221,49 @@ def bandit_sweep(
         if pending < threshold:
             return 0
         updated, sweep = sweep_bandit_journal(state, feedback, gamma=gamma)
+        folded = int(sweep.get("folded_count", 0))
+
+        if enable_guardrails and folded > 0:
+            champ = get_champion_snapshot(sn_dir)
+            ref_st = (
+                load_bandit_snapshot(champ)
+                if champ and champ.is_file()
+                else state
+            )
+            ref_nm = champ.name if champ and champ.is_file() else "prior_state"
+            drift_thresh = DriftSafetyThresholds(
+                max_l2_drift=max_l2,
+                min_cosine_similarity=min_cosine,
+                max_reward_drop=max_reward_drop,
+            )
+            drift_res = evaluate_drift_safety(
+                target=updated,
+                baseline=ref_st,
+                thresholds=drift_thresh,
+                reference_snapshot=ref_nm,
+            )
+            if not drift_res.is_safe:
+                typer.secho(
+                    f"Warning: Drift safety guardrails violated "
+                    f"({len(drift_res.violations)} violation(s)):",
+                    fg=typer.colors.YELLOW,
+                    err=True,
+                )
+                for v in drift_res.violations:
+                    typer.secho(f"  - {v}", fg=typer.colors.YELLOW, err=True)
+                if auto_rollback:
+                    typer.secho(
+                        "Auto-rollback active: reverted state changes.",
+                        fg=typer.colors.RED,
+                    )
+                    return 0
+
         st_p.write_text(
             json.dumps(updated, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         typer.echo(
-            f"Folded {sweep['folded_count']} pending feedback record(s) "
+            f"Folded {folded} pending feedback record(s) "
             f"(gamma={gamma}) into: {st_p}"
         )
         if snapshot_on_sweep:
@@ -3068,7 +3271,7 @@ def bandit_sweep(
                 updated, snapshot_dir=sn_dir, label="auto_sweep"
             )
             typer.echo(f"Created automatic snapshot: {snap}")
-        return int(sweep["folded_count"])
+        return folded
 
     try:
         if not loop:

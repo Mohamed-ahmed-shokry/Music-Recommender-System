@@ -2821,3 +2821,222 @@ def test_bandit_eval_offline_cli(tmp_path: Path) -> None:
     assert res_state.exit_code == 0
     assert "Off-Policy Evaluation" in res_state.output
 
+
+def test_bandit_snapshot_cli_tag_champion(tmp_path: Path) -> None:
+    from music_recommender.bandit import (
+        LinUCBContextualBandit,
+        snapshot_bandit_state,
+        write_bandit_state,
+    )
+
+    bandit = LinUCBContextualBandit(
+        ["popular", "balanced", "long_tail"], context_dim=3
+    )
+    state = snapshot_bandit_state(bandit)
+    state_file = write_bandit_state(state, tmp_path, state_name="active_state")
+    sn_dir = tmp_path / "snapshots"
+
+    # Create snapshot
+    res_create = runner.invoke(
+        cli.app,
+        [
+            "bandit-snapshot",
+            "--create",
+            "--label",
+            "v1_base",
+            "--state-path",
+            str(state_file),
+            "--snapshot-dir",
+            str(sn_dir),
+        ],
+    )
+    assert res_create.exit_code == 0
+    snap_files = list(sn_dir.glob("*.json"))
+    assert len(snap_files) == 1
+    target_snap = snap_files[0]
+
+    # Tag as champion
+    res_tag = runner.invoke(
+        cli.app,
+        [
+            "bandit-snapshot",
+            "--tag-champion",
+            str(target_snap),
+            "--snapshot-dir",
+            str(sn_dir),
+        ],
+    )
+    assert res_tag.exit_code == 0
+    assert "Tagged snapshot as verified champion" in res_tag.output
+
+    # List snapshots and check champion column
+    res_list = runner.invoke(
+        cli.app,
+        ["bandit-snapshot", "--list", "--snapshot-dir", str(sn_dir)],
+    )
+    assert res_list.exit_code == 0
+    assert "yes" in res_list.output
+    assert "Champion" in res_list.output
+
+
+def test_bandit_rollback_cli(tmp_path: Path) -> None:
+    from music_recommender.bandit import (
+        LinUCBContextualBandit,
+        load_bandit_state,
+        save_bandit_snapshot,
+        snapshot_bandit_state,
+        tag_champion_snapshot,
+        write_bandit_state,
+    )
+
+    bandit = LinUCBContextualBandit(
+        ["popular", "balanced", "long_tail"], context_dim=3
+    )
+    bandit.update("popular", [1.0, 0.0, 0.0], 1.0)
+    champ_state = snapshot_bandit_state(bandit)
+
+    sn_dir = tmp_path / "snapshots"
+    champ_snap = save_bandit_snapshot(
+        champ_state, snapshot_dir=sn_dir, label="champion"
+    )
+    tag_champion_snapshot(champ_snap, snapshot_dir=sn_dir)
+
+    # Corrupt or alter active state
+    bandit.update("long_tail", [0.0, 0.0, 1.0], 100.0)
+    degraded_state = snapshot_bandit_state(bandit)
+    active_state = write_bandit_state(
+        degraded_state, tmp_path, state_name="active_state"
+    )
+    policy_path = tmp_path / "active_policy.json"
+
+    # Roll back using champion lookup
+    res = runner.invoke(
+        cli.app,
+        [
+            "bandit-rollback",
+            "--state-path",
+            str(active_state),
+            "--snapshot-dir",
+            str(sn_dir),
+            "--update-policy",
+            "--policy-path",
+            str(policy_path),
+        ],
+    )
+    assert res.exit_code == 0
+    assert "Rolled back bandit state to:" in res.output
+    assert "champion=yes" in res.output
+    assert "Refreshed active cold-start policy at:" in res.output
+    assert policy_path.exists()
+
+    # Active state was reverted to champion selections
+    restored = load_bandit_state(active_state)
+    assert restored["arms"]["popular"]["selections"] == 1
+    assert restored["arms"]["long_tail"]["selections"] == 0
+
+
+def test_bandit_drift_cli_check_safety(tmp_path: Path) -> None:
+    from music_recommender.bandit import (
+        LinUCBContextualBandit,
+        save_bandit_snapshot,
+        snapshot_bandit_state,
+        write_bandit_state,
+    )
+
+    bandit = LinUCBContextualBandit(
+        ["popular", "balanced", "long_tail"], context_dim=3
+    )
+    base_state = snapshot_bandit_state(bandit)
+    sn_dir = tmp_path / "snapshots"
+    snap_path = save_bandit_snapshot(base_state, snapshot_dir=sn_dir, label="base")
+
+    # Slight update -> safe under default thresholds
+    bandit.update("popular", [1.0, 0.0, 0.0], 0.1)
+    safe_state = snapshot_bandit_state(bandit)
+    state_file = write_bandit_state(safe_state, tmp_path, state_name="curr_state")
+
+    res_pass = runner.invoke(
+        cli.app,
+        [
+            "bandit-drift",
+            "--state-path",
+            str(state_file),
+            "--reference",
+            str(snap_path),
+            "--check-safety",
+        ],
+    )
+    assert res_pass.exit_code == 0
+    assert "PASSED: Drift is within safe operating thresholds." in res_pass.output
+
+    # Severe breach -> fail with exit code 1
+    res_fail = runner.invoke(
+        cli.app,
+        [
+            "bandit-drift",
+            "--state-path",
+            str(state_file),
+            "--reference",
+            str(snap_path),
+            "--check-safety",
+            "--max-l2",
+            "0.0001",
+        ],
+    )
+    assert res_fail.exit_code == 1
+    assert "FAILED: Drift safety guardrails violated" in res_fail.output
+
+
+def test_bandit_sweep_cli_with_guardrails_and_auto_rollback(tmp_path: Path) -> None:
+    from music_recommender.bandit import (
+        LinUCBContextualBandit,
+        append_bandit_feedback_batch,
+        load_bandit_state,
+        save_bandit_snapshot,
+        snapshot_bandit_state,
+        tag_champion_snapshot,
+        write_bandit_state,
+    )
+
+    bandit = LinUCBContextualBandit(
+        ["popular", "balanced", "long_tail"], context_dim=3
+    )
+    base_state = snapshot_bandit_state(bandit)
+    state_file = write_bandit_state(base_state, tmp_path, state_name="active_state")
+    sn_dir = tmp_path / "snapshots"
+    champ = save_bandit_snapshot(base_state, snapshot_dir=sn_dir, label="champ")
+    tag_champion_snapshot(champ, snapshot_dir=sn_dir)
+
+    journal = tmp_path / "feedback.json"
+    records = [
+        {"arm": "popular", "context": [1.0, 1.0, 1.0], "reward": 10.0}
+        for _ in range(5)
+    ]
+    append_bandit_feedback_batch(records, journal)
+
+    # Sweep with strict max_l2 and auto-rollback
+    res = runner.invoke(
+        cli.app,
+        [
+            "bandit-sweep",
+            "--state-path",
+            str(state_file),
+            "--journal-path",
+            str(journal),
+            "--snapshot-dir",
+            str(sn_dir),
+            "--enable-guardrails",
+            "--auto-rollback",
+            "--max-l2",
+            "0.01",
+        ],
+    )
+    assert res.exit_code == 0
+    assert "Warning: Drift safety guardrails violated" in res.output
+    assert "Auto-rollback active: reverted state changes." in res.output
+
+    # State file on disk was not corrupted/overwritten
+    loaded = load_bandit_state(state_file)
+    assert loaded["arms"]["popular"]["selections"] == 0
+
+
