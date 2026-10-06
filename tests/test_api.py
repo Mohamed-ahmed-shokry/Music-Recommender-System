@@ -94,6 +94,77 @@ class FakeService:
             "dominant_arm_changed": False,
         }
 
+    def evaluate_bandit_drift_safety(
+        self,
+        reference_path: Path | str | None = None,
+        state_path: Path | str | None = None,
+        snapshot_dir: Path | str | None = None,
+        thresholds: object = None,
+    ) -> dict[str, object]:
+        return {
+            "is_safe": True,
+            "violations": [],
+            "warnings": [],
+            "metrics": {
+                "max_l2_drift": 0.05,
+                "mean_l2_drift": 0.02,
+                "min_cosine_similarity": 0.95,
+                "max_reward_drop": 0.01,
+                "dominant_arm_a": "popular",
+                "dominant_arm_b": "popular",
+                "dominant_arm_changed": False,
+            },
+            "reference_snapshot": str(reference_path or "champ.json"),
+            "evaluated_at": "2026-10-06T00:00:00Z",
+        }
+
+    def rollback_bandit_state(
+        self,
+        snapshot_path: Path | str | None = None,
+        target_state_path: Path | str | None = None,
+        snapshot_dir: Path | str | None = None,
+        *,
+        update_active_policy: bool = True,
+    ) -> dict[str, object]:
+        self.cold_start_policy = {"popular": 1.0}
+        return {
+            "restored": True,
+            "target_state_path": "reports/bandit_state.json",
+            "restored_from": str(snapshot_path or "reports/champ.json"),
+            "restored_at": "2026-10-06T00:00:00Z",
+            "label": "champion",
+            "is_champion": True,
+            "policy_updated": update_active_policy,
+            "policy": self.cold_start_policy,
+        }
+
+    def tag_champion_snapshot(
+        self,
+        snapshot_path: Path | str,
+        snapshot_dir: Path | str | None = None,
+    ) -> dict[str, object]:
+        return {
+            "tagged": True,
+            "path": str(snapshot_path),
+            "filename": Path(str(snapshot_path)).name,
+            "is_champion": True,
+            "label": "champion_v1",
+            "total_selections": 10,
+        }
+
+    def get_champion_snapshot(
+        self,
+        snapshot_dir: Path | str | None = None,
+    ) -> dict[str, object] | None:
+        return {
+            "path": "reports/bandit_snapshots/bandit_state_champ.json",
+            "filename": "bandit_state_champ.json",
+            "label": "champion_v1",
+            "is_champion": True,
+            "created_at": "2026-10-06T00:00:00Z",
+            "total_selections": 10,
+        }
+
     def sweep_bandit_feedback(
         self,
         *,
@@ -1931,5 +2002,126 @@ def test_api_lifespan_closes_service(monkeypatch: pytest.MonkeyPatch) -> None:
     with TestClient(api_main.app):
         assert fake_service.closed is False
     assert fake_service.closed is True
+
+
+def test_bandit_snapshots_champion_tag_and_get() -> None:
+    fake_service = FakeService()
+    with TestClient(api_main.app) as client:
+        api_main.service = fake_service
+        api_main.service_load_error = None
+
+        # Tag champion
+        res_post = client.post(
+            "/bandit/snapshots/champion",
+            json={"snapshot_path": "reports/bandit_snapshots/snap_1.json"},
+        )
+        assert res_post.status_code == 200
+        assert res_post.json()["tagged"] is True
+        assert res_post.json()["is_champion"] is True
+
+        # Get champion
+        res_get = client.get("/bandit/snapshots/champion")
+        assert res_get.status_code == 200
+        assert res_get.json()["is_champion"] is True
+        assert res_get.json()["filename"] == "bandit_state_champ.json"
+
+
+def test_bandit_snapshots_champion_get_404_when_none() -> None:
+    class NoChampionService(FakeService):
+        def get_champion_snapshot(
+            self, snapshot_dir: object = None
+        ) -> dict[str, object] | None:
+            return None
+
+    with TestClient(api_main.app) as client:
+        api_main.service = NoChampionService()
+        api_main.service_load_error = None
+
+        res = client.get("/bandit/snapshots/champion")
+        assert res.status_code == 404
+        assert "No champion snapshot found" in res.json()["detail"]
+
+
+def test_bandit_drift_safety_route() -> None:
+    fake_service = FakeService()
+    with TestClient(api_main.app) as client:
+        api_main.service = fake_service
+        api_main.service_load_error = None
+
+        # 1. Default payload
+        res = client.post("/bandit/drift/safety")
+        assert res.status_code == 200
+        assert res.json()["is_safe"] is True
+        assert "metrics" in res.json()
+
+        # 2. Overridden thresholds
+        res_override = client.post(
+            "/bandit/drift/safety",
+            json={
+                "reference_snapshot": "ref.json",
+                "max_l2_drift": 0.4,
+                "min_cosine_similarity": 0.9,
+                "max_reward_drop": 0.1,
+                "allow_dominant_arm_change": False,
+            },
+        )
+        assert res_override.status_code == 200
+        assert res_override.json()["is_safe"] is True
+
+
+def test_bandit_drift_safety_route_not_found() -> None:
+    class MissingRefService(FakeService):
+        def evaluate_bandit_drift_safety(
+            self, *args: object, **kwargs: object
+        ) -> dict[str, object]:
+            raise FileNotFoundError("Reference snapshot missing")
+
+    with TestClient(api_main.app) as client:
+        api_main.service = MissingRefService()
+        api_main.service_load_error = None
+
+        res = client.post(
+            "/bandit/drift/safety",
+            json={"reference_snapshot": "missing.json"},
+        )
+        assert res.status_code == 404
+        assert "Reference snapshot missing" in res.json()["detail"]
+
+
+def test_bandit_rollback_route() -> None:
+    fake_service = FakeService()
+    with TestClient(api_main.app) as client:
+        api_main.service = fake_service
+        api_main.service_load_error = None
+
+        res = client.post(
+            "/bandit/rollback",
+            json={
+                "snapshot_path": "reports/champ.json",
+                "update_active_policy": True,
+            },
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["restored"] is True
+        assert body["is_champion"] is True
+        assert body["policy_updated"] is True
+
+
+def test_bandit_rollback_route_not_found() -> None:
+    class MissingSnapshotService(FakeService):
+        def rollback_bandit_state(
+            self, *args: object, **kwargs: object
+        ) -> dict[str, object]:
+            raise FileNotFoundError("Snapshot not found for rollback")
+
+    with TestClient(api_main.app) as client:
+        api_main.service = MissingSnapshotService()
+        api_main.service_load_error = None
+
+        res = client.post("/bandit/rollback")
+        assert res.status_code == 404
+        assert "Snapshot not found for rollback" in res.json()["detail"]
+
 
 

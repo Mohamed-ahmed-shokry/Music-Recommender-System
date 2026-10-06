@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from api.middleware import RequestSafetyMiddleware
 from music_recommender import __version__
 from music_recommender.bandit import (
+    DriftSafetyThresholds,
     derive_cold_start_policy,
     load_bandit_report,
 )
@@ -624,6 +625,149 @@ def get_bandit_drift(
             status_code=404,
             detail=f"State or reference snapshot not found: {error}",
         ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+class BanditChampionTagRequest(BaseModel):
+    """Request payload for tagging a snapshot as champion."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    snapshot_path: str = Field(
+        description="Snapshot filename or full path to pin as champion.",
+    )
+
+
+class BanditDriftSafetyRequest(BaseModel):
+    """Request payload for evaluating bandit drift safety."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    reference_snapshot: str | None = Field(
+        default=None,
+        description="Optional path or filename of reference snapshot.",
+    )
+    max_l2_drift: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Optional maximum L2 drift threshold override.",
+    )
+    min_cosine_similarity: float | None = Field(
+        default=None,
+        ge=-1.0,
+        le=1.0,
+        description="Optional minimum cosine similarity threshold override.",
+    )
+    max_reward_drop: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Optional maximum reward drop threshold override.",
+    )
+    allow_dominant_arm_change: bool = Field(
+        default=True,
+        description="Whether to permit changes in dominant arm without violation.",
+    )
+
+
+class BanditRollbackRequest(BaseModel):
+    """Request payload for rolling back bandit state to champion or snapshot."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    snapshot_path: str | None = Field(
+        default=None,
+        description="Optional explicit snapshot path or filename to restore.",
+    )
+    update_active_policy: bool = Field(
+        default=True,
+        description="Whether to reload serving cold-start policy in memory.",
+    )
+
+
+@app.post("/bandit/snapshots/champion")
+def bandit_tag_champion_snapshot(
+    payload: BanditChampionTagRequest,
+) -> dict[str, object]:
+    """Tag a persisted bandit snapshot as the verified production champion."""
+    try:
+        srv = get_service()
+        return srv.tag_champion_snapshot(snapshot_path=payload.snapshot_path)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/bandit/snapshots/champion")
+def bandit_get_champion() -> dict[str, object]:
+    """Get active champion snapshot metadata."""
+    srv = get_service()
+    champ = srv.get_champion_snapshot()
+    if champ is None:
+        raise HTTPException(status_code=404, detail="No champion snapshot found.")
+    return champ
+
+
+@app.post("/bandit/drift/safety")
+def bandit_drift_safety(
+    payload: BanditDriftSafetyRequest | None = None,
+) -> dict[str, object]:
+    """Evaluate drift safety between active state and reference snapshot."""
+    try:
+        srv = get_service()
+        req = payload or BanditDriftSafetyRequest()
+        thresholds: DriftSafetyThresholds | None = None
+        if (
+            req.max_l2_drift is not None
+            or req.min_cosine_similarity is not None
+            or req.max_reward_drop is not None
+            or not req.allow_dominant_arm_change
+        ):
+            base_thresh = getattr(srv, "drift_thresholds", None)
+            base_l2 = base_thresh.max_l2_drift if base_thresh else 0.5
+            base_cos = base_thresh.min_cosine_similarity if base_thresh else 0.8
+            base_drop = base_thresh.max_reward_drop if base_thresh else 0.2
+            thresholds = DriftSafetyThresholds(
+                max_l2_drift=(
+                    req.max_l2_drift if req.max_l2_drift is not None else base_l2
+                ),
+                min_cosine_similarity=(
+                    req.min_cosine_similarity
+                    if req.min_cosine_similarity is not None
+                    else base_cos
+                ),
+                max_reward_drop=(
+                    req.max_reward_drop
+                    if req.max_reward_drop is not None
+                    else base_drop
+                ),
+                allow_dominant_arm_change=req.allow_dominant_arm_change,
+            )
+        return srv.evaluate_bandit_drift_safety(
+            reference_path=req.reference_snapshot,
+            thresholds=thresholds,
+        )
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/bandit/rollback")
+def bandit_rollback(
+    payload: BanditRollbackRequest | None = None,
+) -> dict[str, object]:
+    """Roll back the active bandit state to champion or specified snapshot."""
+    try:
+        srv = get_service()
+        req = payload or BanditRollbackRequest()
+        return srv.rollback_bandit_state(
+            snapshot_path=req.snapshot_path,
+            update_active_policy=req.update_active_policy,
+        )
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
