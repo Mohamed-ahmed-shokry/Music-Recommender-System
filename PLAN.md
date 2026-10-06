@@ -52,27 +52,27 @@ High-throughput production serving benefits from decoupling feedback journaling 
     - Task 6: Integration tests in `tests/test_service.py` and `tests/test_api.py`. ✓
     - Task 7: Documentation in `README.md` and mark Phase 131 complete in `PLAN.md`. ✓
 - Phase 132 — Automated drift guardrails & rollback:
-  `evaluate_drift_safety` and automatic fallback/restore to known good snapshot.
+  `evaluate_drift_safety` and automatic fallback/restore to known good snapshot. ✓
   - Objective: Protect live production serving from model degradation, extreme parameter drift, and unintended arm flipping by evaluating newly folded bandit states against baseline or champion snapshots using configurable drift guardrails (`evaluate_drift_safety`), and automatically triggering safe state rollback (`rollback_bandit_state`) when safety thresholds are breached.
   - Acceptance Criteria:
-    - AC-1: Core drift safety evaluation (`evaluate_drift_safety`, `DriftSafetyThresholds`, `DriftSafetyResult`) validates candidate states or drift summaries against thresholds for maximum $L_2$ drift, minimum cosine similarity, maximum mean reward drop, and dominant arm flipping.
-    - AC-2: Champion snapshot management (`tag_champion_snapshot`, `get_champion_snapshot`) enables identifying and pinning verified production champion models.
-    - AC-3: State rollback helper (`rollback_bandit_state`) atomically restores active bandit state from a designated snapshot or the latest champion snapshot, returning structured rollback metadata.
-    - AC-4: `BanditMaintenanceWorker` integrates automated drift safety evaluation on every feedback sweep, recording drift metrics and automatically rolling back to champion snapshot when `auto_rollback_on_drift` is enabled.
-    - AC-5: Configuration constants and environment variables in `config.py` support configuring drift guardrails and thresholds.
-    - AC-6: `RecommenderService` exposes drift safety evaluation, rollback, and champion tagging methods, dynamically refreshes active serving policy upon rollback, and exposes drift telemetry in status and metadata.
-    - AC-7: CLI commands (`bandit-drift --check-safety`, `bandit-rollback`, `bandit-snapshot --tag-champion`, `bandit-sweep --enable-guardrails`) provide comprehensive operator controls.
-    - AC-8: REST API endpoints (`POST /bandit/drift/safety`, `POST /bandit/rollback`, `POST /bandit/snapshots/champion`, `GET /bandit/status`) expose drift guardrails and rollback capabilities to remote clients.
-    - AC-9: Comprehensive unit, service, CLI, and API test coverage validating safety breaches, clean passes, worker auto-rollback, service hot-reloading, and error paths.
-    - AC-10: Complete user and operator documentation in `README.md`.
+    - AC-1: Core drift safety evaluation (`evaluate_drift_safety`, `DriftSafetyThresholds`, `DriftSafetyResult`) validates candidate states or drift summaries against thresholds for maximum $L_2$ drift, minimum cosine similarity, maximum mean reward drop, and dominant arm flipping. ✓
+    - AC-2: Champion snapshot management (`tag_champion_snapshot`, `get_champion_snapshot`) enables identifying and pinning verified production champion models. ✓
+    - AC-3: State rollback helper (`rollback_bandit_state`) atomically restores active bandit state from a designated snapshot or the latest champion snapshot, returning structured rollback metadata. ✓
+    - AC-4: `BanditMaintenanceWorker` integrates automated drift safety evaluation on every feedback sweep, recording drift metrics and automatically rolling back to champion snapshot when `auto_rollback_on_drift` is enabled. ✓
+    - AC-5: Configuration constants and environment variables in `config.py` support configuring drift guardrails and thresholds. ✓
+    - AC-6: `RecommenderService` exposes drift safety evaluation, rollback, and champion tagging methods, dynamically refreshes active serving policy upon rollback, and exposes drift telemetry in status and metadata. ✓
+    - AC-7: CLI commands (`bandit-drift --check-safety`, `bandit-rollback`, `bandit-snapshot --tag-champion`, `bandit-sweep --enable-guardrails`) provide comprehensive operator controls. ✓
+    - AC-8: REST API endpoints (`POST /bandit/drift/safety`, `POST /bandit/rollback`, `POST /bandit/snapshots/champion`, `GET /bandit/status`) expose drift guardrails and rollback capabilities to remote clients. ✓
+    - AC-9: Comprehensive unit, service, CLI, and API test coverage validating safety breaches, clean passes, worker auto-rollback, service hot-reloading, and error paths. ✓
+    - AC-10: Complete user and operator documentation in `README.md`. ✓
   - Implementation Tasks:
-    - Task 1: Add configuration constants and environment variables in `config.py`.
-    - Task 2: Implement core drift safety evaluation and champion rollback helpers (`DriftSafetyThresholds`, `DriftSafetyResult`, `evaluate_drift_safety`, `tag_champion_snapshot`, `get_champion_snapshot`, `rollback_bandit_state`) in `bandit.py` with unit tests.
-    - Task 3: Integrate drift safety evaluation and automated rollback into `BanditMaintenanceWorker` in `bandit.py` with unit tests.
-    - Task 4: Integrate drift safety evaluation, state rollback, and champion management into `RecommenderService` in `service.py` with integration tests.
-    - Task 5: Integrate CLI commands and flags (`bandit-rollback`, `bandit-drift --check-safety`, `bandit-snapshot --tag-champion`, `bandit-sweep --enable-guardrails`) in `cli.py` with CLI tests.
-    - Task 6: Expose REST API endpoints (`POST /bandit/drift/safety`, `POST /bandit/rollback`, `POST /bandit/snapshots/champion`) in `api/main.py` with API tests.
-    - Task 7: Update `README.md` documentation and mark Phase 132 complete in `PLAN.md`.
+    - Task 1: Add configuration constants and environment variables in `config.py`. ✓
+    - Task 2: Implement core drift safety evaluation and champion rollback helpers (`DriftSafetyThresholds`, `DriftSafetyResult`, `evaluate_drift_safety`, `tag_champion_snapshot`, `get_champion_snapshot`, `rollback_bandit_state`) in `bandit.py` with unit tests. ✓
+    - Task 3: Integrate drift safety evaluation and automated rollback into `BanditMaintenanceWorker` in `bandit.py` with unit tests. ✓
+    - Task 4: Integrate drift safety evaluation, state rollback, and champion management into `RecommenderService` in `service.py` with integration tests. ✓
+    - Task 5: Integrate CLI commands and flags (`bandit-rollback`, `bandit-drift --check-safety`, `bandit-snapshot --tag-champion`, `bandit-sweep --enable-guardrails`) in `cli.py` with CLI tests. ✓
+    - Task 6: Expose REST API endpoints (`POST /bandit/drift/safety`, `POST /bandit/rollback`, `POST /bandit/snapshots/champion`) in `api/main.py` with API tests. ✓
+    - Task 7: Update `README.md` documentation and mark Phase 132 complete in `PLAN.md`. ✓
 - Phase 133 — Observability tooling & CLI/API instrumentation:
   Metrics for queue depth, sweep timing, and streaming health endpoints.
 - Phase 134 — Dashboard, testing, and 0.29.0 release.
