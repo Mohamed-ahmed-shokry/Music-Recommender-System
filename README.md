@@ -833,6 +833,43 @@ To operationalize the cold-start bandit in production environments:
    uv run python -m music_recommender.cli bandit-drift --reference bandit_state_20260927T000000Z_baseline.json
    ```
 
+4. **Automated Drift Guardrails, Champion Pinning, and Rollback**:
+   Protect live serving from model divergence, sudden reward drops, and unintended arm flipping:
+   - **Champion Snapshot Tagging**: Mark stable, verified snapshots as champions to protect them from pruning eviction and designate them as automated rollback targets (`bandit-snapshot --tag-champion <name>`).
+   - **Drift Safety Thresholds**: Compare candidate states against reference or champion snapshots with configurable guardrails for maximum $L_2$ parameter drift, minimum cosine similarity, maximum mean reward drop, and dominant arm changes (`bandit-drift --check-safety`).
+   - **Automated Rollback & Hot-Reloading**: Atomically restore active state to champion or target snapshots upon safety violations (`bandit-rollback`), immediately hot-reloading serving policy weights in memory without service interruption.
+   - **Daemon Worker Guardrails**: Enable automatic drift safety checking and rollback on periodic sweeps (`bandit-sweep --enable-guardrails --auto-rollback` or environment variables `MUSIC_RECOMMENDER_BANDIT_DRIFT_*`).
+
+   ```bash
+   # Create a snapshot and tag it as champion
+   uv run python -m music_recommender.cli bandit-snapshot --create --label prod_champion --tag-champion
+
+   # Evaluate drift safety against the champion snapshot
+   uv run python -m music_recommender.cli bandit-drift --check-safety --max-l2 2.5 --min-cosine 0.8 --max-reward-drop 0.1
+
+   # Rollback active state to the champion snapshot
+   uv run python -m music_recommender.cli bandit-rollback --reason "Sudden reward drop detected"
+
+   # Run automated sweeping with drift safety guardrails and auto-rollback enabled
+   uv run python -m music_recommender.cli bandit-sweep --threshold 50 --enable-guardrails --auto-rollback
+   ```
+
+   In Python via `RecommenderService`:
+   ```python
+   # Tag a champion snapshot
+   service.tag_champion_snapshot("bandit_state_20261006T200000Z_prod.json")
+
+   # Evaluate drift safety
+   safety = service.evaluate_drift_safety(
+       max_l2_drift=2.5,
+       min_cosine_similarity=0.8,
+       max_reward_drop=0.1,
+   )
+   if not safety["is_safe"]:
+       service.rollback_bandit_state(reason="Drift guardrail threshold exceeded")
+   ```
+
+
 ### Multi-Policy Benchmarking, State Derivation, and Off-Policy Evaluation (OPE)
 
 1. **Comparative Multi-Policy Benchmarking**:
@@ -890,7 +927,11 @@ uv run uvicorn api.main:app --reload
 | `POST` | `/bandit/update` | Fold pending served feedback into the persisted bandit state (optional `{"context_features": [...]}` body cross-checked against the state) |
 | `GET` | `/bandit/snapshots` | List persisted bandit state snapshots sorted newest first |
 | `POST` | `/bandit/snapshots` | Create a timestamped bandit state snapshot (optional `{"label": "..."}` body) |
+| `GET` | `/bandit/snapshots/champion` | Retrieve the active champion snapshot metadata |
+| `POST` | `/bandit/snapshots/champion` | Tag a designated snapshot as champion to protect it and designate rollback target |
 | `GET` | `/bandit/drift` | Parameter and reward drift between current state and reference snapshot (optional `?reference=...`) |
+| `POST` | `/bandit/drift/safety` | Evaluate parameter and reward drift safety against reference or champion snapshot |
+| `POST` | `/bandit/rollback` | Rollback active bandit state to a target or champion snapshot and hot-reload policy |
 | `POST` | `/bandit/evaluate/off-policy` | Offline policy evaluation (IPS, SnIPS, DM, DR) on logged feedback |
 | `POST` | `/bandit/evaluate/compare` | Multi-policy comparative simulation benchmarking |
 | `POST` | `/bandit/policy/derive` | Cold-start policy derivation from state or report with temperature annealing |
@@ -922,6 +963,16 @@ curl -X POST http://127.0.0.1:8000/recommend/profile \
 curl -X POST http://127.0.0.1:8000/recommend/session \
   -H "Content-Type: application/json" \
   -d '{"user_id":"user_1","artist_ids":["artist_1","artist_6"],"genres":["pop","electronic"],"mood_tags":["bright"],"exclude_artist_ids":["artist_2"],"top_k":10,"content_weight":0.35,"explain":true}'
+curl -X POST http://127.0.0.1:8000/bandit/drift/safety \
+  -H "Content-Type: application/json" \
+  -d '{"max_l2_drift":2.5,"min_cosine_similarity":0.8}'
+curl -X POST http://127.0.0.1:8000/bandit/snapshots/champion \
+  -H "Content-Type: application/json" \
+  -d '{"snapshot_name":"bandit_state_20261006T200000Z_prod.json"}'
+curl http://127.0.0.1:8000/bandit/snapshots/champion
+curl -X POST http://127.0.0.1:8000/bandit/rollback \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"Drift guardrail violation"}'
 ```
 
 Catalog discovery accepts a free-text `query`, exact `genre`, `mood_tag`,
@@ -1635,7 +1686,20 @@ See [PLAN.md](PLAN.md) for the full phased plan.
   benchmarking (`simulate-bandit --compare-policies`), state-driven cold-start policy derivation with
   dynamic temperature annealing $\tau(t) = \max(\tau_{\min}, \tau_0 / (1 + \lambda t))$, and end-to-end
   CLI (`bandit-eval-offline`, `bandit-policy --from-state`), API, and dashboard integrations. ✓ (0.28.0)
-- Next: Streaming real-time feedback ingestion and asynchronous event-driven policy updates.
+- Real-Time Streaming Feedback Ingestion and Asynchronous Policy Maintenance Worker:
+  `StreamingFeedbackQueue` non-blocking in-memory ingestion with configurable backpressure
+  strategies (`drop_oldest`, `reject`, `block`) and background batch disk flusher;
+  `BanditMaintenanceWorker` background daemon within `RecommenderService` for automatic
+  periodic feedback sweeping, snapshot rotation, and thread-safe serving policy hot-reloading. ✓ (0.29.0)
+- Automated Drift Guardrails, Champion Pinning, and Rollback:
+  drift safety evaluation engine (`evaluate_drift_safety`, `DriftSafetyThresholds`),
+  champion snapshot pinning and prune eviction protection, automated state rollback
+  (`rollback_bandit_state`) with dynamic policy hot-reloading in `RecommenderService`
+  and background `BanditMaintenanceWorker`, plus CLI commands (`bandit-rollback`,
+  `bandit-drift --check-safety`, `bandit-sweep --enable-guardrails --auto-rollback`)
+  and API endpoints (`POST /bandit/drift/safety`, `POST /bandit/rollback`,
+  `GET/POST /bandit/snapshots/champion`). ✓ (0.29.0)
+- Next: Observability tooling, queue depth & sweep telemetry CLI/API instrumentation, and dashboard.
 - Deferred: two-tower neural candidate retrieval (PyTorch / ONNX runtime) until
   a real-scale catalog is available; the sample dataset cannot validate a
   neural retrieval model.
