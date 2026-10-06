@@ -46,6 +46,9 @@ from music_recommender.config import (
     BANDIT_FEEDBACK_PATH,
     BANDIT_SNAPSHOTS_DIR,
     BANDIT_STATE_PATH,
+    DEFAULT_BANDIT_DRIFT_MAX_L2,
+    DEFAULT_BANDIT_DRIFT_MAX_REWARD_DROP,
+    DEFAULT_BANDIT_DRIFT_MIN_COSINE,
     DEFAULT_BANDIT_GAMMA,
     DEFAULT_BANDIT_MAINTENANCE_INTERVAL,
     DEFAULT_BANDIT_MAINTENANCE_THRESHOLD,
@@ -746,6 +749,211 @@ def compute_bandit_drift(
     }
 
 
+@dataclasses.dataclass(frozen=True)
+class DriftSafetyThresholds:
+    """Configurable safety thresholds for contextual bandit parameter drift."""
+
+    max_l2_drift: float | None = DEFAULT_BANDIT_DRIFT_MAX_L2
+    min_cosine_similarity: float | None = DEFAULT_BANDIT_DRIFT_MIN_COSINE
+    max_reward_drop: float | None = DEFAULT_BANDIT_DRIFT_MAX_REWARD_DROP
+    allow_dominant_arm_change: bool = True
+
+    def __post_init__(self) -> None:
+        if self.max_l2_drift is not None and (
+            not np.isfinite(self.max_l2_drift) or self.max_l2_drift < 0.0
+        ):
+            raise ValueError(
+                "max_l2_drift must be a non-negative finite number, "
+                f"got {self.max_l2_drift}."
+            )
+        if self.min_cosine_similarity is not None and (
+            not np.isfinite(self.min_cosine_similarity)
+            or self.min_cosine_similarity < -1.0
+            or self.min_cosine_similarity > 1.0
+        ):
+            raise ValueError(
+                "min_cosine_similarity must be between -1.0 and 1.0, "
+                f"got {self.min_cosine_similarity}."
+            )
+        if self.max_reward_drop is not None and (
+            not np.isfinite(self.max_reward_drop) or self.max_reward_drop < 0.0
+        ):
+            raise ValueError(
+                "max_reward_drop must be a non-negative finite number, "
+                f"got {self.max_reward_drop}."
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "max_l2_drift": self.max_l2_drift,
+            "min_cosine_similarity": self.min_cosine_similarity,
+            "max_reward_drop": self.max_reward_drop,
+            "allow_dominant_arm_change": self.allow_dominant_arm_change,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DriftSafetyThresholds:
+        return cls(
+            max_l2_drift=(
+                float(data["max_l2_drift"])
+                if data.get("max_l2_drift") is not None
+                else None
+            ),
+            min_cosine_similarity=(
+                float(data["min_cosine_similarity"])
+                if data.get("min_cosine_similarity") is not None
+                else None
+            ),
+            max_reward_drop=(
+                float(data["max_reward_drop"])
+                if data.get("max_reward_drop") is not None
+                else None
+            ),
+            allow_dominant_arm_change=bool(
+                data.get("allow_dominant_arm_change", True)
+            ),
+        )
+
+
+@dataclasses.dataclass
+class DriftSafetyResult:
+    """Outcome of drift safety evaluation against guardrails."""
+
+    is_safe: bool
+    violations: list[str] = dataclasses.field(default_factory=list)
+    warnings: list[str] = dataclasses.field(default_factory=list)
+    metrics: dict[str, Any] = dataclasses.field(default_factory=dict)
+    evaluated_at: str = dataclasses.field(
+        default_factory=lambda: datetime.now(UTC).isoformat()
+    )
+    reference_snapshot: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "is_safe": self.is_safe,
+            "violations": list(self.violations),
+            "warnings": list(self.warnings),
+            "metrics": dict(self.metrics),
+            "evaluated_at": self.evaluated_at,
+            "reference_snapshot": self.reference_snapshot,
+        }
+
+
+def evaluate_drift_safety(
+    target: dict[str, Any],
+    baseline: dict[str, Any] | None = None,
+    thresholds: DriftSafetyThresholds | dict[str, Any] | None = None,
+    *,
+    reference_snapshot: str | None = None,
+) -> DriftSafetyResult:
+    """Evaluate drift metrics between bandit states or summary against guardrails.
+
+    Parameters
+    ----------
+    target : dict[str, Any]
+        Candidate bandit state or pre-computed drift dictionary.
+    baseline : dict[str, Any] | None
+        Baseline bandit state to compare against when target is a bandit state.
+    thresholds : DriftSafetyThresholds | dict[str, Any] | None
+        Safety thresholds. Defaults to standard project safety boundaries.
+    reference_snapshot : str | None
+        Optional identifier of the reference snapshot evaluated against.
+    """
+    if "summary" in target and "arms" in target and isinstance(target["summary"], dict):
+        drift = target
+    else:
+        if baseline is None:
+            raise ValueError(
+                "baseline state must be provided when target is a bandit state."
+            )
+        drift = compute_bandit_drift(baseline, target)
+
+    if thresholds is None:
+        thresh = DriftSafetyThresholds()
+    elif isinstance(thresholds, DriftSafetyThresholds):
+        thresh = thresholds
+    elif isinstance(thresholds, dict):
+        thresh = DriftSafetyThresholds.from_dict(thresholds)
+    else:
+        raise TypeError(
+            "thresholds must be DriftSafetyThresholds or dict, "
+            f"got {type(thresholds).__name__}"
+        )
+
+    violations: list[str] = []
+    warnings: list[str] = []
+
+    summary = drift.get("summary", {})
+    arms = drift.get("arms", {})
+
+    max_l2 = float(summary.get("max_l2_drift", 0.0))
+    mean_l2 = float(summary.get("mean_l2_drift", 0.0))
+    dom_a = str(summary.get("dominant_arm_a", ""))
+    dom_b = str(summary.get("dominant_arm_b", ""))
+    dom_changed = bool(summary.get("dominant_arm_changed", False))
+
+    if thresh.max_l2_drift is not None and max_l2 > thresh.max_l2_drift:
+        violations.append(
+            f"Maximum L2 parameter drift ({max_l2:.4f}) "
+            f"exceeds threshold ({thresh.max_l2_drift:.4f})."
+        )
+
+    min_cos_sim = 1.0
+    max_reward_drop = 0.0
+
+    for arm_name, arm_data in arms.items():
+        if not isinstance(arm_data, dict):
+            continue
+        cos_sim = float(arm_data.get("cosine_similarity", 1.0))
+        if cos_sim < min_cos_sim:
+            min_cos_sim = cos_sim
+        if (
+            thresh.min_cosine_similarity is not None
+            and cos_sim < thresh.min_cosine_similarity
+        ):
+            violations.append(
+                f"Arm '{arm_name}' cosine similarity ({cos_sim:.4f}) "
+                f"is below threshold ({thresh.min_cosine_similarity:.4f})."
+            )
+
+        delta_mean_rew = float(arm_data.get("delta_mean_reward", 0.0))
+        if delta_mean_rew < 0:
+            drop = abs(delta_mean_rew)
+            if drop > max_reward_drop:
+                max_reward_drop = drop
+            if thresh.max_reward_drop is not None and drop > thresh.max_reward_drop:
+                violations.append(
+                    f"Arm '{arm_name}' mean reward drop ({drop:.4f}) "
+                    f"exceeds threshold ({thresh.max_reward_drop:.4f})."
+                )
+
+    if not thresh.allow_dominant_arm_change and dom_changed:
+        violations.append(
+            f"Dominant arm changed from '{dom_a}' to '{dom_b}', "
+            "which violates stability policy."
+        )
+
+    metrics = {
+        "max_l2_drift": round(max_l2, 6),
+        "mean_l2_drift": round(mean_l2, 6),
+        "min_cosine_similarity": round(min_cos_sim, 6),
+        "max_reward_drop": round(max_reward_drop, 6),
+        "dominant_arm_a": dom_a,
+        "dominant_arm_b": dom_b,
+        "dominant_arm_changed": dom_changed,
+        "thresholds": thresh.to_dict(),
+    }
+
+    is_safe = len(violations) == 0
+    return DriftSafetyResult(
+        is_safe=is_safe,
+        violations=violations,
+        warnings=warnings,
+        metrics=metrics,
+        reference_snapshot=reference_snapshot,
+    )
+
+
 def save_bandit_snapshot(
     state: dict[str, Any],
     snapshot_dir: Path | str = BANDIT_SNAPSHOTS_DIR,
@@ -808,12 +1016,16 @@ def list_bandit_snapshots(
                 snapshot_meta.get("created_at") or state.get("generated_at") or ""
             )
             label = snapshot_meta.get("label")
+            is_champion = bool(snapshot_meta.get("is_champion", False))
+            champion_tagged_at = snapshot_meta.get("champion_tagged_at")
             snapshots.append(
                 {
                     "filename": path.name,
                     "path": str(path.resolve()),
                     "created_at": created_at,
                     "label": label,
+                    "is_champion": is_champion,
+                    "champion_tagged_at": champion_tagged_at,
                     "arms": list(state["config"].get("arms", [])),
                     "context_dim": state["config"].get("context_dim"),
                     "total_selections": total_selections,
@@ -851,7 +1063,7 @@ def prune_bandit_snapshots(
 ) -> list[Path]:
     """Prune older snapshots in snapshot_dir, keeping the max_keep newest.
 
-    Returns the list of deleted snapshot paths.
+    Protects champion snapshots from deletion. Returns the list of deleted paths.
     """
     if type(max_keep) is not int or max_keep < 1:
         raise ValueError("max_keep must be a positive integer.")
@@ -865,11 +1077,138 @@ def prune_bandit_snapshots(
     deleted: list[Path] = []
     for path in excess:
         try:
+            st = json.loads(path.read_text(encoding="utf-8"))
+            if st.get("snapshot", {}).get("is_champion", False):
+                continue
             path.unlink()
             deleted.append(path)
         except OSError:
             continue
     return deleted
+
+
+def tag_champion_snapshot(
+    snapshot_path: Path | str,
+    *,
+    snapshot_dir: Path | str = BANDIT_SNAPSHOTS_DIR,
+) -> Path:
+    """Tag a persisted bandit state snapshot as the verified champion.
+
+    Updates the snapshot file metadata with `is_champion: True` and
+    creates/updates a `champion_snapshot.json` copy in `snapshot_dir`.
+    """
+    path = Path(snapshot_path)
+    if not path.is_file():
+        candidate = Path(snapshot_dir) / path.name
+        if candidate.is_file():
+            path = candidate
+        else:
+            raise FileNotFoundError(f"Snapshot not found: {snapshot_path}")
+
+    state = load_bandit_snapshot(path)
+    snapshot_meta = dict(state.get("snapshot", {}))
+    snapshot_meta["is_champion"] = True
+    snapshot_meta["champion_tagged_at"] = datetime.now(UTC).isoformat()
+    state["snapshot"] = snapshot_meta
+
+    path.write_text(
+        json.dumps(state, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    target_dir = Path(snapshot_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    champion_pointer = target_dir / "champion_snapshot.json"
+    champion_pointer.write_text(
+        json.dumps(state, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    return path
+
+
+def get_champion_snapshot(
+    snapshot_dir: Path | str = BANDIT_SNAPSHOTS_DIR,
+) -> Path | None:
+    """Resolve the active champion snapshot path.
+
+    First checks for an explicitly tagged champion snapshot in `snapshot_dir`
+    (or `champion_snapshot.json`). If none is tagged as champion, falls back to
+    the newest snapshot. Returns None if no snapshots exist.
+    """
+    target_dir = Path(snapshot_dir)
+    if not target_dir.exists():
+        return None
+
+    all_snaps = list_bandit_snapshots(target_dir)
+    for snap in all_snaps:
+        if snap.get("is_champion"):
+            return Path(snap["path"])
+
+    champion_pointer = target_dir / "champion_snapshot.json"
+    if champion_pointer.is_file():
+        return champion_pointer
+
+    if all_snaps:
+        return Path(all_snaps[0]["path"])
+
+    return None
+
+
+def rollback_bandit_state(
+    target_state_path: Path | str = BANDIT_STATE_PATH,
+    snapshot_path: Path | str | None = None,
+    *,
+    snapshot_dir: Path | str = BANDIT_SNAPSHOTS_DIR,
+) -> dict[str, Any]:
+    """Roll back the active bandit state to a specified or champion snapshot.
+
+    Restores the specified snapshot (or the latest/champion snapshot) into
+    `target_state_path`, returning structured metadata about the restored state.
+    """
+    if snapshot_path is not None:
+        chosen_path = Path(snapshot_path)
+        if not chosen_path.is_file():
+            candidate = Path(snapshot_dir) / chosen_path.name
+            if candidate.is_file():
+                chosen_path = candidate
+            else:
+                raise FileNotFoundError(
+                    f"Snapshot not found for rollback: {snapshot_path}"
+                )
+    else:
+        found = get_champion_snapshot(snapshot_dir)
+        if found is None:
+            raise FileNotFoundError(
+                f"No snapshot found to roll back to in {snapshot_dir}."
+            )
+        chosen_path = found
+
+    restored_target = restore_bandit_snapshot(
+        chosen_path, target_state_path=target_state_path
+    )
+    restored_state = load_bandit_snapshot(restored_target)
+
+    arm_selections = {
+        arm: int(arm_data.get("selections", 0))
+        for arm, arm_data in restored_state.get("arms", {}).items()
+        if isinstance(arm_data, dict)
+    }
+
+    return {
+        "restored": True,
+        "target_state_path": str(restored_target.resolve()),
+        "restored_from": str(chosen_path.resolve()),
+        "restored_at": datetime.now(UTC).isoformat(),
+        "label": restored_state.get("snapshot", {}).get("label"),
+        "is_champion": bool(
+            restored_state.get("snapshot", {}).get("is_champion", False)
+        ),
+        "arms": list(restored_state.get("config", {}).get("arms", [])),
+        "context_dim": restored_state.get("config", {}).get("context_dim"),
+        "total_selections": sum(arm_selections.values()),
+        "arm_selections": arm_selections,
+    }
 
 
 def validate_state_context_features(

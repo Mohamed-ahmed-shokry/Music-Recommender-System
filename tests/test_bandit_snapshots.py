@@ -7,15 +7,21 @@ from pathlib import Path
 import pytest
 
 from music_recommender.bandit import (
+    DriftSafetyResult,
+    DriftSafetyThresholds,
     LinUCBContextualBandit,
     compute_arm_thetas,
     compute_bandit_drift,
+    evaluate_drift_safety,
+    get_champion_snapshot,
     list_bandit_snapshots,
     load_bandit_snapshot,
     prune_bandit_snapshots,
     restore_bandit_snapshot,
+    rollback_bandit_state,
     save_bandit_snapshot,
     snapshot_bandit_state,
+    tag_champion_snapshot,
 )
 
 
@@ -158,3 +164,224 @@ def test_prune_bandit_snapshots(tmp_path: Path) -> None:
 
     remaining = list_bandit_snapshots(tmp_path)
     assert len(remaining) == 3
+
+
+def test_drift_safety_thresholds_validation_and_serialization() -> None:
+    thresh = DriftSafetyThresholds(
+        max_l2_drift=1.2,
+        min_cosine_similarity=0.3,
+        max_reward_drop=0.2,
+        allow_dominant_arm_change=False,
+    )
+    d = thresh.to_dict()
+    assert d["max_l2_drift"] == 1.2
+    assert d["min_cosine_similarity"] == 0.3
+    assert d["max_reward_drop"] == 0.2
+    assert d["allow_dominant_arm_change"] is False
+
+    restored = DriftSafetyThresholds.from_dict(d)
+    assert restored == thresh
+
+    with pytest.raises(ValueError, match="max_l2_drift must be a non-negative"):
+        DriftSafetyThresholds(max_l2_drift=-0.1)
+
+    with pytest.raises(ValueError, match="min_cosine_similarity must be between"):
+        DriftSafetyThresholds(min_cosine_similarity=1.5)
+
+    with pytest.raises(ValueError, match="max_reward_drop must be a non-negative"):
+        DriftSafetyThresholds(max_reward_drop=-0.5)
+
+
+def test_evaluate_drift_safety_identical_states() -> None:
+    state = _sample_bandit_state(selections=1)
+    result = evaluate_drift_safety(state, state)
+    assert isinstance(result, DriftSafetyResult)
+    assert result.is_safe is True
+    assert len(result.violations) == 0
+    assert result.metrics["max_l2_drift"] == 0.0
+    assert result.metrics["min_cosine_similarity"] == 1.0
+
+    d = result.to_dict()
+    assert d["is_safe"] is True
+    assert "metrics" in d
+    assert "evaluated_at" in d
+
+
+def test_evaluate_drift_safety_max_l2_breach() -> None:
+    state_a = _sample_bandit_state(selections=0)
+    state_b = _sample_bandit_state(selections=1)
+    # Drift has max_l2_drift > 0. Set threshold very low
+    thresh = DriftSafetyThresholds(max_l2_drift=0.001)
+    result = evaluate_drift_safety(state_b, state_a, thresholds=thresh)
+    assert result.is_safe is False
+    assert any("Maximum L2 parameter drift" in v for v in result.violations)
+
+
+def test_evaluate_drift_safety_cosine_similarity_breach() -> None:
+    # Construct a synthetic drift summary with low cosine similarity
+    synthetic_drift = {
+        "summary": {
+            "max_l2_drift": 0.1,
+            "mean_l2_drift": 0.05,
+            "dominant_arm_a": "popular",
+            "dominant_arm_b": "popular",
+            "dominant_arm_changed": False,
+        },
+        "arms": {
+            "popular": {
+                "cosine_similarity": -0.5,
+                "delta_mean_reward": 0.0,
+            }
+        },
+    }
+    thresh = DriftSafetyThresholds(min_cosine_similarity=0.0)
+    result = evaluate_drift_safety(synthetic_drift, thresholds=thresh)
+    assert result.is_safe is False
+    assert any("cosine similarity" in v for v in result.violations)
+
+
+def test_evaluate_drift_safety_reward_drop_breach() -> None:
+    synthetic_drift = {
+        "summary": {
+            "max_l2_drift": 0.1,
+            "mean_l2_drift": 0.05,
+            "dominant_arm_a": "popular",
+            "dominant_arm_b": "popular",
+            "dominant_arm_changed": False,
+        },
+        "arms": {
+            "popular": {
+                "cosine_similarity": 0.9,
+                "delta_mean_reward": -0.6,
+            }
+        },
+    }
+    thresh = DriftSafetyThresholds(max_reward_drop=0.2)
+    result = evaluate_drift_safety(synthetic_drift, thresholds=thresh)
+    assert result.is_safe is False
+    assert any("mean reward drop" in v for v in result.violations)
+
+
+def test_evaluate_drift_safety_dominant_arm_changed() -> None:
+    synthetic_drift = {
+        "summary": {
+            "max_l2_drift": 0.1,
+            "mean_l2_drift": 0.05,
+            "dominant_arm_a": "popular",
+            "dominant_arm_b": "long_tail",
+            "dominant_arm_changed": True,
+        },
+        "arms": {
+            "popular": {
+                "cosine_similarity": 0.9,
+                "delta_mean_reward": 0.0,
+            },
+            "long_tail": {
+                "cosine_similarity": 0.9,
+                "delta_mean_reward": 0.1,
+            },
+        },
+    }
+    # When allow_dominant_arm_change is False, flag violation
+    thresh = DriftSafetyThresholds(allow_dominant_arm_change=False)
+    result = evaluate_drift_safety(synthetic_drift, thresholds=thresh)
+    assert result.is_safe is False
+    assert any("Dominant arm changed" in v for v in result.violations)
+
+
+def test_tag_champion_snapshot_and_get_champion(tmp_path: Path) -> None:
+    state = _sample_bandit_state(selections=1)
+    snap1 = save_bandit_snapshot(state, snapshot_dir=tmp_path, label="snap_1")
+    snap2 = save_bandit_snapshot(state, snapshot_dir=tmp_path, label="snap_2")
+
+    # Before tagging, get_champion returns the newest snapshot
+    champion_initial = get_champion_snapshot(tmp_path)
+    assert champion_initial is not None
+    assert champion_initial.name == snap2.name
+
+    # Tag snap1 as champion
+    tagged = tag_champion_snapshot(snap1, snapshot_dir=tmp_path)
+    assert tagged.resolve() == snap1.resolve()
+
+    # Now get_champion resolves to snap1
+    resolved_champion = get_champion_snapshot(tmp_path)
+    assert resolved_champion is not None
+    assert resolved_champion.name == snap1.name
+
+    # list_bandit_snapshots shows is_champion = True for snap1
+    snaps = list_bandit_snapshots(tmp_path)
+    champion_entries = [s for s in snaps if s.get("is_champion")]
+    assert len(champion_entries) == 1
+    assert champion_entries[0]["filename"] == snap1.name
+
+
+def test_prune_bandit_snapshots_protects_champion(tmp_path: Path) -> None:
+    state = _sample_bandit_state(selections=0)
+    snaps = [
+        save_bandit_snapshot(state, snapshot_dir=tmp_path, label=f"snap_{i}")
+        for i in range(5)
+    ]
+    # Tag the oldest snapshot as champion
+    tag_champion_snapshot(snaps[0], snapshot_dir=tmp_path)
+
+    # Prune keeping 2 newest
+    deleted = prune_bandit_snapshots(tmp_path, max_keep=2)
+    # Out of 3 excess snapshots, snaps[0] should be spared because it is champion
+    assert snaps[0].exists()
+    assert snaps[0] not in deleted
+    remaining = list_bandit_snapshots(tmp_path)
+    assert any(s["filename"] == snaps[0].name and s["is_champion"] for s in remaining)
+
+
+def test_rollback_bandit_state_to_champion(tmp_path: Path) -> None:
+    state_champ = _sample_bandit_state(selections=1)
+    snap_champ = save_bandit_snapshot(
+        state_champ, snapshot_dir=tmp_path, label="champion"
+    )
+    tag_champion_snapshot(snap_champ, snapshot_dir=tmp_path)
+
+    # Create active state that has drifted/degraded
+    active_state_path = tmp_path / "active_bandit_state.json"
+    degraded_state = _sample_bandit_state(selections=0)
+    restore_bandit_snapshot(
+        save_bandit_snapshot(degraded_state, snapshot_dir=tmp_path, label="bad"),
+        target_state_path=active_state_path,
+    )
+    loaded_active = load_bandit_snapshot(active_state_path)
+    assert loaded_active["arms"]["popular"]["selections"] == 0
+
+    # Roll back to champion
+    rollback_result = rollback_bandit_state(
+        target_state_path=active_state_path,
+        snapshot_dir=tmp_path,
+    )
+    assert rollback_result["restored"] is True
+    assert rollback_result["is_champion"] is True
+    assert rollback_result["arm_selections"]["popular"] == 1
+
+    restored = load_bandit_snapshot(active_state_path)
+    assert restored["arms"]["popular"]["selections"] == 1
+
+
+def test_rollback_bandit_state_explicit_path(tmp_path: Path) -> None:
+    state = _sample_bandit_state(selections=1)
+    snap = save_bandit_snapshot(state, snapshot_dir=tmp_path, label="specific_target")
+
+    active_state_path = tmp_path / "active.json"
+    res = rollback_bandit_state(
+        target_state_path=active_state_path,
+        snapshot_path=snap,
+        snapshot_dir=tmp_path,
+    )
+    assert res["restored"] is True
+    assert active_state_path.exists()
+    assert res["label"] == "specific_target"
+
+
+def test_rollback_bandit_state_missing_snapshot_raises(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="No snapshot found"):
+        rollback_bandit_state(
+            target_state_path=tmp_path / "active.json",
+            snapshot_dir=tmp_path / "empty_dir",
+        )
+
