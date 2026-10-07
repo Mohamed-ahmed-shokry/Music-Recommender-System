@@ -1390,6 +1390,10 @@ class StreamingQueueMetrics:
     flushed_count: int
     flush_errors: int
     is_running: bool
+    max_queue_size: int = 10_000
+    utilization_pct: float = 0.0
+    backpressure: str = "drop_oldest"
+    total_flushed_batches: int = 0
     last_flush_at: str | None = None
     last_error: str | None = None
 
@@ -1397,9 +1401,13 @@ class StreamingQueueMetrics:
         """Convert metrics to a dictionary representation."""
         return {
             "queue_depth": self.queue_depth,
+            "max_queue_size": self.max_queue_size,
+            "utilization_pct": self.utilization_pct,
+            "backpressure": self.backpressure,
             "enqueued_count": self.enqueued_count,
             "dropped_count": self.dropped_count,
             "flushed_count": self.flushed_count,
+            "total_flushed_batches": self.total_flushed_batches,
             "flush_errors": self.flush_errors,
             "is_running": self.is_running,
             "last_flush_at": self.last_flush_at,
@@ -1476,6 +1484,7 @@ class StreamingFeedbackQueue:
         self._dropped_count: int = 0
         self._flushed_count: int = 0
         self._flush_errors: int = 0
+        self._total_flushed_batches: int = 0
         self._last_flush_at: str | None = None
         self._last_error: str | None = None
         self._worker_thread: threading.Thread | None = None
@@ -1657,13 +1666,23 @@ class StreamingFeedbackQueue:
     def get_metrics(self) -> StreamingQueueMetrics:
         """Return a snapshot of current queue metrics."""
         with self._lock:
+            depth = len(self._queue)
+            util = (
+                round((depth / self.max_queue_size) * 100.0, 2)
+                if self.max_queue_size > 0
+                else 0.0
+            )
             return StreamingQueueMetrics(
-                queue_depth=len(self._queue),
+                queue_depth=depth,
                 enqueued_count=self._enqueued_count,
                 dropped_count=self._dropped_count,
                 flushed_count=self._flushed_count,
                 flush_errors=self._flush_errors,
                 is_running=self.is_running,
+                max_queue_size=self.max_queue_size,
+                utilization_pct=util,
+                backpressure=self.backpressure.value,
+                total_flushed_batches=self._total_flushed_batches,
                 last_flush_at=self._last_flush_at,
                 last_error=self._last_error,
             )
@@ -1707,6 +1726,7 @@ class StreamingFeedbackQueue:
             append_bandit_feedback_batch(batch, self.journal_path)
             with self._lock:
                 self._flushed_count += len(batch)
+                self._total_flushed_batches += 1
                 self._last_flush_at = datetime.now(UTC).isoformat()
                 self._last_error = None
             return True
@@ -2781,6 +2801,19 @@ def compute_off_policy_evaluation(
             "target_action_share": round(share, 6),
         }
 
+    ci_ips = [
+        round(float(v_ips - 1.96 * se_ips), 6),
+        round(float(v_ips + 1.96 * se_ips), 6),
+    ]
+    ci_dm = [
+        round(float(v_dm - 1.96 * se_dm), 6),
+        round(float(v_dm + 1.96 * se_dm), 6),
+    ]
+    ci_dr = [
+        round(float(v_dr - 1.96 * se_dr), 6),
+        round(float(v_dr + 1.96 * se_dr), 6),
+    ]
+
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "target_policy": target_policy_name,
@@ -2794,6 +2827,7 @@ def compute_off_policy_evaluation(
             "ips": {
                 "value": round(v_ips, 6),
                 "standard_error": round(se_ips, 6),
+                "ci_95": ci_ips,
             },
             "snips": {
                 "value": round(v_snips, 6),
@@ -2801,10 +2835,12 @@ def compute_off_policy_evaluation(
             "direct_method": {
                 "value": round(v_dm, 6),
                 "standard_error": round(se_dm, 6),
+                "ci_95": ci_dm,
             },
             "doubly_robust": {
                 "value": round(v_dr, 6),
                 "standard_error": round(se_dr, 6),
+                "ci_95": ci_dr,
                 "lift_over_logging": round(v_dr - logging_mean_reward, 6),
             },
         },
@@ -3076,6 +3112,10 @@ class MaintenanceWorkerMetrics:
     last_sweep_at: str | None = None
     last_sweep_duration_seconds: float | None = None
     last_sweep_records_folded: int = 0
+    total_sweep_duration_seconds: float = 0.0
+    avg_sweep_duration_seconds: float | None = None
+    min_sweep_duration_seconds: float | None = None
+    max_sweep_duration_seconds: float | None = None
     last_snapshot_at: str | None = None
     last_error: str | None = None
     last_drift_result: dict[str, Any] | None = None
@@ -3104,6 +3144,10 @@ class MaintenanceWorkerMetrics:
             "last_sweep_at": self.last_sweep_at,
             "last_sweep_duration_seconds": self.last_sweep_duration_seconds,
             "last_sweep_records_folded": self.last_sweep_records_folded,
+            "total_sweep_duration_seconds": self.total_sweep_duration_seconds,
+            "avg_sweep_duration_seconds": self.avg_sweep_duration_seconds,
+            "min_sweep_duration_seconds": self.min_sweep_duration_seconds,
+            "max_sweep_duration_seconds": self.max_sweep_duration_seconds,
             "last_snapshot_at": self.last_snapshot_at,
             "last_error": self.last_error,
             "last_drift_result": self.last_drift_result,
@@ -3238,6 +3282,9 @@ class BanditMaintenanceWorker:
         self._last_sweep_at: str | None = None
         self._last_sweep_duration_seconds: float | None = None
         self._last_sweep_records_folded: int = 0
+        self._total_sweep_duration_seconds: float = 0.0
+        self._min_sweep_duration_seconds: float | None = None
+        self._max_sweep_duration_seconds: float | None = None
         self._last_snapshot_at: str | None = None
         self._last_error: str | None = None
         self._last_drift_result: dict[str, Any] | None = None
@@ -3430,6 +3477,17 @@ class BanditMaintenanceWorker:
                 now_iso = datetime.now(UTC).isoformat()
                 self._last_sweep_at = now_iso
                 self._last_sweep_duration_seconds = round(duration, 4)
+                self._total_sweep_duration_seconds += duration
+                if (
+                    self._min_sweep_duration_seconds is None
+                    or duration < self._min_sweep_duration_seconds
+                ):
+                    self._min_sweep_duration_seconds = duration
+                if (
+                    self._max_sweep_duration_seconds is None
+                    or duration > self._max_sweep_duration_seconds
+                ):
+                    self._max_sweep_duration_seconds = duration
                 self._last_sweep_records_folded = folded_count
                 self._records_folded_count += folded_count
                 self._sweeps_count += 1
@@ -3521,6 +3579,21 @@ class BanditMaintenanceWorker:
     def get_metrics(self) -> MaintenanceWorkerMetrics:
         """Return a snapshot of current maintenance worker metrics."""
         with self._lock:
+            avg_dur = (
+                round(self._total_sweep_duration_seconds / self._sweeps_count, 4)
+                if self._sweeps_count > 0
+                else None
+            )
+            min_dur = (
+                round(self._min_sweep_duration_seconds, 4)
+                if self._min_sweep_duration_seconds is not None
+                else None
+            )
+            max_dur = (
+                round(self._max_sweep_duration_seconds, 4)
+                if self._max_sweep_duration_seconds is not None
+                else None
+            )
             return MaintenanceWorkerMetrics(
                 is_running=self.is_running,
                 is_closed=self._closed,
@@ -3541,6 +3614,12 @@ class BanditMaintenanceWorker:
                 last_sweep_at=self._last_sweep_at,
                 last_sweep_duration_seconds=self._last_sweep_duration_seconds,
                 last_sweep_records_folded=self._last_sweep_records_folded,
+                total_sweep_duration_seconds=round(
+                    self._total_sweep_duration_seconds, 4
+                ),
+                avg_sweep_duration_seconds=avg_dur,
+                min_sweep_duration_seconds=min_dur,
+                max_sweep_duration_seconds=max_dur,
                 last_snapshot_at=self._last_snapshot_at,
                 last_error=self._last_error,
                 last_drift_result=self._last_drift_result,

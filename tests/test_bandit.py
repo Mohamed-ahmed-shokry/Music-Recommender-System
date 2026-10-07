@@ -3085,4 +3085,103 @@ class TestBanditMaintenanceWorker:
         assert res["rolled_back"] is True
         assert len(policy_updates) == 1
 
+    def test_worker_sweep_duration_telemetry(self, tmp_path: Path) -> None:
+        state_f, journal_f, snap_d = self._create_state_and_journal(tmp_path)
+        records_1 = [{"context": [1.0, 0.0, 0.5], "arm": "popular", "reward": 0.8}]
+        append_bandit_feedback_batch(records_1, journal_f)
+
+        worker = BanditMaintenanceWorker(
+            state_path=state_f,
+            journal_path=journal_f,
+            snapshot_dir=snap_d,
+            min_pending_records=1,
+            auto_start=False,
+        )
+        initial_metrics = worker.get_metrics()
+        assert initial_metrics.sweeps_count == 0
+        assert initial_metrics.total_sweep_duration_seconds == 0.0
+        assert initial_metrics.avg_sweep_duration_seconds is None
+        assert initial_metrics.min_sweep_duration_seconds is None
+        assert initial_metrics.max_sweep_duration_seconds is None
+
+        worker.trigger_sweep()
+        m1 = worker.get_metrics()
+        assert m1.sweeps_count == 1
+        assert m1.total_sweep_duration_seconds > 0.0
+        assert m1.avg_sweep_duration_seconds is not None
+        assert m1.min_sweep_duration_seconds == m1.last_sweep_duration_seconds
+        assert m1.max_sweep_duration_seconds == m1.last_sweep_duration_seconds
+
+        records_2 = [{"context": [0.0, 1.0, 0.5], "arm": "balanced", "reward": 0.6}]
+        append_bandit_feedback_batch(records_2, journal_f)
+        worker.trigger_sweep()
+
+        m2 = worker.get_metrics()
+        assert m2.sweeps_count == 2
+        assert m2.min_sweep_duration_seconds is not None
+        assert m2.max_sweep_duration_seconds is not None
+        assert m2.avg_sweep_duration_seconds is not None
+        assert m2.min_sweep_duration_seconds <= m2.avg_sweep_duration_seconds
+        assert m2.avg_sweep_duration_seconds <= m2.max_sweep_duration_seconds
+        m2_dict = m2.to_dict()
+        assert "avg_sweep_duration_seconds" in m2_dict
+        assert "min_sweep_duration_seconds" in m2_dict
+        assert "max_sweep_duration_seconds" in m2_dict
+        assert "total_sweep_duration_seconds" in m2_dict
+
+
+class TestStreamingQueueObservabilityMetrics:
+    def test_streaming_queue_metrics_and_utilization(self, tmp_path: Path) -> None:
+        journal_p = tmp_path / "feedback.json"
+        queue = StreamingFeedbackQueue(
+            journal_path=journal_p,
+            max_queue_size=10,
+            batch_size=5,
+            auto_start=False,
+        )
+        m = queue.get_metrics()
+        assert m.max_queue_size == 10
+        assert m.queue_depth == 0
+        assert m.utilization_pct == 0.0
+        assert m.backpressure == "drop_oldest"
+        assert m.total_flushed_batches == 0
+
+        queue.enqueue({"context": [1.0, 0.0, 0.0], "arm": "popular", "reward": 1.0})
+        queue.enqueue({"context": [0.0, 1.0, 0.0], "arm": "balanced", "reward": 0.5})
+        m_after = queue.get_metrics()
+        assert m_after.queue_depth == 2
+        assert m_after.utilization_pct == 20.0
+
+        queue.flush()
+        m_flushed = queue.get_metrics()
+        assert m_flushed.queue_depth == 0
+        assert m_flushed.utilization_pct == 0.0
+        assert m_flushed.total_flushed_batches == 1
+        d = m_flushed.to_dict()
+        assert d["max_queue_size"] == 10
+        assert d["utilization_pct"] == 0.0
+        assert d["backpressure"] == "drop_oldest"
+        assert d["total_flushed_batches"] == 1
+
+
+class TestOPEConfidenceIntervals:
+    def test_compute_ope_includes_confidence_intervals(self) -> None:
+        records = [
+            {"context": [1.0, 0.5], "arm": "popular", "reward": 0.8},
+            {"context": [0.5, 1.0], "arm": "balanced", "reward": 0.4},
+            {"context": [1.2, 0.2], "arm": "popular", "reward": 1.0},
+            {"context": [0.1, 0.9], "arm": "long_tail", "reward": 0.2},
+        ]
+        bandit = LinUCBContextualBandit(("popular", "balanced", "long_tail"), 2)
+        ope = compute_off_policy_evaluation(records, bandit)
+
+        for estimator in ("ips", "direct_method", "doubly_robust"):
+            est_metrics = ope["metrics"][estimator]
+            assert "ci_95" in est_metrics
+            ci = est_metrics["ci_95"]
+            assert isinstance(ci, list)
+            assert len(ci) == 2
+            assert ci[0] <= ci[1]
+
+
 
