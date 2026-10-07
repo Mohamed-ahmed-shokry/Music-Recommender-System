@@ -3040,3 +3040,108 @@ def test_bandit_sweep_cli_with_guardrails_and_auto_rollback(tmp_path: Path) -> N
     assert loaded["arms"]["popular"]["selections"] == 0
 
 
+def test_bandit_status_json_output(tmp_path: Path) -> None:
+    from music_recommender.bandit import (
+        LinUCBContextualBandit,
+        snapshot_bandit_state,
+        write_bandit_state,
+    )
+
+    runner = CliRunner()
+    bandit = LinUCBContextualBandit(
+        ["popular", "balanced", "long_tail"], context_dim=3
+    )
+    state = snapshot_bandit_state(bandit)
+    state_file = write_bandit_state(state, tmp_path, state_name="status_state")
+
+    res = runner.invoke(
+        cli.app,
+        [
+            "bandit-status",
+            "--state-path",
+            str(state_file),
+            "--journal-path",
+            str(tmp_path / "nonexistent_feedback.json"),
+            "--json",
+        ],
+    )
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert data["available"] is True
+    assert "journal" in data
+    assert "arms" in data["state"]
+
+
+def test_bandit_observability_cli(tmp_path: Path) -> None:
+    from music_recommender.bandit import (
+        LinUCBContextualBandit,
+        append_bandit_feedback_batch,
+        save_bandit_snapshot,
+        snapshot_bandit_state,
+        tag_champion_snapshot,
+        write_bandit_state,
+    )
+
+    runner = CliRunner()
+    bandit = LinUCBContextualBandit(
+        ["popular", "balanced", "long_tail"], context_dim=3
+    )
+    state = snapshot_bandit_state(bandit)
+    state_file = write_bandit_state(state, tmp_path, state_name="obs_state")
+    sn_dir = tmp_path / "snapshots"
+    champ = save_bandit_snapshot(state, snapshot_dir=sn_dir, label="prod_v1")
+    tag_champion_snapshot(champ, snapshot_dir=sn_dir)
+
+    journal = tmp_path / "feedback.json"
+    records = [
+        {"arm": "popular", "context": [1.0, 0.5, 0.2], "reward": 0.8},
+        {"arm": "balanced", "context": [0.2, 1.0, 0.5], "reward": 0.4},
+    ]
+    append_bandit_feedback_batch(records, journal)
+
+    # 1. Text output
+    res_text = runner.invoke(
+        cli.app,
+        [
+            "bandit-observability",
+            "--state-path",
+            str(state_file),
+            "--journal-path",
+            str(journal),
+            "--snapshot-dir",
+            str(sn_dir),
+        ],
+    )
+    assert res_text.exit_code == 0
+    assert "Bandit Observability Diagnostics:" in res_text.output
+    assert "State: available" in res_text.output
+    assert "Health: healthy" in res_text.output
+    assert "Champion: " in res_text.output
+
+    # 2. JSON output with OPE
+    res_json = runner.invoke(
+        cli.app,
+        [
+            "bandit-observability",
+            "--state-path",
+            str(state_file),
+            "--journal-path",
+            str(journal),
+            "--snapshot-dir",
+            str(sn_dir),
+            "--include-ope",
+            "--json",
+        ],
+    )
+    assert res_json.exit_code == 0
+    data = json.loads(res_json.output)
+    assert data["health"]["status"] == "healthy"
+    assert data["state"]["available"] is True
+    assert data["journal"]["total_records"] == 2
+    assert data["snapshots"]["total_count"] == 1
+    assert data["snapshots"]["champion"] == champ.name
+    assert data["off_policy_evaluation"] is not None
+    assert "ci_95" in data["off_policy_evaluation"]["metrics"]["ips"]
+
+
+

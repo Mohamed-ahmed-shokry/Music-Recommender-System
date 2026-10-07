@@ -2655,19 +2655,24 @@ def bandit_update(
 @app.command()
 def bandit_status(
     state_path: str = typer.Option(
-        BANDIT_STATE_PATH,
+        str(BANDIT_STATE_PATH),
         "--state-path",
         help="Path to the persisted bandit state to inspect.",
     ),
     journal_path: str = typer.Option(
-        BANDIT_FEEDBACK_PATH,
+        str(BANDIT_FEEDBACK_PATH),
         "--journal-path",
         help="Feedback journal to account for in the summary.",
     ),
     policy_path: str = typer.Option(
-        COLD_START_POLICY_PATH,
+        str(COLD_START_POLICY_PATH),
         "--policy-path",
         help="Cold-start policy file to report as active.",
+    ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit JSON output for monitoring pipelines.",
     ),
 ) -> None:
     """Report the cold-start bandit lifecycle (state, policy, journal, folds)."""
@@ -2686,6 +2691,10 @@ def bandit_status(
     except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
+
+    if as_json:
+        typer.echo(json.dumps(summary, indent=2))
+        return
 
     typer.echo("Cold-start bandit lifecycle:")
     if summary["available"]:
@@ -2743,6 +2752,170 @@ def bandit_status(
             f"Journal: {summary['journal']['length']} record(s), "
             f"{summary['journal']['pending']} pending (no fold yet)"
         )
+
+
+@app.command()
+def bandit_observability(
+    state_path: str = typer.Option(
+        str(BANDIT_STATE_PATH),
+        "--state-path",
+        help="Path to the persisted bandit state to inspect.",
+    ),
+    journal_path: str = typer.Option(
+        str(BANDIT_FEEDBACK_PATH),
+        "--journal-path",
+        help="Path to the feedback journal.",
+    ),
+    snapshot_dir: str = typer.Option(
+        str(BANDIT_SNAPSHOTS_DIR),
+        "--snapshot-dir",
+        help="Directory where bandit snapshots are stored.",
+    ),
+    policy_path: str = typer.Option(
+        str(COLD_START_POLICY_PATH),
+        "--policy-path",
+        help="Cold-start policy file to evaluate.",
+    ),
+    include_ope: bool = typer.Option(
+        False,
+        "--include-ope",
+        help="Calculate and include off-policy evaluation on the feedback journal.",
+    ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit JSON output for monitoring systems.",
+    ),
+) -> None:
+    """Report observability telemetry across streaming, maintenance, and guardrails."""
+    st_path_obj = Path(state_path)
+    j_path_obj = Path(journal_path)
+    sn_dir_obj = Path(snapshot_dir)
+    pol_path_obj = Path(policy_path)
+
+    state = load_bandit_state(st_path_obj) if st_path_obj.exists() else None
+    journal = load_bandit_feedback(j_path_obj) if j_path_obj.exists() else []
+    snapshots = list_bandit_snapshots(sn_dir_obj) if sn_dir_obj.exists() else []
+    champ_path = get_champion_snapshot(sn_dir_obj) if sn_dir_obj.exists() else None
+    champ_name = champ_path.name if champ_path is not None else None
+
+    warnings: list[str] = []
+    if not state:
+        warnings.append("No active bandit state file found.")
+    pending = pending_feedback_count(state, journal) if state else len(journal)
+    if pending >= 50:
+        warnings.append(f"{pending} pending feedback records waiting to be folded.")
+
+    health_status = "healthy" if not warnings else "degraded"
+
+    ope_data: dict[str, Any] | None = None
+    if include_ope:
+        if not journal:
+            ope_data = {"available": False, "reason": "No feedback records found."}
+        else:
+            pol = (
+                load_cold_start_policy(pol_path_obj)
+                if pol_path_obj.exists()
+                else "popular"
+            )
+            try:
+                ope_data = compute_off_policy_evaluation(journal, pol)
+            except Exception as ope_err:
+                ope_data = {"available": False, "error": str(ope_err)}
+
+    st_cfg = state.get("config", {}) if state else {}
+    pol_model = str(st_cfg.get("policy_type", "linucb")) if state else None
+    alpha_val = float(st_cfg.get("alpha", 1.0)) if state else None
+    ctx_feat: list[str] = (
+        list(state.get("context_features") or []) if state else []
+    )
+    total_sel = (
+        sum(
+            int(arm.get("selections", 0))
+            for arm in state.get("arms", {}).values()
+            if isinstance(arm, dict)
+        )
+        if state
+        else 0
+    )
+
+    report: dict[str, Any] = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "health": {
+            "status": health_status,
+            "warnings": warnings,
+        },
+        "state": {
+            "available": state is not None,
+            "path": str(st_path_obj),
+            "policy_type": pol_model,
+            "alpha": alpha_val,
+            "context_features": ctx_feat if state else None,
+            "total_selections": total_sel,
+        },
+        "journal": {
+            "path": str(j_path_obj),
+            "total_records": len(journal),
+            "pending_records": pending,
+        },
+        "snapshots": {
+            "directory": str(sn_dir_obj),
+            "total_count": len(snapshots),
+            "champion": champ_name,
+            "latest": snapshots[0]["filename"] if snapshots else None,
+        },
+        "off_policy_evaluation": ope_data,
+    }
+
+    if as_json:
+        typer.echo(json.dumps(report, indent=2))
+        return
+
+    typer.echo("Bandit Observability Diagnostics:")
+    typer.echo("=================================")
+    if state:
+        typer.echo(f"State: available ({st_path_obj})")
+        typer.echo(f"  Policy model: {pol_model} (alpha={alpha_val})")
+        typer.echo(f"  Context features ({len(ctx_feat)}): {', '.join(ctx_feat)}")
+        typer.echo(f"  Total selections: {total_sel}")
+    else:
+        typer.echo("State: unavailable (run simulate-bandit or bandit-update)")
+
+    typer.echo(f"Journal: {j_path_obj}")
+    typer.echo(f"  Total records: {len(journal)}, Pending records: {pending}")
+
+    typer.echo(f"Snapshots: {sn_dir_obj} ({len(snapshots)} total)")
+    typer.echo(f"  Champion: {champ_name or 'none'}")
+    if snapshots:
+        typer.echo(f"  Latest: {snapshots[0]['filename']}")
+
+    typer.echo(f"Health: {health_status} ({len(warnings)} warning(s))")
+    for w in warnings:
+        typer.echo(f"  - Warning: {w}")
+
+    if include_ope and ope_data:
+        typer.echo("Off-Policy Evaluation (OPE):")
+        if ope_data.get("available") is False:
+            err_msg = ope_data.get("reason") or ope_data.get("error")
+            typer.echo(f"  OPE unavailable: {err_msg}")
+        else:
+            summ = ope_data.get("summary", {})
+            mets = ope_data.get("metrics", {})
+            typer.echo(f"  Target policy: {ope_data.get('target_policy')}")
+            typer.echo(f"  Records evaluated: {summ.get('records_evaluated')}")
+            typer.echo(f"  Effective sample size: {summ.get('effective_sample_size')}")
+            for m_key, m_val in mets.items():
+                if isinstance(m_val, dict):
+                    v = m_val.get("value")
+                    ci = m_val.get("ci_95")
+                    if ci and v is not None:
+                        typer.echo(
+                            f"    {m_key.upper():<14}: {v:.4f} "
+                            f"(95% CI: [{ci[0]:.4f}, {ci[1]:.4f}])"
+                        )
+                    elif v is not None:
+                        typer.echo(f"    {m_key.upper():<14}: {v:.4f}")
+
 
 
 @app.command()
