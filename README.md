@@ -894,6 +894,45 @@ Track evaluation reports land in `reports/` as JSON (`track_evaluation.json`
 by default), recording the run configuration and per-arm metrics. Specify
 `--report-dir` to customize the output directory.
 
+### Streaming & Bandit Observability, Health Diagnostics, and Operator Tooling
+
+Production deployments require real-time visibility into ingestion queue saturation, background sweep latencies, drift safety guardrails, and offline policy evaluation. The system provides granular telemetry instrumentation across the CLI, Python Service, and REST API:
+
+1. **Queue Capacity and Saturation Telemetry**:
+   `StreamingQueueMetrics` reports real-time queue depth (`buffered_events`), capacity limit (`max_queue_size`), buffer saturation percentage (`utilization_pct`), active backpressure mode (`backpressure`), and batch flush metrics (`total_flushed_batches`, `flush_errors`).
+
+2. **Maintenance Sweep Latency Profiling**:
+   `BanditMaintenanceWorker` instruments execution timings across all automated sweep cycles:
+   - `total_sweep_duration_seconds`: Cumulative wall-clock seconds spent folding feedback.
+   - `avg_sweep_duration_seconds`: Average latency per sweep cycle.
+   - `min_sweep_duration_seconds`: Fastest observed sweep cycle.
+   - `max_sweep_duration_seconds`: Peak sweep latency spike.
+
+3. **Off-Policy Evaluation (OPE) Confidence Intervals**:
+   `compute_off_policy_evaluation` computes 95% normal-distribution confidence intervals (`ci_95`) for `ips`, `direct_method`, and `doubly_robust` value estimators based on standard error:
+   $$[\hat{V} - 1.96 \cdot \text{SE}, \hat{V} + 1.96 \cdot \text{SE}]$$
+
+4. **Automated Health Evaluation**:
+   `service.streaming_health()` grades pipeline health as `healthy`, `degraded`, or `unhealthy` by evaluating:
+   - Daemon thread liveness for ingestion queue and maintenance worker.
+   - Unhandled flush errors or maintenance exceptions.
+   - Buffer saturation thresholds (warning at $\ge 80\%$, critical backpressure alert at $100\%$).
+   - Active drift guardrail safety breaches.
+
+5. **Operator CLI Tooling**:
+   - `bandit-observability`: Renders visual diagnostics tables or machine-readable JSON (`--json`), with optional on-demand OPE evaluation (`--include-ope`):
+     ```bash
+     # Human-readable operator diagnostics table
+     uv run python -m music_recommender.cli bandit-observability
+
+     # Machine-readable telemetry with off-policy confidence intervals
+     uv run python -m music_recommender.cli bandit-observability --include-ope --json
+     ```
+   - `bandit-status --json`: Emits structured JSON state and journal metrics for monitoring agents:
+     ```bash
+     uv run python -m music_recommender.cli bandit-status --json
+     ```
+
 ## API Reference
 
 Train before starting the API:
@@ -911,7 +950,8 @@ uv run uvicorn api.main:app --reload
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | `GET` | `/` | Basic API message |
-| `GET` | `/health` | Artifact and service health |
+| `GET` | `/health` | Artifact and service health (including `streaming_status`) |
+| `GET` | `/health/streaming` | Real-time streaming queue and maintenance health (200 OK or 503 Service Unavailable) |
 | `GET` | `/metadata` | Training config, dataset fingerprint, artifact metadata |
 | `GET` | `/evaluation/ablation-summary` | Persisted aggregated knob-importance summary |
 | `GET` | `/catalog/artists?query=pop&limit=25` | Search and page through artists and metadata |
@@ -924,6 +964,7 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/tracks/popular?top_k=10` | Popular track recommendations |
 | `GET` | `/tracks/catalog?query=hit&artist=Drake&limit=25` | Search and page through the track catalog |
 | `GET` | `/bandit/status` | Cold-start bandit lifecycle snapshot (state, policy, journal, context features, auto-sweep threshold, snapshots count) |
+| `GET` | `/bandit/observability` | Consolidated bandit telemetry (queue, sweep latency, snapshots, optional OPE `?include_ope=true`) |
 | `POST` | `/bandit/update` | Fold pending served feedback into the persisted bandit state (optional `{"context_features": [...]}` body cross-checked against the state) |
 | `GET` | `/bandit/snapshots` | List persisted bandit state snapshots sorted newest first |
 | `POST` | `/bandit/snapshots` | Create a timestamped bandit state snapshot (optional `{"label": "..."}` body) |
@@ -944,6 +985,8 @@ Example requests:
 
 ```bash
 curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/health/streaming
+curl "http://127.0.0.1:8000/bandit/observability?include_ope=true"
 curl http://127.0.0.1:8000/metadata
 curl http://127.0.0.1:8000/evaluation/ablation-summary
 curl "http://127.0.0.1:8000/catalog/artists?genre=pop&country=Canada&limit=25"
@@ -1699,7 +1742,9 @@ See [PLAN.md](PLAN.md) for the full phased plan.
   `bandit-drift --check-safety`, `bandit-sweep --enable-guardrails --auto-rollback`)
   and API endpoints (`POST /bandit/drift/safety`, `POST /bandit/rollback`,
   `GET/POST /bandit/snapshots/champion`). ✓ (0.29.0)
-- Next: Observability tooling, queue depth & sweep telemetry CLI/API instrumentation, and dashboard.
+- Observability Tooling, Queue Depth & Sweep Telemetry CLI/API Instrumentation:
+  Comprehensive telemetry metrics across streaming feedback ingestion (queue capacity, utilization, backpressure, batch flushes) and background maintenance sweeps (sweep duration min/max/avg profiling); off-policy evaluation 95% confidence intervals; streaming health status evaluation (healthy, degraded, unhealthy); operator CLI diagnostics (`bandit-observability`, `bandit-status --json`); and REST API telemetry endpoints (`GET /health/streaming`, `GET /bandit/observability`, and `streaming_status` in `GET /health`). ✓ (0.29.0)
+- Next: Streamlit dashboard visualization for streaming queue, worker telemetry, and OPE confidence intervals.
 - Deferred: two-tower neural candidate retrieval (PyTorch / ONNX runtime) until
   a real-scale catalog is available; the sample dataset cannot validate a
   neural retrieval model.

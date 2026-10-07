@@ -74,27 +74,27 @@ High-throughput production serving benefits from decoupling feedback journaling 
     - Task 6: Expose REST API endpoints (`POST /bandit/drift/safety`, `POST /bandit/rollback`, `POST /bandit/snapshots/champion`) in `api/main.py` with API tests. ✓
     - Task 7: Update `README.md` documentation and mark Phase 132 complete in `PLAN.md`. ✓
 - Phase 133 — Observability tooling & CLI/API instrumentation:
-  Metrics for queue depth, sweep timing, and streaming health endpoints.
+  Metrics for queue depth, sweep timing, and streaming health endpoints. ✓
   - Objective: Provide production-grade observability and telemetry instrumentation across streaming feedback ingestion, background maintenance daemon sweeps, drift safety guardrails, and off-policy evaluation (OPE). Expose real-time queue depth and saturation, granular sweep latency profiling (min, max, avg), automated streaming health checks (healthy, degraded, unhealthy), operator CLI tooling (bandit-observability), and REST API health and diagnostics endpoints (GET /health/streaming, GET /bandit/observability).
   - Acceptance Criteria:
-    - AC-1: Enhanced `StreamingQueueMetrics` tracks queue capacity (`max_queue_size`), saturation percentage (`utilization_pct`), backpressure policy, and batch flush count.
-    - AC-2: Enhanced `MaintenanceWorkerMetrics` tracks total sweep duration, minimum sweep duration, maximum sweep duration, and average sweep duration across all executed sweeps.
-    - AC-3: `compute_off_policy_evaluation` computes and includes 95% confidence intervals (`ci_95`) for IPS, Direct Method (DM), and Doubly Robust (DR) policy value estimators.
-    - AC-4: `RecommenderService.streaming_health()` assesses real-time health (`healthy`, `degraded`, `unhealthy`) across queue buffering, worker daemon liveness, error rates, and drift violations, with actionable diagnostic warnings.
-    - AC-5: `RecommenderService.bandit_observability()` aggregates streaming queue metrics, worker sweep timing statistics, guardrail telemetry, snapshot inventory, and optional OPE confidence intervals.
-    - AC-6: CLI command `bandit-observability` reports formatted visual diagnostics tables and JSON output (`--json`) for streaming queue, worker sweep timings, guardrails, and health warnings.
-    - AC-7: CLI command `bandit-status` supports a `--json` export option for monitoring pipelines.
-    - AC-8: REST API endpoint `GET /health/streaming` returns streaming and maintenance health (returning HTTP 200 for healthy/degraded, HTTP 503 for unhealthy); root `GET /health` reports high-level streaming status.
-    - AC-9: REST API endpoint `GET /bandit/observability` exposes end-to-end diagnostics metrics with optional OPE calculation (`?include_ope=true`).
-    - AC-10: Comprehensive test coverage for all metrics models, sweep timing profiling, health grading, CLI commands, and API endpoints without regressions.
-    - AC-11: Complete operator and user documentation in `README.md`.
+    - AC-1: Enhanced `StreamingQueueMetrics` tracks queue capacity (`max_queue_size`), saturation percentage (`utilization_pct`), backpressure policy, and batch flush count. ✓
+    - AC-2: Enhanced `MaintenanceWorkerMetrics` tracks total sweep duration, minimum sweep duration, maximum sweep duration, and average sweep duration across all executed sweeps. ✓
+    - AC-3: `compute_off_policy_evaluation` computes and includes 95% confidence intervals (`ci_95`) for IPS, Direct Method (DM), and Doubly Robust (DR) policy value estimators. ✓
+    - AC-4: `RecommenderService.streaming_health()` assesses real-time health (`healthy`, `degraded`, `unhealthy`) across queue buffering, worker daemon liveness, error rates, and drift violations, with actionable diagnostic warnings. ✓
+    - AC-5: `RecommenderService.bandit_observability()` aggregates streaming queue metrics, worker sweep timing statistics, guardrail telemetry, snapshot inventory, and optional OPE confidence intervals. ✓
+    - AC-6: CLI command `bandit-observability` reports formatted visual diagnostics tables and JSON output (`--json`) for streaming queue, worker sweep timings, guardrails, and health warnings. ✓
+    - AC-7: CLI command `bandit-status` supports a `--json` export option for monitoring pipelines. ✓
+    - AC-8: REST API endpoint `GET /health/streaming` returns streaming and maintenance health (returning HTTP 200 for healthy/degraded, HTTP 503 for unhealthy); root `GET /health` reports high-level streaming status. ✓
+    - AC-9: REST API endpoint `GET /bandit/observability` exposes end-to-end diagnostics metrics with optional OPE calculation (`?include_ope=true`). ✓
+    - AC-10: Comprehensive test coverage for all metrics models, sweep timing profiling, health grading, CLI commands, and API endpoints without regressions. ✓
+    - AC-11: Complete operator and user documentation in `README.md`. ✓
   - Implementation Tasks:
-    - Task 1: Update `PLAN.md` with detailed Phase 133 objective, acceptance criteria, and task breakdown.
-    - Task 2: Enhance metrics models (`StreamingQueueMetrics`, `MaintenanceWorkerMetrics`), sweep timing profiling in `BanditMaintenanceWorker`, and 95% confidence intervals in `compute_off_policy_evaluation` in `bandit.py` with unit tests.
-    - Task 3: Implement `streaming_health()` and `bandit_observability()` in `RecommenderService` in `service.py` with integration tests.
-    - Task 4: Implement `bandit-observability` CLI command and `--json` flag on `bandit-status` in `cli.py` with CLI tests.
-    - Task 5: Expose `GET /health/streaming` and `GET /bandit/observability` in `api/main.py`, updating `GET /health` with streaming status, with API tests.
-    - Task 6: Document observability tooling, health endpoints, and CLI commands in `README.md` and mark Phase 133 complete in `PLAN.md`.
+    - Task 1: Update `PLAN.md` with detailed Phase 133 objective, acceptance criteria, and task breakdown. ✓
+    - Task 2: Enhance metrics models (`StreamingQueueMetrics`, `MaintenanceWorkerMetrics`), sweep timing profiling in `BanditMaintenanceWorker`, and 95% confidence intervals in `compute_off_policy_evaluation` in `bandit.py` with unit tests. ✓
+    - Task 3: Implement `streaming_health()` and `bandit_observability()` in `RecommenderService` in `service.py` with integration tests. ✓
+    - Task 4: Implement `bandit-observability` CLI command and `--json` flag on `bandit-status` in `cli.py` with CLI tests. ✓
+    - Task 5: Expose `GET /health/streaming` and `GET /bandit/observability` in `api/main.py`, updating `GET /health` with streaming status, with API tests. ✓
+    - Task 6: Document observability tooling, health endpoints, and CLI commands in `README.md` and mark Phase 133 complete in `PLAN.md`. ✓
 - Phase 134 — Dashboard, testing, and 0.29.0 release.
 
 ## Previous milestone (0.28.0) — shipped
