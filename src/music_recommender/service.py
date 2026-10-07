@@ -7,6 +7,7 @@ import logging
 import os
 import threading
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -603,6 +604,179 @@ class RecommenderService:
         if self.feedback_queue is not None:
             self.feedback_queue.flush(timeout=timeout)
 
+    def streaming_health(self) -> dict[str, Any]:
+        """Assess real-time health across streaming queue and maintenance daemon."""
+        queue_enabled = self.feedback_queue is not None
+        maintenance_enabled = self.maintenance_worker is not None
+
+        if not queue_enabled and not maintenance_enabled:
+            return {
+                "status": "disabled",
+                "healthy": True,
+                "queue_enabled": False,
+                "maintenance_enabled": False,
+                "queue": None,
+                "maintenance": None,
+                "warnings": [],
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+
+        warnings: list[str] = []
+        is_unhealthy = False
+        is_degraded = False
+
+        q_dict: dict[str, Any] | None = None
+        if self.feedback_queue is not None:
+            q_metrics = self.feedback_queue.get_metrics()
+            q_dict = q_metrics.to_dict()
+            if not q_metrics.is_running or self.feedback_queue.is_closed:
+                warnings.append("Streaming feedback queue worker is not running.")
+                is_unhealthy = True
+            if q_metrics.flush_errors > 0:
+                warnings.append(
+                    f"Streaming feedback queue encountered "
+                    f"{q_metrics.flush_errors} flush error(s)."
+                )
+                is_unhealthy = True
+            if q_metrics.dropped_count > 0:
+                warnings.append(
+                    f"Streaming feedback queue dropped "
+                    f"{q_metrics.dropped_count} record(s) under backpressure."
+                )
+                is_degraded = True
+            if q_metrics.utilization_pct >= 80.0:
+                warnings.append(
+                    f"Streaming feedback queue saturation is high "
+                    f"({q_metrics.utilization_pct}%)."
+                )
+                is_degraded = True
+
+        m_dict: dict[str, Any] | None = None
+        if self.maintenance_worker is not None:
+            w_metrics = self.maintenance_worker.get_metrics()
+            m_dict = w_metrics.to_dict()
+            if not w_metrics.is_running or w_metrics.is_closed:
+                warnings.append("Bandit maintenance daemon is not running.")
+                is_unhealthy = True
+            if w_metrics.errors_count > 0:
+                warnings.append(
+                    f"Bandit maintenance worker encountered "
+                    f"{w_metrics.errors_count} error(s)."
+                )
+                is_unhealthy = True
+            if w_metrics.drift_violations_count > 0:
+                warnings.append(
+                    f"Bandit maintenance detected "
+                    f"{w_metrics.drift_violations_count} drift violation(s)."
+                )
+                is_degraded = True
+
+        if is_unhealthy:
+            status = "unhealthy"
+            healthy = False
+        elif is_degraded:
+            status = "degraded"
+            healthy = True
+        else:
+            status = "healthy"
+            healthy = True
+
+        return {
+            "status": status,
+            "healthy": healthy,
+            "queue_enabled": queue_enabled,
+            "maintenance_enabled": maintenance_enabled,
+            "queue": q_dict,
+            "maintenance": m_dict,
+            "warnings": warnings,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+
+    def bandit_observability(
+        self,
+        *,
+        include_ope: bool = False,
+        ope_policy: str | dict[str, float] | None = None,
+        feedback_journal_path: str | Path | None = None,
+        snapshot_dir: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Aggregate diagnostics and telemetry across the bandit subsystem."""
+        sn_dir = (
+            Path(snapshot_dir) if snapshot_dir is not None else BANDIT_SNAPSHOTS_DIR
+        )
+        snapshots = self.list_bandit_snapshots(snapshot_dir=sn_dir)
+        champion_snap = self.get_champion_snapshot(snapshot_dir=sn_dir)
+        health_summary = self.streaming_health()
+
+        q_dict: dict[str, Any] | None = None
+        if self.feedback_queue is not None:
+            q_dict = self.feedback_queue.get_metrics().to_dict()
+
+        m_dict: dict[str, Any] | None = None
+        sweep_timings: dict[str, Any] | None = None
+        if self.maintenance_worker is not None:
+            w_m = self.maintenance_worker.get_metrics()
+            m_dict = w_m.to_dict()
+            sweep_timings = {
+                "total_sweep_duration_seconds": w_m.total_sweep_duration_seconds,
+                "avg_sweep_duration_seconds": w_m.avg_sweep_duration_seconds,
+                "min_sweep_duration_seconds": w_m.min_sweep_duration_seconds,
+                "max_sweep_duration_seconds": w_m.max_sweep_duration_seconds,
+                "last_sweep_duration_seconds": w_m.last_sweep_duration_seconds,
+            }
+
+        guardrail_stats = {
+            "enabled": self.drift_guardrails_enabled,
+            "auto_rollback": self.auto_rollback_on_drift,
+            "thresholds": self.drift_thresholds.to_dict(),
+            "drift_evaluations_count": (
+                m_dict.get("drift_evaluations_count", 0) if m_dict else 0
+            ),
+            "drift_violations_count": (
+                m_dict.get("drift_violations_count", 0) if m_dict else 0
+            ),
+            "rollbacks_count": (
+                m_dict.get("rollbacks_count", 0) if m_dict else 0
+            ),
+            "last_drift_result": (
+                m_dict.get("last_drift_result") if m_dict else None
+            ),
+            "last_rollback_at": (
+                m_dict.get("last_rollback_at") if m_dict else None
+            ),
+            "last_rollback_reason": (
+                m_dict.get("last_rollback_reason") if m_dict else None
+            ),
+        }
+
+        ope_result: dict[str, Any] | None = None
+        if include_ope:
+            try:
+                ope_result = self.evaluate_bandit_off_policy(
+                    feedback_journal_path=feedback_journal_path,
+                    target_policy=ope_policy,
+                )
+            except Exception as ope_err:
+                ope_result = {
+                    "available": False,
+                    "error": str(ope_err),
+                }
+
+        return {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "health": health_summary,
+            "streaming_queue": q_dict,
+            "maintenance_worker": m_dict,
+            "sweep_timings": sweep_timings,
+            "guardrails": guardrail_stats,
+            "snapshots": {
+                "total_count": len(snapshots),
+                "champion": champion_snap,
+                "latest": snapshots[0]["filename"] if snapshots else None,
+            },
+            "off_policy_evaluation": ope_result,
+        }
+
     def close(self, timeout: float | None = 5.0) -> None:
         """Release background resources (maintenance worker and feedback queue)."""
         if self.maintenance_worker is not None:
@@ -1064,6 +1238,7 @@ class RecommenderService:
             "track_ltr_available": (
                 getattr(self.artifact, "track_ltr_model", None) is not None
             ),
+            "streaming_status": self.streaming_health()["status"],
         }
 
     def recommend_user(

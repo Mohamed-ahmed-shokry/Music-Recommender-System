@@ -2068,4 +2068,111 @@ def test_service_sweep_bandit_feedback_drift_guardrail(tmp_path: Path) -> None:
     service.close()
 
 
+def test_service_streaming_health_disabled(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    health = service.streaming_health()
+    assert health["status"] == "disabled"
+    assert health["healthy"] is True
+    assert health["queue_enabled"] is False
+    assert health["maintenance_enabled"] is False
+    assert len(health["warnings"]) == 0
+
+    base_health = service.health()
+    assert base_health["streaming_status"] == "disabled"
+    service.close()
+
+
+def test_service_streaming_health_healthy(tmp_path: Path) -> None:
+    journal_p = tmp_path / "feedback.json"
+    queue = StreamingFeedbackQueue(journal_path=journal_p, auto_start=False)
+    service = create_service(tmp_path, feedback_queue=queue)
+
+    health = service.streaming_health()
+    assert health["queue_enabled"] is True
+    assert health["maintenance_enabled"] is False
+    # Since queue wasn't started, it reports unhealthy for stopped worker
+    assert health["status"] == "unhealthy"
+    assert any("not running" in w for w in health["warnings"])
+
+    queue.start()
+    health_running = service.streaming_health()
+    assert health_running["status"] == "healthy"
+    assert health_running["healthy"] is True
+    assert health_running["queue"]["max_queue_size"] == queue.max_queue_size
+    assert health_running["queue"]["utilization_pct"] == 0.0
+
+    service.close()
+
+
+def test_service_bandit_observability_report(tmp_path: Path) -> None:
+    st_p = tmp_path / "bandit_state.json"
+    j_p = tmp_path / "bandit_feedback.json"
+    sn_d = tmp_path / "snapshots"
+    sn_d.mkdir(parents=True, exist_ok=True)
+
+    bandit = LinUCBContextualBandit(
+        arms=DEFAULT_COLD_START_ARMS, context_dim=3, alpha=1.0
+    )
+    st_p.write_text(json.dumps(snapshot_bandit_state(bandit)) + "\n", encoding="utf-8")
+
+    queue = StreamingFeedbackQueue(journal_path=j_p, max_queue_size=100)
+    worker = BanditMaintenanceWorker(
+        state_path=st_p,
+        journal_path=j_p,
+        snapshot_dir=sn_d,
+        min_pending_records=1,
+        auto_start=False,
+    )
+
+    service = create_service(
+        tmp_path,
+        feedback_queue=queue,
+        maintenance_worker=worker,
+    )
+    worker.start()
+
+    # Enqueue and flush feedback
+    records = [
+        {"context": [1.0, 0.0, 0.0], "arm": "popular", "reward": 0.9},
+        {"context": [0.0, 1.0, 0.0], "arm": "balanced", "reward": 0.4},
+        {"context": [0.0, 0.0, 1.0], "arm": "long_tail", "reward": 0.2},
+    ]
+    queue.enqueue_batch(records)
+    queue.flush()
+
+    # Trigger worker sweep
+    worker.trigger_sweep()
+
+    # Create champion snapshot
+    snap_p = service.create_bandit_snapshot(
+        label="v1", state_path=st_p, snapshot_dir=sn_d
+    )
+    service.tag_champion_snapshot(snap_p, snapshot_dir=sn_d)
+
+    obs = service.bandit_observability(
+        include_ope=True,
+        feedback_journal_path=j_p,
+        snapshot_dir=sn_d,
+    )
+
+    assert "health" in obs
+    assert obs["health"]["status"] == "healthy"
+    assert obs["streaming_queue"]["total_flushed_batches"] >= 1
+    assert obs["maintenance_worker"]["sweeps_count"] == 1
+    assert obs["sweep_timings"]["total_sweep_duration_seconds"] > 0.0
+    assert obs["sweep_timings"]["avg_sweep_duration_seconds"] is not None
+    assert obs["guardrails"]["enabled"] is False
+    assert obs["snapshots"]["total_count"] == 1
+    assert obs["snapshots"]["champion"] is not None
+
+    ope = obs["off_policy_evaluation"]
+    assert ope is not None
+    assert "metrics" in ope
+    assert "ci_95" in ope["metrics"]["ips"]
+    assert "ci_95" in ope["metrics"]["doubly_robust"]
+
+    service.close()
+
+
+
 
