@@ -24,7 +24,78 @@ class FakeService:
         self.closed = True
 
     def health(self) -> dict[str, object]:
-        return {"status": "ok", "artifact_version": "4.0"}
+        return {
+            "status": "ok",
+            "artifact_version": "4.0",
+            "streaming_status": "healthy",
+        }
+
+    def streaming_health(self) -> dict[str, object]:
+        return {
+            "status": "healthy",
+            "reasons": [],
+            "queue": {
+                "running": True,
+                "buffered_events": 0,
+                "max_queue_size": 1000,
+                "utilization_pct": 0.0,
+                "backpressure": False,
+                "total_enqueued": 10,
+                "total_flushed_batches": 2,
+                "total_flushed_records": 10,
+                "flush_errors": 0,
+            },
+            "maintenance": {
+                "running": True,
+                "total_sweeps": 1,
+                "total_records_swept": 10,
+                "failed_sweeps": 0,
+                "last_sweep_at": "2026-10-06T00:00:00Z",
+                "avg_sweep_duration_seconds": 0.02,
+                "min_sweep_duration_seconds": 0.02,
+                "max_sweep_duration_seconds": 0.02,
+            },
+            "drift": {
+                "is_safe": True,
+                "violations": [],
+                "warnings": [],
+            },
+        }
+
+    def bandit_observability(
+        self, *, include_ope: bool = False
+    ) -> dict[str, object]:
+        obs: dict[str, object] = {
+            "timestamp": "2026-10-06T00:00:00Z",
+            "health": self.streaming_health(),
+            "state": {
+                "available": True,
+                "policy_type": "linucb",
+                "alpha": 0.5,
+                "total_selections": 10,
+            },
+            "journal": {
+                "path": "reports/bandit_feedback.json",
+                "total_records": 10,
+                "pending_records": 0,
+            },
+            "snapshots": {
+                "total_count": 1,
+                "champion": "bandit_state_champ.json",
+                "latest": "bandit_state_champ.json",
+            },
+            "off_policy_evaluation": None,
+        }
+        if include_ope:
+            obs["off_policy_evaluation"] = {
+                "available": True,
+                "target_policy": "popular",
+                "summary": {"records_evaluated": 10, "effective_sample_size": 8.5},
+                "metrics": {
+                    "ips": {"value": 0.6, "ci_95": [0.5, 0.7]},
+                },
+            }
+        return obs
 
     def metadata(self) -> dict[str, object]:
         return {"version": "4.0", "hybrid_config": {"default_content_weight": 0.25}}
@@ -2122,6 +2193,140 @@ def test_bandit_rollback_route_not_found() -> None:
         res = client.post("/bandit/rollback")
         assert res.status_code == 404
         assert "Snapshot not found for rollback" in res.json()["detail"]
+
+
+def test_health_route_includes_streaming_status() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/health")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "ok"
+        assert body["streaming_status"] == "healthy"
+
+
+def test_health_streaming_route_healthy() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/health/streaming")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "healthy"
+        assert body["reasons"] == []
+        assert body["queue"]["running"] is True
+        assert body["maintenance"]["total_sweeps"] == 1
+
+
+def test_health_streaming_route_degraded() -> None:
+    class DegradedService(FakeService):
+        def streaming_health(self) -> dict[str, object]:
+            return {
+                "status": "degraded",
+                "reasons": ["Queue saturation high: 85.0%"],
+                "queue": {"running": True, "utilization_pct": 85.0},
+                "maintenance": {"running": True},
+                "drift": {"is_safe": True},
+            }
+
+    with TestClient(api_main.app) as client:
+        api_main.service = DegradedService()
+        api_main.service_load_error = None
+
+        response = client.get("/health/streaming")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "degraded"
+        assert len(body["reasons"]) == 1
+
+
+def test_health_streaming_route_unhealthy_returns_503() -> None:
+    class UnhealthyService(FakeService):
+        def streaming_health(self) -> dict[str, object]:
+            return {
+                "status": "unhealthy",
+                "reasons": ["Queue backpressure saturation (100.0%)"],
+                "queue": {"running": False, "backpressure": True},
+                "maintenance": {"running": False},
+                "drift": {"is_safe": False},
+            }
+
+    with TestClient(api_main.app) as client:
+        api_main.service = UnhealthyService()
+        api_main.service_load_error = None
+
+        response = client.get("/health/streaming")
+        assert response.status_code == 503
+        body = response.json()
+        assert body["status"] == "unhealthy"
+        assert "Queue backpressure saturation" in body["reasons"][0]
+
+
+def test_health_streaming_route_service_unavailable() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = None
+        api_main.service_load_error = "Model artifacts not found."
+
+        response = client.get("/health/streaming")
+        assert response.status_code == 503
+        assert "Model artifacts not found" in response.json()["detail"]
+
+
+def test_bandit_observability_route() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/bandit/observability")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["health"]["status"] == "healthy"
+        assert body["state"]["available"] is True
+        assert body["journal"]["total_records"] == 10
+        assert body["snapshots"]["total_count"] == 1
+        assert body["off_policy_evaluation"] is None
+
+
+def test_bandit_observability_route_include_ope() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/bandit/observability?include_ope=true")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["off_policy_evaluation"] is not None
+        assert body["off_policy_evaluation"]["available"] is True
+        assert "ci_95" in body["off_policy_evaluation"]["metrics"]["ips"]
+
+
+def test_bandit_observability_route_service_unavailable() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = None
+        api_main.service_load_error = "Model artifacts not found."
+
+        response = client.get("/bandit/observability")
+        assert response.status_code == 503
+
+
+def test_bandit_observability_route_not_found() -> None:
+    class MissingStateService(FakeService):
+        def bandit_observability(
+            self, *, include_ope: bool = False
+        ) -> dict[str, object]:
+            raise FileNotFoundError("State file not found")
+
+    with TestClient(api_main.app) as client:
+        api_main.service = MissingStateService()
+        api_main.service_load_error = None
+
+        response = client.get("/bandit/observability")
+        assert response.status_code == 404
+        assert "State file not found" in response.json()["detail"]
+
 
 
 

@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -195,6 +195,15 @@ def root() -> dict[str, str]:
 def health() -> dict[str, object]:
     """Return service health and artifact availability."""
     return get_service().health()
+
+
+@app.get("/health/streaming")
+def health_streaming(response: Response) -> dict[str, object]:
+    """Return streaming feedback ingestion and maintenance health."""
+    health_data = get_service().streaming_health()
+    if health_data.get("status") == "unhealthy":
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return health_data
 
 
 @app.get("/metadata")
@@ -768,6 +777,25 @@ def bandit_rollback(
         )
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/bandit/observability")
+def bandit_observability(
+    include_ope: bool = Query(
+        default=False,
+        description="Whether to run and attach off-policy evaluation.",
+    ),
+) -> dict[str, object]:
+    """Return consolidated bandit observability diagnostics and telemetry."""
+    try:
+        return get_service().bandit_observability(include_ope=include_ope)
+    except FileNotFoundError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Resource not found: {error}",
+        ) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
