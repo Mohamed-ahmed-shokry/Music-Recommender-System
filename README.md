@@ -1046,7 +1046,7 @@ Open the dashboard at:
 http://127.0.0.1:8501
 ```
 
-The dashboard provides seven workflows:
+The dashboard provides eight workflows:
 
 - personalized hybrid recommendations for known listeners (with optional LTR re-ranking);
 - cold-start recommendations from favorite artists, genres, and moods;
@@ -1054,7 +1054,8 @@ The dashboard provides seven workflows:
 - ALS, metadata, and hybrid artist similarity;
 - track recommendations, audio-feature track similarity, and searchable track catalog table;
 - responsive catalog search over artist metadata and popularity statistics;
-- aggregated ablation-importance summary for ranking knob analysis.
+- aggregated ablation-importance summary for ranking knob analysis;
+- cold-start bandit operations: streaming health status, queue metrics & flush controls, maintenance daemon telemetry & sweep profiling, champion snapshot tagging & rollback, automated drift guardrail verification, policy derivation with temperature annealing, counterfactual OPE with 95% confidence intervals, and comparative benchmarking.
 
 The trained `RecommenderService` is cached as a shared Streamlit resource, so
 widget reruns do not reload the model artifact. Catalog search uses the same
@@ -1744,7 +1745,9 @@ See [PLAN.md](PLAN.md) for the full phased plan.
   `GET/POST /bandit/snapshots/champion`). ✓ (0.29.0)
 - Observability Tooling, Queue Depth & Sweep Telemetry CLI/API Instrumentation:
   Comprehensive telemetry metrics across streaming feedback ingestion (queue capacity, utilization, backpressure, batch flushes) and background maintenance sweeps (sweep duration min/max/avg profiling); off-policy evaluation 95% confidence intervals; streaming health status evaluation (healthy, degraded, unhealthy); operator CLI diagnostics (`bandit-observability`, `bandit-status --json`); and REST API telemetry endpoints (`GET /health/streaming`, `GET /bandit/observability`, and `streaming_status` in `GET /health`). ✓ (0.29.0)
-- Next: Streamlit dashboard visualization for streaming queue, worker telemetry, and OPE confidence intervals.
+- Streamlit Dashboard Observability & 0.29.0 Release:
+  Operator dashboard on the Cold-Start Bandit tab exposing real-time streaming health banners, queue metrics & flush controls, maintenance daemon telemetry & sweep trigger, champion snapshot indicator & tagging, state rollback, automated drift safety verification & breach alerts, observability diagnostics expander, and OPE 95% confidence intervals. ✓ (0.29.0)
+- Next: Streaming metrics Prometheus / OpenTelemetry exporter and alerting integration.
 - Deferred: two-tower neural candidate retrieval (PyTorch / ONNX runtime) until
   a real-scale catalog is available; the sample dataset cannot validate a
   neural retrieval model.
