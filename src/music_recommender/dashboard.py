@@ -747,6 +747,22 @@ def _render_bandit_tab(service: RecommenderService) -> None:
         st.error(f"Bandit lifecycle unavailable: {error}")
         return
 
+    if hasattr(service, "streaming_health"):
+        try:
+            health_status = service.streaming_health()
+        except Exception:
+            health_status = None
+        if health_status:
+            h_stat = str(health_status.get("status", "unknown")).upper()
+            if h_stat == "HEALTHY":
+                st.success(f"Streaming & Maintenance Health: **{h_stat}**")
+            elif h_stat == "DEGRADED":
+                st.warning(f"Streaming & Maintenance Health: **{h_stat}**")
+            elif h_stat == "UNHEALTHY":
+                st.error(f"Streaming & Maintenance Health: **{h_stat}**")
+            for warning_msg in health_status.get("warnings", []):
+                st.warning(f"⚠️ {warning_msg}")
+
     active_features = _bandit_context_features(service, status)
     st.caption(
         f"Context features ({len(active_features)}): "
