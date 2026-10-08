@@ -900,6 +900,57 @@ def _render_bandit_tab(service: RecommenderService) -> None:
             else:
                 st.info("Service does not support flush_feedback.")
 
+    worker_metrics = status.get("maintenance_worker")
+    if worker_metrics:
+        st.markdown("##### Asynchronous Maintenance Daemon")
+        w_cols = st.columns(4)
+        daemon_status = "Running" if worker_metrics.get("is_running") else "Stopped"
+        w_cols[0].metric("Daemon Status", daemon_status)
+        w_cols[1].metric("Sweep Interval", f"{worker_metrics['interval_seconds']}s")
+        w_cols[2].metric("Cycles Executed", worker_metrics["cycles_count"])
+        folded_recs = worker_metrics.get("records_folded_count", 0)
+        w_cols[3].metric(
+            "Sweeps / Folded",
+            f"{worker_metrics['sweeps_count']} ({folded_recs} recs)",
+        )
+        last_sw = worker_metrics.get("last_sweep_duration_seconds")
+        avg_sw = worker_metrics.get("avg_sweep_duration_seconds")
+        min_sw = worker_metrics.get("min_sweep_duration_seconds")
+        max_sw = worker_metrics.get("max_sweep_duration_seconds")
+        if last_sw is not None or avg_sw is not None:
+            w_time_cols = st.columns(4)
+            w_time_cols[0].metric(
+                "Last Sweep",
+                f"{last_sw:.4f}s" if last_sw is not None else "-",
+            )
+            w_time_cols[1].metric(
+                "Avg Sweep",
+                f"{avg_sw:.4f}s" if avg_sw is not None else "-",
+            )
+            w_time_cols[2].metric(
+                "Min Sweep",
+                f"{min_sw:.4f}s" if min_sw is not None else "-",
+            )
+            w_time_cols[3].metric(
+                "Max Sweep",
+                f"{max_sw:.4f}s" if max_sw is not None else "-",
+            )
+        trigger_sweep_btn = st.button(
+            "Trigger Maintenance Sweep", key="btn_trigger_maintenance_sweep"
+        )
+        if trigger_sweep_btn:
+            if hasattr(service, "trigger_maintenance_sweep"):
+                try:
+                    sw_res = service.trigger_maintenance_sweep()
+                    recs_folded = sw_res.get("records_folded", 0)
+                    st.success(
+                        f"Maintenance sweep triggered: {recs_folded} record(s) folded."
+                    )
+                except Exception as error:
+                    st.error(f"Maintenance sweep failed: {error}")
+            else:
+                st.info("Service does not support trigger_maintenance_sweep.")
+
     st.divider()
     st.subheader("Bandit Snapshots & Drift Tracking")
     st.caption(
