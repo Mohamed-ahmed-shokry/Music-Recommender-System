@@ -857,6 +857,49 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                 f"Journal now {updated['journal']['pending']} pending."
             )
 
+    queue_metrics = status.get("streaming_queue")
+    if queue_metrics:
+        st.markdown("##### Streaming Feedback Ingestion Queue")
+        q_cols = st.columns(4)
+        q_cols[0].metric(
+            "Queue Depth",
+            f"{queue_metrics['queue_depth']} / {queue_metrics['max_queue_size']}",
+        )
+        q_cols[1].metric(
+            "Utilization",
+            f"{float(queue_metrics['utilization_pct']):.1f}%",
+        )
+        q_cols[2].metric(
+            "Backpressure",
+            str(queue_metrics.get("backpressure", "drop_oldest")),
+        )
+        flushed_batches = queue_metrics.get("total_flushed_batches", 0)
+        flushed_recs = queue_metrics.get("flushed_count", 0)
+        q_cols[3].metric(
+            "Flushed Batches",
+            f"{flushed_batches} ({flushed_recs} recs)",
+        )
+        if (
+            queue_metrics.get("dropped_count", 0) > 0
+            or queue_metrics.get("flush_errors", 0) > 0
+        ):
+            st.caption(
+                f"Dropped records: **{queue_metrics.get('dropped_count', 0)}** | "
+                f"Flush errors: **{queue_metrics.get('flush_errors', 0)}**"
+            )
+        flush_q_btn = st.button(
+            "Flush Feedback Queue", key="btn_flush_feedback_queue"
+        )
+        if flush_q_btn:
+            if hasattr(service, "flush_feedback"):
+                try:
+                    service.flush_feedback()
+                    st.success("Streaming feedback queue flushed successfully.")
+                except Exception as error:
+                    st.error(f"Queue flush failed: {error}")
+            else:
+                st.info("Service does not support flush_feedback.")
+
     st.divider()
     st.subheader("Bandit Snapshots & Drift Tracking")
     st.caption(
