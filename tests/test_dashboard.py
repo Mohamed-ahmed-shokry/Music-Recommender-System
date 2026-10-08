@@ -88,7 +88,7 @@ class FakeDashboardService:
         }
 
     def bandit_status(self) -> dict[str, object]:
-        return {
+        status: dict[str, object] = {
             "available": True,
             "auto_sweep_threshold": 50,
             "snapshots_count": len(self.snapshots),
@@ -113,6 +113,148 @@ class FakeDashboardService:
             "policy": {"popular": 0.7, "long_tail": 0.3},
             "journal": {"length": 3, "pending": 1},
             "last_fold": {"offset": 2, "at": "2026-01-01T00:00:00+00:00"},
+            "champion_snapshot": self.get_champion_snapshot(),
+            "drift_guardrails": {
+                "enabled": True,
+                "auto_rollback": False,
+                "thresholds": {
+                    "max_l2_drift": 0.5,
+                    "min_cosine_similarity": 0.7,
+                },
+            },
+        }
+        if getattr(self, "streaming_queue_enabled", False):
+            status["streaming_queue"] = {
+                "queue_depth": 5,
+                "max_queue_size": 1000,
+                "utilization_pct": 0.5,
+                "backpressure": "drop_oldest",
+                "flushed_count": 20,
+                "total_flushed_batches": 2,
+                "dropped_count": 0,
+                "flush_errors": 0,
+            }
+        if getattr(self, "maintenance_worker_enabled", False):
+            status["maintenance_worker"] = {
+                "is_running": True,
+                "interval_seconds": 60.0,
+                "cycles_count": 4,
+                "sweeps_count": 2,
+                "records_folded_count": 15,
+                "last_sweep_duration_seconds": 0.0125,
+                "avg_sweep_duration_seconds": 0.015,
+                "min_sweep_duration_seconds": 0.01,
+                "max_sweep_duration_seconds": 0.02,
+            }
+        return status
+
+    def flush_feedback(self, timeout: float | None = 5.0) -> None:
+        self.last_flush_called = True
+
+    def streaming_health(self) -> dict[str, Any]:
+        queue_enabled = getattr(self, "streaming_queue_enabled", False)
+        maint_enabled = getattr(self, "maintenance_worker_enabled", False)
+        status_val = "healthy" if (queue_enabled or maint_enabled) else "disabled"
+        return {
+            "status": status_val,
+            "healthy": True,
+            "queue_enabled": queue_enabled,
+            "maintenance_enabled": maint_enabled,
+            "warnings": [],
+            "timestamp": "2026-10-08T00:00:00Z",
+        }
+
+    def trigger_maintenance_sweep(self) -> dict[str, Any]:
+        self.last_trigger_sweep_called = True
+        return {"swept": True, "records_folded": 5}
+
+    def tag_champion_snapshot(
+        self, snapshot_path: str | Path, snapshot_dir: str | Path | None = None
+    ) -> dict[str, Any]:
+        self.champion_snapshot_filename = Path(snapshot_path).name
+        return {
+            "tagged": True,
+            "filename": self.champion_snapshot_filename,
+            "is_champion": True,
+            "label": "champion",
+            "total_selections": 10,
+        }
+
+    def get_champion_snapshot(
+        self, snapshot_dir: str | Path | None = None
+    ) -> dict[str, Any] | None:
+        if getattr(self, "champion_snapshot_filename", None):
+            return {
+                "filename": self.champion_snapshot_filename,
+                "label": "champion",
+                "is_champion": True,
+                "created_at": "2026-09-27T00:00:00Z",
+                "total_selections": 10,
+            }
+        return None
+
+    def rollback_bandit_state(
+        self,
+        snapshot_path: str | Path | None = None,
+        target_state_path: str | Path | None = None,
+        snapshot_dir: str | Path | None = None,
+        *,
+        update_active_policy: bool = True,
+    ) -> dict[str, Any]:
+        self.last_rollback_called = True
+        self.last_rollback_target = str(snapshot_path) if snapshot_path else "latest"
+        return {
+            "rolled_back": True,
+            "source_snapshot": self.last_rollback_target,
+            "policy_updated": True,
+            "policy": {"popular": 0.8, "long_tail": 0.2},
+        }
+
+    def evaluate_bandit_drift_safety(
+        self,
+        reference_path: str | Path | None = None,
+        state_path: str | Path | None = None,
+        snapshot_dir: str | Path | None = None,
+        thresholds: Any = None,
+    ) -> dict[str, Any]:
+        return {
+            "is_safe": True,
+            "violations": [],
+            "warnings": [],
+            "reference_snapshot": str(reference_path or "ref.json"),
+            "metrics": {"max_l2_drift": 0.05, "min_cosine_similarity": 0.99},
+            "thresholds": {"max_l2_drift": 0.5, "min_cosine_similarity": 0.7},
+        }
+
+    def bandit_observability(
+        self,
+        *,
+        include_ope: bool = False,
+        ope_policy: Any = None,
+        feedback_journal_path: Any = None,
+        snapshot_dir: Any = None,
+    ) -> dict[str, Any]:
+        return {
+            "timestamp": "2026-10-08T00:00:00Z",
+            "health": self.streaming_health(),
+            "streaming_queue": self.bandit_status().get("streaming_queue"),
+            "maintenance_worker": self.bandit_status().get("maintenance_worker"),
+            "sweep_timings": {
+                "total_sweep_duration_seconds": 0.03,
+                "avg_sweep_duration_seconds": 0.015,
+                "min_sweep_duration_seconds": 0.01,
+                "max_sweep_duration_seconds": 0.02,
+                "last_sweep_duration_seconds": 0.0125,
+            },
+            "guardrails": {
+                "enabled": True,
+                "auto_rollback": False,
+                "thresholds": {"max_l2_drift": 0.5},
+            },
+            "snapshots": {"total_count": len(self.snapshots), "champion": None},
+            "off_policy_evaluation": (
+                self.evaluate_bandit_off_policy() if include_ope else None
+            ),
         }
 
     def list_bandit_snapshots(self) -> list[dict[str, object]]:
@@ -188,10 +330,22 @@ class FakeDashboardService:
                 "logging_mean_reward": 0.62,
             },
             "metrics": {
-                "ips": {"value": 0.72, "standard_error": 0.05},
+                "ips": {
+                    "value": 0.72,
+                    "standard_error": 0.05,
+                    "ci_95": [0.62, 0.82],
+                },
                 "snips": {"value": 0.69},
-                "direct_method": {"value": 0.71, "standard_error": 0.04},
-                "doubly_robust": {"value": 0.73, "standard_error": 0.04},
+                "direct_method": {
+                    "value": 0.71,
+                    "standard_error": 0.04,
+                    "ci_95": [0.63, 0.79],
+                },
+                "doubly_robust": {
+                    "value": 0.73,
+                    "standard_error": 0.04,
+                    "ci_95": [0.65, 0.81],
+                },
             },
         }
 
@@ -1188,3 +1342,329 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
         "Ablation Summary",
         "Cold-Start Bandit",
     ]
+
+
+def test_dashboard_bandit_tab_streaming_queue_metrics_and_flush() -> None:
+    service = FakeDashboardService()
+    service.streaming_queue_enabled = True
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("Streaming Feedback Ingestion Queue" in m.value for m in app.markdown)
+    assert any(metric.label == "Queue Depth" for metric in app.metric)
+    assert any(metric.label == "Utilization" for metric in app.metric)
+    assert any(metric.label == "Backpressure" for metric in app.metric)
+    assert any(metric.label == "Flushed Batches" for metric in app.metric)
+
+    flush_button = next(
+        button for button in app.button if button.label == "Flush Feedback Queue"
+    )
+    flush_button.click().run()
+
+    assert not app.exception
+    assert service.last_flush_called is True
+    assert any(
+        "Streaming feedback queue flushed successfully." in s.value
+        for s in app.success
+    )
+
+
+def test_dashboard_bandit_tab_maintenance_daemon_and_sweep() -> None:
+    service = FakeDashboardService()
+    service.maintenance_worker_enabled = True
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(
+        "Asynchronous Maintenance Daemon" in m.value for m in app.markdown
+    )
+    assert any(metric.label == "Daemon Status" for metric in app.metric)
+    assert any(metric.label == "Sweep Interval" for metric in app.metric)
+    assert any(metric.label == "Cycles Executed" for metric in app.metric)
+    assert any(metric.label == "Sweeps / Folded" for metric in app.metric)
+    assert any(metric.label == "Last Sweep" for metric in app.metric)
+    assert any(metric.label == "Avg Sweep" for metric in app.metric)
+
+    trigger_button = next(
+        button
+        for button in app.button
+        if button.label == "Trigger Maintenance Sweep"
+    )
+    trigger_button.click().run()
+
+    assert not app.exception
+    assert service.last_trigger_sweep_called is True
+    assert any(
+        "Maintenance sweep triggered:" in s.value
+        and "record(s) folded." in s.value
+        for s in app.success
+    )
+
+
+def test_dashboard_bandit_tab_champion_tagging_and_rollback() -> None:
+    service = FakeDashboardService()
+    snap_filename = "bandit_state_20260927T000000Z_baseline.json"
+    service.snapshots.append(
+        {
+            "filename": snap_filename,
+            "path": f"reports/bandit_snapshots/{snap_filename}",
+            "timestamp": "20260927T000000Z",
+            "label": "baseline",
+            "size_bytes": 1024,
+        }
+    )
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(
+        "Champion Snapshot Management & State Rollback" in m.value
+        for m in app.markdown
+    )
+
+    tag_button = next(
+        button for button in app.button if button.label == "Tag as Champion"
+    )
+    tag_button.click().run()
+
+    assert not app.exception
+    assert service.champion_snapshot_filename == snap_filename
+    assert any(
+        f"Snapshot `{snap_filename}` tagged as champion." in s.value
+        for s in app.success
+    )
+
+    rollback_button = next(
+        button for button in app.button if button.label == "Roll Back State"
+    )
+    rollback_button.click().run()
+
+    assert not app.exception
+    assert service.last_rollback_called is True
+    assert any(
+        f"Rolled back active state to `{snap_filename}`." in s.value
+        for s in app.success
+    )
+
+
+def test_dashboard_bandit_tab_drift_safety_evaluation_pass_and_breach() -> None:
+    service = FakeDashboardService()
+    snap_filename = "bandit_state_20260927T000000Z_baseline.json"
+    service.snapshots.append(
+        {
+            "filename": snap_filename,
+            "path": f"reports/bandit_snapshots/{snap_filename}",
+            "timestamp": "20260927T000000Z",
+            "label": "baseline",
+            "size_bytes": 1024,
+        }
+    )
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    verify_button = next(
+        button for button in app.button if button.label == "Verify Drift Safety"
+    )
+    verify_button.click().run()
+
+    assert not app.exception
+    assert any(
+        "Drift Safety Check: **PASSED**" in s.value for s in app.success
+    )
+
+    class BreachSafetyService(FakeDashboardService):
+        def evaluate_bandit_drift_safety(
+            self,
+            reference_path: str | Path | None = None,
+            state_path: str | Path | None = None,
+            snapshot_dir: str | Path | None = None,
+            thresholds: Any = None,
+        ) -> dict[str, Any]:
+            return {
+                "is_safe": False,
+                "violations": ["L2 drift 0.85 exceeds threshold 0.50"],
+                "warnings": [],
+                "reference_snapshot": str(reference_path or "ref.json"),
+                "metrics": {"max_l2_drift": 0.85},
+                "thresholds": {"max_l2_drift": 0.50},
+            }
+
+    breach_service = BreachSafetyService()
+    breach_service.snapshots.append(
+        {
+            "filename": snap_filename,
+            "path": f"reports/bandit_snapshots/{snap_filename}",
+            "timestamp": "20260927T000000Z",
+            "label": "baseline",
+            "size_bytes": 1024,
+        }
+    )
+    breach_app = AppTest.from_function(
+        dashboard_script,
+        args=(breach_service,),
+        default_timeout=10,
+    ).run()
+
+    verify_button_breach = next(
+        button
+        for button in breach_app.button
+        if button.label == "Verify Drift Safety"
+    )
+    verify_button_breach.click().run()
+
+    assert not breach_app.exception
+    assert any(
+        "Drift Safety Check: **BREACH DETECTED**" in err.value
+        for err in breach_app.error
+    )
+    assert any(
+        "Violation: L2 drift 0.85 exceeds threshold 0.50" in w.value
+        for w in breach_app.warning
+    )
+
+
+def test_dashboard_bandit_tab_streaming_health_banners() -> None:
+    service_healthy = FakeDashboardService()
+    service_healthy.streaming_queue_enabled = True
+    app_healthy = AppTest.from_function(
+        dashboard_script,
+        args=(service_healthy,),
+        default_timeout=10,
+    ).run()
+
+    assert not app_healthy.exception
+    assert any(
+        "Streaming & Maintenance Health: **HEALTHY**" in s.value
+        for s in app_healthy.success
+    )
+
+    class DegradedHealthService(FakeDashboardService):
+        def streaming_health(self) -> dict[str, Any]:
+            return {
+                "status": "degraded",
+                "healthy": True,
+                "queue_enabled": True,
+                "maintenance_enabled": True,
+                "warnings": ["Queue utilization exceeds 80%."],
+                "timestamp": "2026-10-08T00:00:00Z",
+            }
+
+    app_degraded = AppTest.from_function(
+        dashboard_script,
+        args=(DegradedHealthService(),),
+        default_timeout=10,
+    ).run()
+
+    assert not app_degraded.exception
+    assert any(
+        "Streaming & Maintenance Health: **DEGRADED**" in w.value
+        for w in app_degraded.warning
+    )
+    assert any(
+        "Queue utilization exceeds 80%." in w.value
+        for w in app_degraded.warning
+    )
+
+    class UnhealthyHealthService(FakeDashboardService):
+        def streaming_health(self) -> dict[str, Any]:
+            return {
+                "status": "unhealthy",
+                "healthy": False,
+                "queue_enabled": True,
+                "maintenance_enabled": False,
+                "warnings": ["Worker daemon stopped unexpectedly."],
+                "timestamp": "2026-10-08T00:00:00Z",
+            }
+
+    app_unhealthy = AppTest.from_function(
+        dashboard_script,
+        args=(UnhealthyHealthService(),),
+        default_timeout=10,
+    ).run()
+
+    assert not app_unhealthy.exception
+    assert any(
+        "Streaming & Maintenance Health: **UNHEALTHY**" in e.value
+        for e in app_unhealthy.error
+    )
+    assert any(
+        "Worker daemon stopped unexpectedly." in w.value
+        for w in app_unhealthy.warning
+    )
+
+
+def test_dashboard_bandit_tab_observability_expander() -> None:
+    service = FakeDashboardService()
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    load_obs_btn = next(
+        button
+        for button in app.button
+        if button.label == "Load Observability Telemetry"
+    )
+    load_obs_btn.click().run()
+
+    assert not app.exception
+    assert any(
+        "Observability diagnostics loaded." in s.value for s in app.success
+    )
+    assert len(app.json) > 0
+
+
+def test_dashboard_bandit_tab_ope_confidence_intervals() -> None:
+    service = FakeDashboardService()
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    ope_button = next(
+        button
+        for button in app.button
+        if button.label == "Run Off-Policy Evaluation"
+    )
+    ope_button.click().run()
+
+    assert not app.exception
+    ope_df = next(
+        df.value
+        for df in app.dataframe
+        if "Estimator" in df.value.columns
+    )
+    assert "95% CI" in ope_df.columns
+    ips_row = ope_df[ope_df["Estimator"] == "Inverse Propensity (IPS)"].iloc[0]
+    assert ips_row["95% CI"] == "[0.6200, 0.8200]"
+    dm_row = ope_df[ope_df["Estimator"] == "Direct Method (DM)"].iloc[0]
+    assert dm_row["95% CI"] == "[0.6300, 0.7900]"
+    dr_row = ope_df[ope_df["Estimator"] == "Doubly Robust (DR)"].iloc[0]
+    assert dr_row["95% CI"] == "[0.6500, 0.8100]"
+    snips_row = ope_df[
+        ope_df["Estimator"] == "Self-Normalized (SnIPS)"
+    ].iloc[0]
+    assert snips_row["95% CI"] == "-"
+
+
+
+
+
+

@@ -95,7 +95,39 @@ High-throughput production serving benefits from decoupling feedback journaling 
     - Task 4: Implement `bandit-observability` CLI command and `--json` flag on `bandit-status` in `cli.py` with CLI tests. ✓
     - Task 5: Expose `GET /health/streaming` and `GET /bandit/observability` in `api/main.py`, updating `GET /health` with streaming status, with API tests. ✓
     - Task 6: Document observability tooling, health endpoints, and CLI commands in `README.md` and mark Phase 133 complete in `PLAN.md`. ✓
-- Phase 134 — Dashboard, testing, and 0.29.0 release.
+- Phase 134 — Dashboard, testing, and 0.29.0 release:
+  Streaming queue controls, maintenance telemetry, drift guardrails & rollback, observability cards, OPE confidence intervals, and 0.29.0 release.
+  - Objective: Complete the 0.29.0 release milestone by exposing real-time streaming feedback queue metrics, asynchronous maintenance daemon telemetry, drift safety guardrails, champion snapshot management, automated rollback, and streaming health diagnostics directly in the Streamlit operator dashboard (`Cold-Start Bandit` tab), displaying 95% confidence intervals in OPE results, backing all additions with unit and integration tests, verifying the full test suite and quality gates, bumping the project version to 0.29.0, updating the documentation (`CHANGELOG.md`, `README.md`, `PLAN.md`), and delivering the release.
+  - Acceptance Criteria:
+    - AC-1: Dashboard Cold-Start Bandit tab displays streaming feedback queue metrics (queue depth, capacity, utilization %, backpressure strategy, flush stats) and provides an interactive "Flush Feedback Queue" button that invokes `service.flush_feedback()`.
+    - AC-2: Dashboard displays maintenance daemon worker status, sweep cycle count, records folded, and sweep latency profiling (min, max, avg, total, last) with an interactive "Trigger Maintenance Sweep" button invoking `service.trigger_maintenance_sweep()`.
+    - AC-3: Dashboard displays champion snapshot metadata, provides a "Tag as Champion" button invoking `service.tag_champion_snapshot()`, and provides a state rollback control invoking `service.rollback_bandit_state()` with serving policy refresh.
+    - AC-4: Dashboard provides an interactive "Verify Drift Safety" button invoking `service.evaluate_bandit_drift_safety()`, displaying a pass/breach badge, threshold comparison metrics, and violation reasons.
+    - AC-5: Dashboard displays a real-time streaming health card (Healthy / Degraded / Unhealthy) from `service.streaming_health()` with active warning alerts when issues are detected.
+    - AC-6: Dashboard OPE results table renders 95% confidence intervals (`ci_95`) for IPS, Direct Method, and Doubly Robust estimators.
+    - AC-7: Comprehensive test suite in `tests/test_dashboard.py` validates all new UI components, buttons, error handling, and states with 0 regressions across the entire test suite.
+    - AC-8: Release packaging and documentation complete: `pyproject.toml` bumped to 0.29.0, `CHANGELOG.md` updated with comprehensive 0.29.0 entry, `README.md` updated, and `PLAN.md` updated.
+  - Implementation Tasks:
+    - Task 1: Update `PLAN.md` and create `docs/PROGRESS.md` with Phase 134 roadmap, acceptance criteria, and decision log.
+    - Task 2: Implement streaming queue metrics and interactive flush feedback controls in `src/music_recommender/dashboard.py`.
+    - Task 3: Implement maintenance daemon status, sweep latency profiling, and manual sweep trigger controls in `src/music_recommender/dashboard.py`.
+    - Task 4: Implement champion snapshot display, tagging, and state rollback controls in `src/music_recommender/dashboard.py`.
+    - Task 5: Implement drift safety guardrails verification and threshold diagnostics in `src/music_recommender/dashboard.py`.
+    - Task 6: Implement streaming health status card and observability diagnostics in `src/music_recommender/dashboard.py`.
+    - Task 7: Update OPE results table in `src/music_recommender/dashboard.py` to display 95% confidence intervals.
+    - Task 8: Update `FakeDashboardService` in `tests/test_dashboard.py` with mock support for all new service methods and properties.
+    - Task 9: Add tests for streaming queue controls and flush feedback in `tests/test_dashboard.py`.
+    - Task 10: Add tests for maintenance daemon telemetry and sweep trigger in `tests/test_dashboard.py`.
+    - Task 11: Add tests for champion tagging and state rollback in `tests/test_dashboard.py`.
+    - Task 12: Add tests for drift safety evaluation (pass and breach) in `tests/test_dashboard.py`.
+    - Task 13: Add tests for streaming health card and observability diagnostics in `tests/test_dashboard.py`.
+    - Task 14: Add tests for OPE 95% confidence intervals display in `tests/test_dashboard.py`.
+    - Task 15: Run full verification suite (lint, typecheck, tests, coverage) and ensure all pass.
+    - Task 16: Bump version to 0.29.0 in `pyproject.toml`.
+    - Task 17: Update `CHANGELOG.md` with 0.29.0 release notes covering Phases 130-134.
+    - Task 18: Update `README.md` with dashboard and streaming architecture documentation.
+    - Task 19: Finalize `PLAN.md` and `docs/PROGRESS.md`, marking Phase 134 and Milestone 0.29.0 complete.
+    - Task 20: Push phase branch and open draft pull request.
 
 ## Previous milestone (0.28.0) — shipped
 

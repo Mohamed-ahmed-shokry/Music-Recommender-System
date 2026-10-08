@@ -747,6 +747,22 @@ def _render_bandit_tab(service: RecommenderService) -> None:
         st.error(f"Bandit lifecycle unavailable: {error}")
         return
 
+    if hasattr(service, "streaming_health"):
+        try:
+            health_status = service.streaming_health()
+        except Exception:
+            health_status = None
+        if health_status:
+            h_stat = str(health_status.get("status", "unknown")).upper()
+            if h_stat == "HEALTHY":
+                st.success(f"Streaming & Maintenance Health: **{h_stat}**")
+            elif h_stat == "DEGRADED":
+                st.warning(f"Streaming & Maintenance Health: **{h_stat}**")
+            elif h_stat == "UNHEALTHY":
+                st.error(f"Streaming & Maintenance Health: **{h_stat}**")
+            for warning_msg in health_status.get("warnings", []):
+                st.warning(f"⚠️ {warning_msg}")
+
     active_features = _bandit_context_features(service, status)
     st.caption(
         f"Context features ({len(active_features)}): "
@@ -841,6 +857,100 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                 f"Journal now {updated['journal']['pending']} pending."
             )
 
+    queue_metrics = status.get("streaming_queue")
+    if queue_metrics:
+        st.markdown("##### Streaming Feedback Ingestion Queue")
+        q_cols = st.columns(4)
+        q_cols[0].metric(
+            "Queue Depth",
+            f"{queue_metrics['queue_depth']} / {queue_metrics['max_queue_size']}",
+        )
+        q_cols[1].metric(
+            "Utilization",
+            f"{float(queue_metrics['utilization_pct']):.1f}%",
+        )
+        q_cols[2].metric(
+            "Backpressure",
+            str(queue_metrics.get("backpressure", "drop_oldest")),
+        )
+        flushed_batches = queue_metrics.get("total_flushed_batches", 0)
+        flushed_recs = queue_metrics.get("flushed_count", 0)
+        q_cols[3].metric(
+            "Flushed Batches",
+            f"{flushed_batches} ({flushed_recs} recs)",
+        )
+        if (
+            queue_metrics.get("dropped_count", 0) > 0
+            or queue_metrics.get("flush_errors", 0) > 0
+        ):
+            st.caption(
+                f"Dropped records: **{queue_metrics.get('dropped_count', 0)}** | "
+                f"Flush errors: **{queue_metrics.get('flush_errors', 0)}**"
+            )
+        flush_q_btn = st.button(
+            "Flush Feedback Queue", key="btn_flush_feedback_queue"
+        )
+        if flush_q_btn:
+            if hasattr(service, "flush_feedback"):
+                try:
+                    service.flush_feedback()
+                    st.success("Streaming feedback queue flushed successfully.")
+                except Exception as error:
+                    st.error(f"Queue flush failed: {error}")
+            else:
+                st.info("Service does not support flush_feedback.")
+
+    worker_metrics = status.get("maintenance_worker")
+    if worker_metrics:
+        st.markdown("##### Asynchronous Maintenance Daemon")
+        w_cols = st.columns(4)
+        daemon_status = "Running" if worker_metrics.get("is_running") else "Stopped"
+        w_cols[0].metric("Daemon Status", daemon_status)
+        w_cols[1].metric("Sweep Interval", f"{worker_metrics['interval_seconds']}s")
+        w_cols[2].metric("Cycles Executed", worker_metrics["cycles_count"])
+        folded_recs = worker_metrics.get("records_folded_count", 0)
+        w_cols[3].metric(
+            "Sweeps / Folded",
+            f"{worker_metrics['sweeps_count']} ({folded_recs} recs)",
+        )
+        last_sw = worker_metrics.get("last_sweep_duration_seconds")
+        avg_sw = worker_metrics.get("avg_sweep_duration_seconds")
+        min_sw = worker_metrics.get("min_sweep_duration_seconds")
+        max_sw = worker_metrics.get("max_sweep_duration_seconds")
+        if last_sw is not None or avg_sw is not None:
+            w_time_cols = st.columns(4)
+            w_time_cols[0].metric(
+                "Last Sweep",
+                f"{last_sw:.4f}s" if last_sw is not None else "-",
+            )
+            w_time_cols[1].metric(
+                "Avg Sweep",
+                f"{avg_sw:.4f}s" if avg_sw is not None else "-",
+            )
+            w_time_cols[2].metric(
+                "Min Sweep",
+                f"{min_sw:.4f}s" if min_sw is not None else "-",
+            )
+            w_time_cols[3].metric(
+                "Max Sweep",
+                f"{max_sw:.4f}s" if max_sw is not None else "-",
+            )
+        trigger_sweep_btn = st.button(
+            "Trigger Maintenance Sweep", key="btn_trigger_maintenance_sweep"
+        )
+        if trigger_sweep_btn:
+            if hasattr(service, "trigger_maintenance_sweep"):
+                try:
+                    sw_res = service.trigger_maintenance_sweep()
+                    recs_folded = sw_res.get("records_folded", 0)
+                    st.success(
+                        f"Maintenance sweep triggered: {recs_folded} record(s) folded."
+                    )
+                except Exception as error:
+                    st.error(f"Maintenance sweep failed: {error}")
+            else:
+                st.info("Service does not support trigger_maintenance_sweep.")
+
     st.divider()
     st.subheader("Bandit Snapshots & Drift Tracking")
     st.caption(
@@ -869,6 +979,17 @@ def _render_bandit_tab(service: RecommenderService) -> None:
         except (FileNotFoundError, ValueError) as error:
             st.error(f"Snapshot creation failed: {error}")
 
+    champion_snap = status.get("champion_snapshot")
+    if champion_snap:
+        champ_label = champion_snap.get("label") or "none"
+        champ_sels = champion_snap.get("total_selections", 0)
+        st.info(
+            f"🏆 Active Champion Snapshot: `{champion_snap['filename']}` "
+            f"(label: `{champ_label}`, selections: {champ_sels})"
+        )
+    else:
+        st.caption("Active Champion Snapshot: None tagged")
+
     try:
         snapshots = service.list_bandit_snapshots()
     except Exception as error:
@@ -881,6 +1002,15 @@ def _render_bandit_tab(service: RecommenderService) -> None:
             [
                 {
                     "Filename": s["filename"],
+                    "Champion": (
+                        "🏆 Champion"
+                        if (
+                            champion_snap is not None
+                            and s["filename"] == champion_snap.get("filename")
+                        )
+                        or bool(s.get("is_champion", False))
+                        else "-"
+                    ),
                     "Timestamp": s.get("timestamp", "-"),
                     "Label": s.get("label") or "-",
                     "Size (bytes)": s.get("size_bytes", 0),
@@ -889,6 +1019,48 @@ def _render_bandit_tab(service: RecommenderService) -> None:
             ]
         )
         st.dataframe(snap_df, hide_index=True, width="stretch")
+
+        snapshot_options = [str(s["filename"]) for s in snapshots]
+        st.markdown("##### Champion Snapshot Management & State Rollback")
+        tag_col, rollback_col = st.columns(2)
+        with tag_col:
+            snap_to_tag = st.selectbox(
+                "Select snapshot to tag as champion",
+                options=snapshot_options,
+                index=0,
+                key="bandit_snapshot_to_tag",
+            )
+            if st.button("Tag as Champion", key="btn_tag_champion_snapshot"):
+                if hasattr(service, "tag_champion_snapshot"):
+                    try:
+                        service.tag_champion_snapshot(snap_to_tag)
+                        st.success(
+                            f"Snapshot `{snap_to_tag}` tagged as champion."
+                        )
+                    except Exception as error:
+                        st.error(f"Champion tagging failed: {error}")
+                else:
+                    st.info("Service does not support tag_champion_snapshot.")
+        with rollback_col:
+            snap_to_rollback = st.selectbox(
+                "Select snapshot to restore active state",
+                options=snapshot_options,
+                index=0,
+                key="bandit_snapshot_to_rollback",
+            )
+            if st.button("Roll Back State", key="btn_rollback_bandit_state"):
+                if hasattr(service, "rollback_bandit_state"):
+                    try:
+                        service.rollback_bandit_state(
+                            snapshot_path=snap_to_rollback
+                        )
+                        st.success(
+                            f"Rolled back active state to `{snap_to_rollback}`."
+                        )
+                    except Exception as error:
+                        st.error(f"State rollback failed: {error}")
+                else:
+                    st.info("Service does not support rollback_bandit_state.")
 
         st.markdown("#### Policy Drift Analysis")
         st.caption(
@@ -952,6 +1124,49 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                         hide_index=True,
                         width="stretch",
                     )
+
+                guardrails = status.get("drift_guardrails", {})
+                thresholds = guardrails.get("thresholds", {})
+                st.markdown("##### Automated Drift Guardrails")
+                g_enabled = (
+                    "Enabled" if guardrails.get("enabled") else "Disabled"
+                )
+                g_rollback = (
+                    "Enabled" if guardrails.get("auto_rollback") else "Disabled"
+                )
+                st.caption(
+                    f"Guardrails: **{g_enabled}** | "
+                    f"Auto-rollback: **{g_rollback}** | "
+                    f"Max L2: `{thresholds.get('max_l2_drift', 0.5)}` | "
+                    f"Min Cosine: `{thresholds.get('min_cosine_similarity', 0.7)}`"
+                )
+                if st.button("Verify Drift Safety", key="btn_verify_drift_safety"):
+                    if hasattr(service, "evaluate_bandit_drift_safety"):
+                        try:
+                            safety_res = service.evaluate_bandit_drift_safety(
+                                reference_path=selected_ref
+                            )
+                            ref_name = safety_res.get(
+                                "reference_snapshot", selected_ref
+                            )
+                            if safety_res.get("is_safe"):
+                                st.success(
+                                    "Drift Safety Check: **PASSED** against "
+                                    f"`{ref_name}`."
+                                )
+                            else:
+                                st.error(
+                                    "Drift Safety Check: **BREACH DETECTED** against "
+                                    f"`{ref_name}`."
+                                )
+                            for violation in safety_res.get("violations", []):
+                                st.warning(f"Violation: {violation}")
+                        except Exception as error:
+                            st.error(f"Drift safety evaluation failed: {error}")
+                    else:
+                        st.info(
+                            "Service does not support evaluate_bandit_drift_safety."
+                        )
     else:
         st.info(
             "No snapshots found in `reports/bandit_snapshots/`. "
@@ -1081,16 +1296,23 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                     f"{ope_summary['logging_mean_reward']:.4f}",
                 )
 
+                def _fmt_ci(ci: Any) -> str:
+                    if isinstance(ci, (list, tuple)) and len(ci) == 2:
+                        return f"[{float(ci[0]):.4f}, {float(ci[1]):.4f}]"
+                    return "-"
+
                 est_rows = [
                     {
                         "Estimator": "Inverse Propensity (IPS)",
                         "Estimated Value": ope_metrics["ips"]["value"],
                         "Std Error": ope_metrics["ips"].get("standard_error", "-"),
+                        "95% CI": _fmt_ci(ope_metrics["ips"].get("ci_95")),
                     },
                     {
                         "Estimator": "Self-Normalized (SnIPS)",
                         "Estimated Value": ope_metrics["snips"]["value"],
                         "Std Error": "-",
+                        "95% CI": "-",
                     },
                     {
                         "Estimator": "Direct Method (DM)",
@@ -1098,12 +1320,18 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                         "Std Error": ope_metrics["direct_method"].get(
                             "standard_error", "-"
                         ),
+                        "95% CI": _fmt_ci(
+                            ope_metrics["direct_method"].get("ci_95")
+                        ),
                     },
                     {
                         "Estimator": "Doubly Robust (DR)",
                         "Estimated Value": ope_metrics["doubly_robust"]["value"],
                         "Std Error": ope_metrics["doubly_robust"].get(
                             "standard_error", "-"
+                        ),
+                        "95% CI": _fmt_ci(
+                            ope_metrics["doubly_robust"].get("ci_95")
                         ),
                     },
                 ]
@@ -1165,6 +1393,31 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                     )
                 except (FileNotFoundError, ValueError) as error:
                     st.error(f"Policy benchmark failed: {error}")
+
+    with st.expander("Bandit Observability & Telemetry Diagnostics"):
+        st.caption(
+            "Inspect unified subsystem telemetry across streaming queue buffers, "
+            "worker sweep latencies, drift guardrails, and snapshots."
+        )
+        include_ope_obs = st.checkbox(
+            "Include Off-Policy Evaluation in diagnostics",
+            value=False,
+            key="bandit_obs_include_ope",
+        )
+        if st.button(
+            "Load Observability Telemetry", key="btn_load_bandit_observability"
+        ):
+            if hasattr(service, "bandit_observability"):
+                try:
+                    obs_data = service.bandit_observability(
+                        include_ope=include_ope_obs
+                    )
+                    st.success("Observability diagnostics loaded.")
+                    st.json(obs_data)
+                except Exception as error:
+                    st.error(f"Observability diagnostics failed: {error}")
+            else:
+                st.info("Service does not support bandit_observability.")
 
 
 def render_dashboard(service: RecommenderService) -> None:
