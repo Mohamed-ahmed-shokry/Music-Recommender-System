@@ -1409,3 +1409,53 @@ def test_dashboard_bandit_tab_maintenance_daemon_and_sweep() -> None:
     )
 
 
+def test_dashboard_bandit_tab_champion_tagging_and_rollback() -> None:
+    service = FakeDashboardService()
+    snap_filename = "bandit_state_20260927T000000Z_baseline.json"
+    service.snapshots.append(
+        {
+            "filename": snap_filename,
+            "path": f"reports/bandit_snapshots/{snap_filename}",
+            "timestamp": "20260927T000000Z",
+            "label": "baseline",
+            "size_bytes": 1024,
+        }
+    )
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(
+        "Champion Snapshot Management & State Rollback" in m.value
+        for m in app.markdown
+    )
+
+    tag_button = next(
+        button for button in app.button if button.label == "Tag as Champion"
+    )
+    tag_button.click().run()
+
+    assert not app.exception
+    assert service.champion_snapshot_filename == snap_filename
+    assert any(
+        f"Snapshot `{snap_filename}` tagged as champion." in s.value
+        for s in app.success
+    )
+
+    rollback_button = next(
+        button for button in app.button if button.label == "Roll Back State"
+    )
+    rollback_button.click().run()
+
+    assert not app.exception
+    assert service.last_rollback_called is True
+    assert any(
+        f"Rolled back active state to `{snap_filename}`." in s.value
+        for s in app.success
+    )
+
+
+
