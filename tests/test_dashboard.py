@@ -1537,5 +1537,134 @@ def test_dashboard_bandit_tab_drift_safety_evaluation_pass_and_breach() -> None:
     )
 
 
+def test_dashboard_bandit_tab_streaming_health_banners() -> None:
+    service_healthy = FakeDashboardService()
+    service_healthy.streaming_queue_enabled = True
+    app_healthy = AppTest.from_function(
+        dashboard_script,
+        args=(service_healthy,),
+        default_timeout=10,
+    ).run()
+
+    assert not app_healthy.exception
+    assert any(
+        "Streaming & Maintenance Health: **HEALTHY**" in s.value
+        for s in app_healthy.success
+    )
+
+    class DegradedHealthService(FakeDashboardService):
+        def streaming_health(self) -> dict[str, Any]:
+            return {
+                "status": "degraded",
+                "healthy": True,
+                "queue_enabled": True,
+                "maintenance_enabled": True,
+                "warnings": ["Queue utilization exceeds 80%."],
+                "timestamp": "2026-10-08T00:00:00Z",
+            }
+
+    app_degraded = AppTest.from_function(
+        dashboard_script,
+        args=(DegradedHealthService(),),
+        default_timeout=10,
+    ).run()
+
+    assert not app_degraded.exception
+    assert any(
+        "Streaming & Maintenance Health: **DEGRADED**" in w.value
+        for w in app_degraded.warning
+    )
+    assert any(
+        "Queue utilization exceeds 80%." in w.value
+        for w in app_degraded.warning
+    )
+
+    class UnhealthyHealthService(FakeDashboardService):
+        def streaming_health(self) -> dict[str, Any]:
+            return {
+                "status": "unhealthy",
+                "healthy": False,
+                "queue_enabled": True,
+                "maintenance_enabled": False,
+                "warnings": ["Worker daemon stopped unexpectedly."],
+                "timestamp": "2026-10-08T00:00:00Z",
+            }
+
+    app_unhealthy = AppTest.from_function(
+        dashboard_script,
+        args=(UnhealthyHealthService(),),
+        default_timeout=10,
+    ).run()
+
+    assert not app_unhealthy.exception
+    assert any(
+        "Streaming & Maintenance Health: **UNHEALTHY**" in e.value
+        for e in app_unhealthy.error
+    )
+    assert any(
+        "Worker daemon stopped unexpectedly." in w.value
+        for w in app_unhealthy.warning
+    )
+
+
+def test_dashboard_bandit_tab_observability_expander() -> None:
+    service = FakeDashboardService()
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    load_obs_btn = next(
+        button
+        for button in app.button
+        if button.label == "Load Observability Telemetry"
+    )
+    load_obs_btn.click().run()
+
+    assert not app.exception
+    assert any(
+        "Observability diagnostics loaded." in s.value for s in app.success
+    )
+    assert len(app.json) > 0
+
+
+def test_dashboard_bandit_tab_ope_confidence_intervals() -> None:
+    service = FakeDashboardService()
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    ope_button = next(
+        button
+        for button in app.button
+        if button.label == "Run Off-Policy Evaluation"
+    )
+    ope_button.click().run()
+
+    assert not app.exception
+    ope_df = next(
+        df.value
+        for df in app.dataframe
+        if "Estimator" in df.value.columns
+    )
+    assert "95% CI" in ope_df.columns
+    ips_row = ope_df[ope_df["Estimator"] == "Inverse Propensity (IPS)"].iloc[0]
+    assert ips_row["95% CI"] == "[0.6200, 0.8200]"
+    dm_row = ope_df[ope_df["Estimator"] == "Direct Method (DM)"].iloc[0]
+    assert dm_row["95% CI"] == "[0.6300, 0.7900]"
+    dr_row = ope_df[ope_df["Estimator"] == "Doubly Robust (DR)"].iloc[0]
+    assert dr_row["95% CI"] == "[0.6500, 0.8100]"
+    snips_row = ope_df[
+        ope_df["Estimator"] == "Self-Normalized (SnIPS)"
+    ].iloc[0]
+    assert snips_row["95% CI"] == "-"
+
+
+
+
 
 
