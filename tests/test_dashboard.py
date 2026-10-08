@@ -1342,3 +1342,33 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
         "Ablation Summary",
         "Cold-Start Bandit",
     ]
+
+
+def test_dashboard_bandit_tab_streaming_queue_metrics_and_flush() -> None:
+    service = FakeDashboardService()
+    service.streaming_queue_enabled = True
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("Streaming Feedback Ingestion Queue" in m.value for m in app.markdown)
+    assert any(metric.label == "Queue Depth" for metric in app.metric)
+    assert any(metric.label == "Utilization" for metric in app.metric)
+    assert any(metric.label == "Backpressure" for metric in app.metric)
+    assert any(metric.label == "Flushed Batches" for metric in app.metric)
+
+    flush_button = next(
+        button for button in app.button if button.label == "Flush Feedback Queue"
+    )
+    flush_button.click().run()
+
+    assert not app.exception
+    assert service.last_flush_called is True
+    assert any(
+        "Streaming feedback queue flushed successfully." in s.value
+        for s in app.success
+    )
+
