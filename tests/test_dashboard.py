@@ -1458,4 +1458,84 @@ def test_dashboard_bandit_tab_champion_tagging_and_rollback() -> None:
     )
 
 
+def test_dashboard_bandit_tab_drift_safety_evaluation_pass_and_breach() -> None:
+    service = FakeDashboardService()
+    snap_filename = "bandit_state_20260927T000000Z_baseline.json"
+    service.snapshots.append(
+        {
+            "filename": snap_filename,
+            "path": f"reports/bandit_snapshots/{snap_filename}",
+            "timestamp": "20260927T000000Z",
+            "label": "baseline",
+            "size_bytes": 1024,
+        }
+    )
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    verify_button = next(
+        button for button in app.button if button.label == "Verify Drift Safety"
+    )
+    verify_button.click().run()
+
+    assert not app.exception
+    assert any(
+        "Drift Safety Check: **PASSED**" in s.value for s in app.success
+    )
+
+    class BreachSafetyService(FakeDashboardService):
+        def evaluate_bandit_drift_safety(
+            self,
+            reference_path: str | Path | None = None,
+            state_path: str | Path | None = None,
+            snapshot_dir: str | Path | None = None,
+            thresholds: Any = None,
+        ) -> dict[str, Any]:
+            return {
+                "is_safe": False,
+                "violations": ["L2 drift 0.85 exceeds threshold 0.50"],
+                "warnings": [],
+                "reference_snapshot": str(reference_path or "ref.json"),
+                "metrics": {"max_l2_drift": 0.85},
+                "thresholds": {"max_l2_drift": 0.50},
+            }
+
+    breach_service = BreachSafetyService()
+    breach_service.snapshots.append(
+        {
+            "filename": snap_filename,
+            "path": f"reports/bandit_snapshots/{snap_filename}",
+            "timestamp": "20260927T000000Z",
+            "label": "baseline",
+            "size_bytes": 1024,
+        }
+    )
+    breach_app = AppTest.from_function(
+        dashboard_script,
+        args=(breach_service,),
+        default_timeout=10,
+    ).run()
+
+    verify_button_breach = next(
+        button
+        for button in breach_app.button
+        if button.label == "Verify Drift Safety"
+    )
+    verify_button_breach.click().run()
+
+    assert not breach_app.exception
+    assert any(
+        "Drift Safety Check: **BREACH DETECTED**" in err.value
+        for err in breach_app.error
+    )
+    assert any(
+        "Violation: L2 drift 0.85 exceeds threshold 0.50" in w.value
+        for w in breach_app.warning
+    )
+
+
+
 
