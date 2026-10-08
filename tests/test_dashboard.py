@@ -1372,3 +1372,40 @@ def test_dashboard_bandit_tab_streaming_queue_metrics_and_flush() -> None:
         for s in app.success
     )
 
+
+def test_dashboard_bandit_tab_maintenance_daemon_and_sweep() -> None:
+    service = FakeDashboardService()
+    service.maintenance_worker_enabled = True
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(
+        "Asynchronous Maintenance Daemon" in m.value for m in app.markdown
+    )
+    assert any(metric.label == "Daemon Status" for metric in app.metric)
+    assert any(metric.label == "Sweep Interval" for metric in app.metric)
+    assert any(metric.label == "Cycles Executed" for metric in app.metric)
+    assert any(metric.label == "Sweeps / Folded" for metric in app.metric)
+    assert any(metric.label == "Last Sweep" for metric in app.metric)
+    assert any(metric.label == "Avg Sweep" for metric in app.metric)
+
+    trigger_button = next(
+        button
+        for button in app.button
+        if button.label == "Trigger Maintenance Sweep"
+    )
+    trigger_button.click().run()
+
+    assert not app.exception
+    assert service.last_trigger_sweep_called is True
+    assert any(
+        "Maintenance sweep triggered:" in s.value
+        and "record(s) folded." in s.value
+        for s in app.success
+    )
+
+
