@@ -979,6 +979,17 @@ def _render_bandit_tab(service: RecommenderService) -> None:
         except (FileNotFoundError, ValueError) as error:
             st.error(f"Snapshot creation failed: {error}")
 
+    champion_snap = status.get("champion_snapshot")
+    if champion_snap:
+        champ_label = champion_snap.get("label") or "none"
+        champ_sels = champion_snap.get("total_selections", 0)
+        st.info(
+            f"🏆 Active Champion Snapshot: `{champion_snap['filename']}` "
+            f"(label: `{champ_label}`, selections: {champ_sels})"
+        )
+    else:
+        st.caption("Active Champion Snapshot: None tagged")
+
     try:
         snapshots = service.list_bandit_snapshots()
     except Exception as error:
@@ -991,6 +1002,15 @@ def _render_bandit_tab(service: RecommenderService) -> None:
             [
                 {
                     "Filename": s["filename"],
+                    "Champion": (
+                        "🏆 Champion"
+                        if (
+                            champion_snap is not None
+                            and s["filename"] == champion_snap.get("filename")
+                        )
+                        or bool(s.get("is_champion", False))
+                        else "-"
+                    ),
                     "Timestamp": s.get("timestamp", "-"),
                     "Label": s.get("label") or "-",
                     "Size (bytes)": s.get("size_bytes", 0),
@@ -999,6 +1019,48 @@ def _render_bandit_tab(service: RecommenderService) -> None:
             ]
         )
         st.dataframe(snap_df, hide_index=True, width="stretch")
+
+        snapshot_options = [str(s["filename"]) for s in snapshots]
+        st.markdown("##### Champion Snapshot Management & State Rollback")
+        tag_col, rollback_col = st.columns(2)
+        with tag_col:
+            snap_to_tag = st.selectbox(
+                "Select snapshot to tag as champion",
+                options=snapshot_options,
+                index=0,
+                key="bandit_snapshot_to_tag",
+            )
+            if st.button("Tag as Champion", key="btn_tag_champion_snapshot"):
+                if hasattr(service, "tag_champion_snapshot"):
+                    try:
+                        service.tag_champion_snapshot(snap_to_tag)
+                        st.success(
+                            f"Snapshot `{snap_to_tag}` tagged as champion."
+                        )
+                    except Exception as error:
+                        st.error(f"Champion tagging failed: {error}")
+                else:
+                    st.info("Service does not support tag_champion_snapshot.")
+        with rollback_col:
+            snap_to_rollback = st.selectbox(
+                "Select snapshot to restore active state",
+                options=snapshot_options,
+                index=0,
+                key="bandit_snapshot_to_rollback",
+            )
+            if st.button("Roll Back State", key="btn_rollback_bandit_state"):
+                if hasattr(service, "rollback_bandit_state"):
+                    try:
+                        service.rollback_bandit_state(
+                            snapshot_path=snap_to_rollback
+                        )
+                        st.success(
+                            f"Rolled back active state to `{snap_to_rollback}`."
+                        )
+                    except Exception as error:
+                        st.error(f"State rollback failed: {error}")
+                else:
+                    st.info("Service does not support rollback_bandit_state.")
 
         st.markdown("#### Policy Drift Analysis")
         st.caption(
