@@ -1124,6 +1124,49 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                         hide_index=True,
                         width="stretch",
                     )
+
+                guardrails = status.get("drift_guardrails", {})
+                thresholds = guardrails.get("thresholds", {})
+                st.markdown("##### Automated Drift Guardrails")
+                g_enabled = (
+                    "Enabled" if guardrails.get("enabled") else "Disabled"
+                )
+                g_rollback = (
+                    "Enabled" if guardrails.get("auto_rollback") else "Disabled"
+                )
+                st.caption(
+                    f"Guardrails: **{g_enabled}** | "
+                    f"Auto-rollback: **{g_rollback}** | "
+                    f"Max L2: `{thresholds.get('max_l2_drift', 0.5)}` | "
+                    f"Min Cosine: `{thresholds.get('min_cosine_similarity', 0.7)}`"
+                )
+                if st.button("Verify Drift Safety", key="btn_verify_drift_safety"):
+                    if hasattr(service, "evaluate_bandit_drift_safety"):
+                        try:
+                            safety_res = service.evaluate_bandit_drift_safety(
+                                reference_path=selected_ref
+                            )
+                            ref_name = safety_res.get(
+                                "reference_snapshot", selected_ref
+                            )
+                            if safety_res.get("is_safe"):
+                                st.success(
+                                    "Drift Safety Check: **PASSED** against "
+                                    f"`{ref_name}`."
+                                )
+                            else:
+                                st.error(
+                                    "Drift Safety Check: **BREACH DETECTED** against "
+                                    f"`{ref_name}`."
+                                )
+                            for violation in safety_res.get("violations", []):
+                                st.warning(f"Violation: {violation}")
+                        except Exception as error:
+                            st.error(f"Drift safety evaluation failed: {error}")
+                    else:
+                        st.info(
+                            "Service does not support evaluate_bandit_drift_safety."
+                        )
     else:
         st.info(
             "No snapshots found in `reports/bandit_snapshots/`. "
