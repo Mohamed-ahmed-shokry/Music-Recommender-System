@@ -1296,16 +1296,23 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                     f"{ope_summary['logging_mean_reward']:.4f}",
                 )
 
+                def _fmt_ci(ci: Any) -> str:
+                    if isinstance(ci, (list, tuple)) and len(ci) == 2:
+                        return f"[{float(ci[0]):.4f}, {float(ci[1]):.4f}]"
+                    return "-"
+
                 est_rows = [
                     {
                         "Estimator": "Inverse Propensity (IPS)",
                         "Estimated Value": ope_metrics["ips"]["value"],
                         "Std Error": ope_metrics["ips"].get("standard_error", "-"),
+                        "95% CI": _fmt_ci(ope_metrics["ips"].get("ci_95")),
                     },
                     {
                         "Estimator": "Self-Normalized (SnIPS)",
                         "Estimated Value": ope_metrics["snips"]["value"],
                         "Std Error": "-",
+                        "95% CI": "-",
                     },
                     {
                         "Estimator": "Direct Method (DM)",
@@ -1313,12 +1320,18 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                         "Std Error": ope_metrics["direct_method"].get(
                             "standard_error", "-"
                         ),
+                        "95% CI": _fmt_ci(
+                            ope_metrics["direct_method"].get("ci_95")
+                        ),
                     },
                     {
                         "Estimator": "Doubly Robust (DR)",
                         "Estimated Value": ope_metrics["doubly_robust"]["value"],
                         "Std Error": ope_metrics["doubly_robust"].get(
                             "standard_error", "-"
+                        ),
+                        "95% CI": _fmt_ci(
+                            ope_metrics["doubly_robust"].get("ci_95")
                         ),
                     },
                 ]
@@ -1380,6 +1393,31 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                     )
                 except (FileNotFoundError, ValueError) as error:
                     st.error(f"Policy benchmark failed: {error}")
+
+    with st.expander("Bandit Observability & Telemetry Diagnostics"):
+        st.caption(
+            "Inspect unified subsystem telemetry across streaming queue buffers, "
+            "worker sweep latencies, drift guardrails, and snapshots."
+        )
+        include_ope_obs = st.checkbox(
+            "Include Off-Policy Evaluation in diagnostics",
+            value=False,
+            key="bandit_obs_include_ope",
+        )
+        if st.button(
+            "Load Observability Telemetry", key="btn_load_bandit_observability"
+        ):
+            if hasattr(service, "bandit_observability"):
+                try:
+                    obs_data = service.bandit_observability(
+                        include_ope=include_ope_obs
+                    )
+                    st.success("Observability diagnostics loaded.")
+                    st.json(obs_data)
+                except Exception as error:
+                    st.error(f"Observability diagnostics failed: {error}")
+            else:
+                st.info("Service does not support bandit_observability.")
 
 
 def render_dashboard(service: RecommenderService) -> None:
