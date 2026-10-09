@@ -933,6 +933,36 @@ Production deployments require real-time visibility into ingestion queue saturat
      uv run python -m music_recommender.cli bandit-status --json
      ```
 
+### Prometheus Metrics Scraping & OpenTelemetry Collector Integration
+
+The service provides standard, pure-Python Prometheus text exposition (version 0.0.4) metrics at `/metrics` for direct scraping by Prometheus or OpenTelemetry collectors:
+
+1. **Exposition Endpoint**: `GET /metrics` returns `Content-Type: text/plain; version=0.0.4; charset=utf-8`.
+2. **Key Metric Families**:
+   - `music_recommender_info`: System version, python version, and environment labels.
+   - `music_recommender_up`: Service operational readiness (1=running, 0=unavailable).
+   - `music_recommender_artifact_*`: Active indexed users, artists, and interaction counts.
+   - `music_recommender_bandit_arm_weight{arm="..."}`: Cold-start policy serving weights.
+   - `music_recommender_streaming_queue_*`: Queue size, capacity, utilization ratio, records enqueued/flushed/dropped, flush errors.
+   - `music_recommender_maintenance_*`: Background worker liveness, cycle count, sweeps, records folded, sweep latencies (last/min/max/avg/total), drift evaluations, drift violations, rollbacks.
+   - `music_recommender_streaming_health{status="..."}`: Real-time health classification flags.
+   - `music_recommender_http_requests_total{endpoint="...",method="...",status="..."}`: Handled HTTP request counts.
+   - `music_recommender_http_request_duration_seconds`: Request latency histogram buckets, sum, and count.
+
+3. **Prometheus Scrape Configuration**:
+   A ready-to-use scrape job is provided in [`configs/prometheus.yml`](configs/prometheus.yml):
+   ```yaml
+   scrape_configs:
+     - job_name: "music_recommender"
+       scrape_interval: 10s
+       metrics_path: "/metrics"
+       static_configs:
+         - targets: ["localhost:8000"]
+   ```
+
+4. **OpenTelemetry Collector Configuration**:
+   An OpenTelemetry Collector pipeline template is provided in [`configs/otel-collector-config.yaml`](configs/otel-collector-config.yaml), configuring Prometheus metrics scraping, batch processing, memory limiting, and forwarding via OTLP and Prometheus exporters.
+
 ## API Reference
 
 Train before starting the API:
@@ -952,6 +982,7 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/` | Basic API message |
 | `GET` | `/health` | Artifact and service health (including `streaming_status`) |
 | `GET` | `/health/streaming` | Real-time streaming queue and maintenance health (200 OK or 503 Service Unavailable) |
+| `GET` | `/metrics` | Prometheus 0.0.4 text exposition metrics for Prometheus and OpenTelemetry collectors |
 | `GET` | `/metadata` | Training config, dataset fingerprint, artifact metadata |
 | `GET` | `/evaluation/ablation-summary` | Persisted aggregated knob-importance summary |
 | `GET` | `/catalog/artists?query=pop&limit=25` | Search and page through artists and metadata |
