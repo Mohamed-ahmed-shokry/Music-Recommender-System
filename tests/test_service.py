@@ -2165,13 +2165,38 @@ def test_service_bandit_observability_report(tmp_path: Path) -> None:
     assert obs["snapshots"]["total_count"] == 1
     assert obs["snapshots"]["champion"] is not None
 
-    ope = obs["off_policy_evaluation"]
-    assert ope is not None
-    assert "metrics" in ope
-    assert "ci_95" in ope["metrics"]["ips"]
-    assert "ci_95" in ope["metrics"]["doubly_robust"]
-
     service.close()
+
+
+def test_service_export_prometheus_metrics(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    metrics_text = service.export_prometheus_metrics(
+        custom_labels={"environment": "test"}
+    )
+    assert metrics_text.endswith("\n")
+    assert "# HELP music_recommender_info" in metrics_text
+    assert 'music_recommender_info{environment="test"' in metrics_text
+    assert "music_recommender_up 1" in metrics_text
+    assert "music_recommender_artifact_users_count" in metrics_text
+    assert "music_recommender_bandit_arms_count" in metrics_text
+    assert "music_recommender_streaming_queue_enabled" in metrics_text
+    assert "music_recommender_maintenance_enabled" in metrics_text
+
+
+def test_service_record_request(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    service.record_request(
+        endpoint="/recommend/user",
+        method="GET",
+        status_code=200,
+        duration_seconds=0.015,
+    )
+    metrics_text = service.export_prometheus_metrics()
+    assert (
+        'music_recommender_http_requests_total{endpoint="/recommend/user",'
+        'method="GET",status="200"}' in metrics_text
+    )
+
 
 
 

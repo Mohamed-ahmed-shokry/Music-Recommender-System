@@ -777,6 +777,38 @@ class RecommenderService:
             "off_policy_evaluation": ope_result,
         }
 
+    def export_prometheus_metrics(
+        self,
+        *,
+        custom_labels: dict[str, str] | None = None,
+        request_tracker: Any | None = None,
+    ) -> str:
+        """Export service state and telemetry in Prometheus text format (0.0.4)."""
+        from music_recommender.telemetry import export_prometheus_metrics
+
+        return export_prometheus_metrics(
+            self,
+            request_tracker=request_tracker,
+            custom_labels=custom_labels,
+        )
+
+    def record_request(
+        self,
+        endpoint: str,
+        method: str = "GET",
+        status_code: int = 200,
+        duration_seconds: float = 0.0,
+    ) -> None:
+        """Record an executed request in the service telemetry tracker."""
+        from music_recommender.telemetry import get_global_request_tracker
+
+        get_global_request_tracker().record_request(
+            endpoint=endpoint,
+            method=method,
+            status_code=status_code,
+            duration_seconds=duration_seconds,
+        )
+
     def close(self, timeout: float | None = 5.0) -> None:
         """Release background resources (maintenance worker and feedback queue)."""
         if self.maintenance_worker is not None:

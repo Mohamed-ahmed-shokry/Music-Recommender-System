@@ -225,15 +225,16 @@ def collect_service_metric_families(
 
     # 3. Bandit Policy Arms & Weights
     policy = getattr(service, "cold_start_policy", None)
-    if policy is not None and isinstance(policy, dict):
-        arms_fam = MetricFamily(
-            name="music_recommender_bandit_arms_count",
-            help_text="Total number of configured cold-start bandit arms.",
-            metric_type=MetricType.GAUGE,
-        )
-        arms_fam.add_sample(value=len(policy))
-        families.append(arms_fam)
+    arms_count = len(policy) if isinstance(policy, dict) else 0
+    arms_fam = MetricFamily(
+        name="music_recommender_bandit_arms_count",
+        help_text="Total number of configured cold-start bandit arms.",
+        metric_type=MetricType.GAUGE,
+    )
+    arms_fam.add_sample(value=arms_count)
+    families.append(arms_fam)
 
+    if isinstance(policy, dict) and policy:
         weights_fam = MetricFamily(
             name="music_recommender_bandit_arm_weight",
             help_text="Current serving probability weight per cold-start bandit arm.",
