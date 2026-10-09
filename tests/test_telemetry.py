@@ -1,8 +1,9 @@
 """Tests for Prometheus exposition models, formatting, and telemetry."""
 
-from __future__ import annotations
+from pathlib import Path
 
 import pytest
+import yaml
 
 from music_recommender.telemetry import (
     MetricFamily,
@@ -362,5 +363,45 @@ def test_export_prometheus_metrics() -> None:
         in text
     )
     assert "# TYPE music_recommender_http_request_duration_seconds histogram" in text
+
+
+def test_telemetry_configs_valid_yaml() -> None:
+    root_dir = Path(__file__).resolve().parent.parent
+
+    # 1. Prometheus config validation
+    prom_path = root_dir / "configs" / "prometheus.yml"
+    assert prom_path.exists(), f"Prometheus config missing at {prom_path}"
+
+    with open(prom_path, encoding="utf-8") as f:
+        prom_data = yaml.safe_load(f)
+
+    assert isinstance(prom_data, dict)
+    assert "global" in prom_data
+    assert "scrape_configs" in prom_data
+    scrape_jobs = {job["job_name"]: job for job in prom_data["scrape_configs"]}
+    assert "music_recommender" in scrape_jobs
+    mr_job = scrape_jobs["music_recommender"]
+    assert mr_job["metrics_path"] == "/metrics"
+    assert "localhost:8000" in mr_job["static_configs"][0]["targets"]
+
+    # 2. OpenTelemetry Collector config validation
+    otel_path = root_dir / "configs" / "otel-collector-config.yaml"
+    assert otel_path.exists(), f"OpenTelemetry config missing at {otel_path}"
+
+    with open(otel_path, encoding="utf-8") as f:
+        otel_data = yaml.safe_load(f)
+
+    assert isinstance(otel_data, dict)
+    assert "receivers" in otel_data
+    assert "prometheus" in otel_data["receivers"]
+    assert "processors" in otel_data
+    assert "batch" in otel_data["processors"]
+    assert "exporters" in otel_data
+    assert "otlp" in otel_data["exporters"]
+    assert "prometheus" in otel_data["exporters"]
+    assert "service" in otel_data
+    assert "pipelines" in otel_data["service"]
+    assert "metrics" in otel_data["service"]["pipelines"]
+
 
 
