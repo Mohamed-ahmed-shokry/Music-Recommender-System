@@ -3,7 +3,47 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.29.0) — planned
+## Current milestone (0.30.0) — planned
+
+Production Telemetry Exporters, Prometheus Metrics Scraping, and Alerting Rules.
+Production observability pipelines require standard metric export formats for scraping by Prometheus or OpenTelemetry collectors and actionable threshold alerts:
+1. Standard Prometheus metrics endpoint (`/metrics`) exposing real-time queue depth, sweep durations, error rates, and drift violations.
+2. Alerting threshold specifications and webhook dispatch for degraded health, high queue utilization, and drift breaches.
+3. Operator CLI exporter command (`music-recommender export-metrics`).
+4. Grafana / Prometheus dashboard templates and documentation.
+
+- Phase 135 — Prometheus metrics exporter endpoint & OpenTelemetry collectors:
+  Standard Prometheus text exposition endpoint (`/metrics`), pure-Python metric generator, and OpenTelemetry collector configs.
+  - Objective: Build a production-grade Prometheus text format (version 0.0.4) metrics exporter in `src/music_recommender/telemetry.py` without third-party runtime dependencies, expose a standard `GET /metrics` endpoint in FastAPI (`api/main.py`), implement `export_prometheus_metrics()` on `RecommenderService`, track API request counts and latency distributions, and provide ready-to-use Prometheus scrape and OpenTelemetry Collector configuration templates in `configs/`.
+  - Acceptance Criteria:
+    - AC-1: Pure-Python Prometheus 0.0.4 exposition format metric formatter in `telemetry.py` supporting `GAUGE`, `COUNTER`, and `HISTOGRAM`/`SUMMARY` metric families with strict label escaping and comment formatting.
+    - AC-2: Exposes system info, service liveness, artifact inventory statistics, and cold-start bandit arm weights/champion metadata as standard Prometheus gauges.
+    - AC-3: Exposes streaming feedback queue telemetry (depth, capacity, utilization ratio, enqueued, flushed, dropped, flush errors) and maintenance worker daemon telemetry (status, cycles, sweeps, folded records, sweep latencies, drift evaluations/violations, rollbacks).
+    - AC-4: `RecommenderService.export_prometheus_metrics()` provides programmatic text export with optional custom labels and timestamp inclusion.
+    - AC-5: FastAPI application exposes `GET /metrics` with HTTP 200 and Content-Type `text/plain; version=0.0.4; charset=utf-8`.
+    - AC-6: HTTP request instrumentation middleware tracks endpoint hit counts and request duration percentiles in Prometheus metric families.
+    - AC-7: Production-ready collector configuration templates provided in `configs/prometheus.yml` and `configs/otel-collector-config.yaml`.
+    - AC-8: Comprehensive test suite across `tests/test_telemetry.py`, `tests/test_api.py`, and `tests/test_service.py` with 0 regressions across the entire repository.
+  - Implementation Tasks:
+    - Task 1: Update `PLAN.md` with Phase 135 roadmap and create `docs/PROGRESS.md`.
+    - Task 2: Implement core Prometheus exposition data structures and formatting utilities in `src/music_recommender/telemetry.py`.
+    - Task 3: Implement streaming queue, maintenance worker, and artifact metric extractors in `src/music_recommender/telemetry.py`.
+    - Task 4: Implement thread-safe request telemetry tracker in `src/music_recommender/telemetry.py`.
+    - Task 5: Integrate `export_prometheus_metrics()` and request recording into `RecommenderService` in `src/music_recommender/service.py`.
+    - Task 6: Expose `GET /metrics` endpoint and request tracking middleware in `api/main.py`.
+    - Task 7: Provide standard scrape and collector templates in `configs/prometheus.yml` and `configs/otel-collector-config.yaml`.
+    - Task 8: Implement unit tests in `tests/test_telemetry.py`.
+    - Task 9: Implement service integration tests for metrics export in `tests/test_service.py`.
+    - Task 10: Implement API integration tests for `GET /metrics` in `tests/test_api.py`.
+    - Task 11: Implement configuration validation tests for Prometheus and OpenTelemetry configs in `tests/test_telemetry.py`.
+    - Task 12: Run full test suite, lint, and typecheck verifications.
+    - Task 13: Update `README.md` documenting `/metrics` and OpenTelemetry collector setup.
+    - Task 14: Finalize progress records, push commits, and update draft PR.
+- Phase 136 — Alerting rule definitions & automated notification dispatch.
+- Phase 137 — CLI & Service metrics export tooling.
+- Phase 138 — Integration testing, dashboard templates, and 0.30.0 release.
+
+## Previous milestone (0.29.0) — shipped
 
 Real-Time Streaming Feedback Ingestion and Asynchronous Policy Maintenance Worker.
 High-throughput production serving benefits from decoupling feedback journaling and policy update sweeps from synchronous request-response threads:
@@ -96,38 +136,38 @@ High-throughput production serving benefits from decoupling feedback journaling 
     - Task 5: Expose `GET /health/streaming` and `GET /bandit/observability` in `api/main.py`, updating `GET /health` with streaming status, with API tests. ✓
     - Task 6: Document observability tooling, health endpoints, and CLI commands in `README.md` and mark Phase 133 complete in `PLAN.md`. ✓
 - Phase 134 — Dashboard, testing, and 0.29.0 release:
-  Streaming queue controls, maintenance telemetry, drift guardrails & rollback, observability cards, OPE confidence intervals, and 0.29.0 release.
+  Streaming queue controls, maintenance telemetry, drift guardrails & rollback, observability cards, OPE confidence intervals, and 0.29.0 release. ✓
   - Objective: Complete the 0.29.0 release milestone by exposing real-time streaming feedback queue metrics, asynchronous maintenance daemon telemetry, drift safety guardrails, champion snapshot management, automated rollback, and streaming health diagnostics directly in the Streamlit operator dashboard (`Cold-Start Bandit` tab), displaying 95% confidence intervals in OPE results, backing all additions with unit and integration tests, verifying the full test suite and quality gates, bumping the project version to 0.29.0, updating the documentation (`CHANGELOG.md`, `README.md`, `PLAN.md`), and delivering the release.
   - Acceptance Criteria:
-    - AC-1: Dashboard Cold-Start Bandit tab displays streaming feedback queue metrics (queue depth, capacity, utilization %, backpressure strategy, flush stats) and provides an interactive "Flush Feedback Queue" button that invokes `service.flush_feedback()`.
-    - AC-2: Dashboard displays maintenance daemon worker status, sweep cycle count, records folded, and sweep latency profiling (min, max, avg, total, last) with an interactive "Trigger Maintenance Sweep" button invoking `service.trigger_maintenance_sweep()`.
-    - AC-3: Dashboard displays champion snapshot metadata, provides a "Tag as Champion" button invoking `service.tag_champion_snapshot()`, and provides a state rollback control invoking `service.rollback_bandit_state()` with serving policy refresh.
-    - AC-4: Dashboard provides an interactive "Verify Drift Safety" button invoking `service.evaluate_bandit_drift_safety()`, displaying a pass/breach badge, threshold comparison metrics, and violation reasons.
-    - AC-5: Dashboard displays a real-time streaming health card (Healthy / Degraded / Unhealthy) from `service.streaming_health()` with active warning alerts when issues are detected.
-    - AC-6: Dashboard OPE results table renders 95% confidence intervals (`ci_95`) for IPS, Direct Method, and Doubly Robust estimators.
-    - AC-7: Comprehensive test suite in `tests/test_dashboard.py` validates all new UI components, buttons, error handling, and states with 0 regressions across the entire test suite.
-    - AC-8: Release packaging and documentation complete: `pyproject.toml` bumped to 0.29.0, `CHANGELOG.md` updated with comprehensive 0.29.0 entry, `README.md` updated, and `PLAN.md` updated.
+    - AC-1: Dashboard Cold-Start Bandit tab displays streaming feedback queue metrics (queue depth, capacity, utilization %, backpressure strategy, flush stats) and provides an interactive "Flush Feedback Queue" button that invokes `service.flush_feedback()`. ✓
+    - AC-2: Dashboard displays maintenance daemon worker status, sweep cycle count, records folded, and sweep latency profiling (min, max, avg, total, last) with an interactive "Trigger Maintenance Sweep" button invoking `service.trigger_maintenance_sweep()`. ✓
+    - AC-3: Dashboard displays champion snapshot metadata, provides a "Tag as Champion" button invoking `service.tag_champion_snapshot()`, and provides a state rollback control invoking `service.rollback_bandit_state()` with serving policy refresh. ✓
+    - AC-4: Dashboard provides an interactive "Verify Drift Safety" button invoking `service.evaluate_bandit_drift_safety()`, displaying a pass/breach badge, threshold comparison metrics, and violation reasons. ✓
+    - AC-5: Dashboard displays a real-time streaming health card (Healthy / Degraded / Unhealthy) from `service.streaming_health()` with active warning alerts when issues are detected. ✓
+    - AC-6: Dashboard OPE results table renders 95% confidence intervals (`ci_95`) for IPS, Direct Method, and Doubly Robust estimators. ✓
+    - AC-7: Comprehensive test suite in `tests/test_dashboard.py` validates all new UI components, buttons, error handling, and states with 0 regressions across the entire test suite. ✓
+    - AC-8: Release packaging and documentation complete: `pyproject.toml` bumped to 0.29.0, `CHANGELOG.md` updated with comprehensive 0.29.0 entry, `README.md` updated, and `PLAN.md` updated. ✓
   - Implementation Tasks:
-    - Task 1: Update `PLAN.md` and create `docs/PROGRESS.md` with Phase 134 roadmap, acceptance criteria, and decision log.
-    - Task 2: Implement streaming queue metrics and interactive flush feedback controls in `src/music_recommender/dashboard.py`.
-    - Task 3: Implement maintenance daemon status, sweep latency profiling, and manual sweep trigger controls in `src/music_recommender/dashboard.py`.
-    - Task 4: Implement champion snapshot display, tagging, and state rollback controls in `src/music_recommender/dashboard.py`.
-    - Task 5: Implement drift safety guardrails verification and threshold diagnostics in `src/music_recommender/dashboard.py`.
-    - Task 6: Implement streaming health status card and observability diagnostics in `src/music_recommender/dashboard.py`.
-    - Task 7: Update OPE results table in `src/music_recommender/dashboard.py` to display 95% confidence intervals.
-    - Task 8: Update `FakeDashboardService` in `tests/test_dashboard.py` with mock support for all new service methods and properties.
-    - Task 9: Add tests for streaming queue controls and flush feedback in `tests/test_dashboard.py`.
-    - Task 10: Add tests for maintenance daemon telemetry and sweep trigger in `tests/test_dashboard.py`.
-    - Task 11: Add tests for champion tagging and state rollback in `tests/test_dashboard.py`.
-    - Task 12: Add tests for drift safety evaluation (pass and breach) in `tests/test_dashboard.py`.
-    - Task 13: Add tests for streaming health card and observability diagnostics in `tests/test_dashboard.py`.
-    - Task 14: Add tests for OPE 95% confidence intervals display in `tests/test_dashboard.py`.
-    - Task 15: Run full verification suite (lint, typecheck, tests, coverage) and ensure all pass.
-    - Task 16: Bump version to 0.29.0 in `pyproject.toml`.
-    - Task 17: Update `CHANGELOG.md` with 0.29.0 release notes covering Phases 130-134.
-    - Task 18: Update `README.md` with dashboard and streaming architecture documentation.
-    - Task 19: Finalize `PLAN.md` and `docs/PROGRESS.md`, marking Phase 134 and Milestone 0.29.0 complete.
-    - Task 20: Push phase branch and open draft pull request.
+    - Task 1: Update `PLAN.md` and create `docs/PROGRESS.md` with Phase 134 roadmap, acceptance criteria, and decision log. ✓
+    - Task 2: Implement streaming queue metrics and interactive flush feedback controls in `src/music_recommender/dashboard.py`. ✓
+    - Task 3: Implement maintenance daemon status, sweep latency profiling, and manual sweep trigger controls in `src/music_recommender/dashboard.py`. ✓
+    - Task 4: Implement champion snapshot display, tagging, and state rollback controls in `src/music_recommender/dashboard.py`. ✓
+    - Task 5: Implement drift safety guardrails verification and threshold diagnostics in `src/music_recommender/dashboard.py`. ✓
+    - Task 6: Implement streaming health status card and observability diagnostics in `src/music_recommender/dashboard.py`. ✓
+    - Task 7: Update OPE results table in `src/music_recommender/dashboard.py` to display 95% confidence intervals. ✓
+    - Task 8: Update `FakeDashboardService` in `tests/test_dashboard.py` with mock support for all new service methods and properties. ✓
+    - Task 9: Add tests for streaming queue controls and flush feedback in `tests/test_dashboard.py`. ✓
+    - Task 10: Add tests for maintenance daemon telemetry and sweep trigger in `tests/test_dashboard.py`. ✓
+    - Task 11: Add tests for champion tagging and state rollback in `tests/test_dashboard.py`. ✓
+    - Task 12: Add tests for drift safety evaluation (pass and breach) in `tests/test_dashboard.py`. ✓
+    - Task 13: Add tests for streaming health card and observability diagnostics in `tests/test_dashboard.py`. ✓
+    - Task 14: Add tests for OPE 95% confidence intervals display in `tests/test_dashboard.py`. ✓
+    - Task 15: Run full verification suite (lint, typecheck, tests, coverage) and ensure all pass. ✓
+    - Task 16: Bump version to 0.29.0 in `pyproject.toml`. ✓
+    - Task 17: Update `CHANGELOG.md` with 0.29.0 release notes covering Phases 130-134. ✓
+    - Task 18: Update `README.md` with dashboard and streaming architecture documentation. ✓
+    - Task 19: Finalize `PLAN.md` and `docs/PROGRESS.md`, marking Phase 134 and Milestone 0.29.0 complete. ✓
+    - Task 20: Push phase branch and open draft pull request. ✓
 
 ## Previous milestone (0.28.0) — shipped
 

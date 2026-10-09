@@ -2328,5 +2328,56 @@ def test_bandit_observability_route_not_found() -> None:
         assert "State file not found" in response.json()["detail"]
 
 
+def test_metrics_route_returns_prometheus_exposition() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/metrics")
+        assert response.status_code == 200
+        assert "text/plain" in response.headers["content-type"]
+        assert "version=0.0.4" in response.headers["content-type"]
+
+        content = response.text
+        assert content.endswith("\n")
+        assert "# HELP music_recommender_info" in content
+        assert "music_recommender_up 1" in content
+        assert "music_recommender_streaming_health" in content
+
+
+def test_metrics_route_when_service_is_none() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = None
+        api_main.service_load_error = "Model not trained."
+
+        response = client.get("/metrics")
+        assert response.status_code == 200
+        assert "text/plain" in response.headers["content-type"]
+
+        content = response.text
+        assert "# HELP music_recommender_info" in content
+        assert "music_recommender_up 0" in content
+
+
+def test_metrics_route_tracks_request_counts_and_latency() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        # Issue several requests to populate telemetry
+        client.get("/")
+        client.get("/health")
+
+        response = client.get("/metrics")
+        assert response.status_code == 200
+        content = response.text
+
+        assert "# HELP music_recommender_http_requests_total" in content
+        assert "music_recommender_http_requests_total" in content
+        assert "# HELP music_recommender_http_request_duration_seconds" in content
+        assert "music_recommender_http_request_duration_seconds_count" in content
+
+
+
 
 

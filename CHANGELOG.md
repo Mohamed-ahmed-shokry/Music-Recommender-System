@@ -7,7 +7,44 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.28.0] - 2026-10-04
+## [0.29.0] - 2026-10-08
+
+### Added
+
+- Real-Time Streaming Feedback Ingestion and Asynchronous Policy Maintenance Worker:
+  - Streaming feedback ingestion queue (`StreamingFeedbackQueue`): thread-safe, non-blocking ingestion buffering feedback records in memory with bounded capacity (`max_queue_size`), configurable backpressure strategies (`drop_oldest`, `reject`, `block`), and an asynchronous background flush worker persisting atomic batches (`append_bandit_feedback_batch`) to disk without blocking serving threads.
+  - Background maintenance daemon worker (`BanditMaintenanceWorker`): dedicated background daemon thread executing periodic feedback sweeps, coordinated flushing with `StreamingFeedbackQueue`, automatic state snapshot rotation (`snapshot_on_sweep`), policy hot-reloading (`auto_update_policy`), and clean thread synchronization.
+  - Automated drift guardrails & safe rollback: `evaluate_drift_safety` validating candidate states against `DriftSafetyThresholds` (maximum $L_2$ norm drift, minimum cosine similarity, maximum mean reward drop, and dominant arm flipping); champion snapshot management (`tag_champion_snapshot`, `get_champion_snapshot`) pinning verified production models; and safe rollback (`rollback_bandit_state`) restoring active state and dynamically refreshing serving policy weights.
+  - Granular observability and telemetry instrumentation:
+    - Enhanced `StreamingQueueMetrics` tracking queue depth, capacity, utilization %, backpressure strategy, and batch flush counts.
+    - Enhanced `MaintenanceWorkerMetrics` tracking sweep cycle counts, records folded, and sweep duration profiling (min, max, avg, total, last).
+    - Off-Policy Evaluation (OPE) 95% confidence intervals (`ci_95`) computed for IPS, Direct Method (DM), and Doubly Robust (DR) policy value estimators.
+    - `RecommenderService.streaming_health()` evaluating real-time operational health (`healthy`, `degraded`, `unhealthy`) across queues, daemons, error rates, and drift violations.
+    - `RecommenderService.bandit_observability()` aggregating diagnostics across buffers, latencies, guardrails, snapshots, and counterfactual evaluations.
+  - CLI commands & options:
+    - `bandit-observability` command displaying visual diagnostics tables and structured JSON export (`--json`).
+    - `bandit-status` command supporting a `--json` export option for monitoring pipelines.
+    - `bandit-rollback` command for operator-driven state rollback to champion or target snapshots.
+    - `bandit-drift` supports `--check-safety` with configurable threshold options.
+    - `bandit-snapshot` supports `--tag-champion`.
+    - `bandit-sweep` supports `--enable-guardrails` and `--auto-rollback`.
+  - API endpoints:
+    - `GET /health/streaming`: returns streaming ingestion and maintenance daemon health status (HTTP 200 for healthy/degraded, HTTP 503 for unhealthy); root `GET /health` reports high-level streaming status.
+    - `GET /bandit/observability`: comprehensive diagnostics payload with optional on-demand OPE evaluation (`?include_ope=true`).
+    - `POST /bandit/drift/safety`: evaluates drift safety of current state against champion or specified reference snapshot.
+    - `POST /bandit/rollback`: triggers active state rollback to a designated snapshot or champion.
+    - `POST /bandit/snapshots/champion`: tags a persisted snapshot as the production champion.
+  - Dashboard integration: Cold-Start Bandit tab expanded with real-time streaming health banner & warning alerts, streaming feedback ingestion queue metrics with interactive "Flush Feedback Queue" button, asynchronous maintenance daemon telemetry with sweep latency profiling and "Trigger Maintenance Sweep" button, champion snapshot indicator and interactive tagging, state rollback controls, automated drift safety verification with pass/breach alerts, an observability telemetry diagnostics expander, and OPE 95% confidence intervals in counterfactual evaluation tables.
+
+### Tests
+
+- 1084 automated tests passing with 93.74% total code coverage (well above the required 75%):
+  - `tests/test_bandit.py`: unit tests for `StreamingFeedbackQueue`, `BanditMaintenanceWorker`, `evaluate_drift_safety`, champion snapshot helpers, `rollback_bandit_state`, sweep duration profiling, and OPE confidence intervals.
+  - `tests/test_service.py`: integration tests for streaming queue routing, maintenance daemon lifecycle, drift safety evaluation, rollback policy hot-reloading, `streaming_health()`, and `bandit_observability()`.
+  - `tests/test_cli.py`: CLI testing for `bandit-observability`, `bandit-status --json`, `bandit-rollback`, `bandit-drift --check-safety`, `bandit-snapshot --tag-champion`, and `bandit-sweep --enable-guardrails`.
+  - `tests/test_api.py`: FastAPI route testing for `/health/streaming`, `/bandit/observability`, `/bandit/drift/safety`, `/bandit/rollback`, and `/bandit/snapshots/champion`.
+  - `tests/test_dashboard.py`: Streamlit AppTest tests for streaming health banners, queue metrics and flush button, maintenance telemetry and sweep trigger, champion tagging, state rollback, drift safety pass and breach alerts, observability diagnostics expander, and OPE 95% confidence intervals.
+
 
 ### Added
 

@@ -50,19 +50,32 @@ class RequestSafetyMiddleware:
             nonlocal response_started
             if message["type"] == "http.response.start":
                 response_started = True
+                duration = perf_counter() - started_at
                 response_headers = MutableHeaders(scope=message)
                 response_headers["x-request-id"] = request_id
-                response_headers["x-process-time"] = (
-                    f"{perf_counter() - started_at:.6f}"
-                )
+                response_headers["x-process-time"] = f"{duration:.6f}"
+                status_code = int(message.get("status", -1))
                 logger.info(
                     "request method=%s path=%s status=%d request_id=%s duration=%.3fs",
                     scope.get("method"),
                     scope.get("path"),
-                    message.get("status", -1),
+                    status_code,
                     request_id,
-                    perf_counter() - started_at,
+                    duration,
                 )
+                try:
+                    from music_recommender.telemetry import (
+                        get_global_request_tracker,
+                    )
+
+                    get_global_request_tracker().record_request(
+                        endpoint=str(scope.get("path") or "/"),
+                        method=str(scope.get("method") or "GET"),
+                        status_code=status_code,
+                        duration_seconds=duration,
+                    )
+                except Exception:
+                    pass
             await send(message)
 
         content_length = headers.get("content-length")
