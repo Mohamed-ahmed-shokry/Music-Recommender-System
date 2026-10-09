@@ -7,6 +7,16 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Prometheus Metrics Exporter Endpoint & OpenTelemetry Collectors (Phase 135):
+  - Pure-Python Prometheus 0.0.4 text exposition generator (`src/music_recommender/telemetry.py`): provides `MetricType` (`GAUGE`, `COUNTER`, `HISTOGRAM`, `SUMMARY`), `MetricFamily`, `MetricSample`, label sanitization/escaping, and deterministic text rendering without external dependencies.
+  - Granular telemetry extraction (`collect_service_metric_families`): exposes `music_recommender_info`, `music_recommender_up`, artifact counts, cold-start bandit arm weights, champion snapshot info, streaming feedback queue metrics (depth, capacity, utilization ratio, enqueued, flushed, dropped, errors), maintenance worker timings/cycles/sweeps/drift/rollbacks, and streaming health status flags.
+  - HTTP request telemetry tracking (`RequestTelemetryTracker`): thread-safe tracking of request counts by endpoint, HTTP method, and status code (`music_recommender_http_requests_total`) and execution duration histogram buckets, sum, and count (`music_recommender_http_request_duration_seconds`).
+  - FastAPI `/metrics` endpoint (`GET /metrics`): standard text exposition response (`text/plain; version=0.0.4; charset=utf-8`) for scraping by Prometheus and OpenTelemetry collectors.
+  - `RecommenderService.export_prometheus_metrics()`: programmatic metrics export supporting custom labels.
+  - Turn-key collector templates: `configs/prometheus.yml` (server scrape job) and `configs/otel-collector-config.yaml` (OpenTelemetry Collector pipeline with Prometheus receiver and OTLP/Prometheus exporters).
+
 ## [0.29.0] - 2026-10-08
 
 ### Added
