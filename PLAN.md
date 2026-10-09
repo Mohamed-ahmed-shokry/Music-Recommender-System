@@ -12,7 +12,33 @@ Production observability pipelines require standard metric export formats for sc
 3. Operator CLI exporter command (`music-recommender export-metrics`).
 4. Grafana / Prometheus dashboard templates and documentation.
 
-- Phase 135 — Prometheus metrics exporter endpoint & OpenTelemetry collectors.
+- Phase 135 — Prometheus metrics exporter endpoint & OpenTelemetry collectors:
+  Standard Prometheus text exposition endpoint (`/metrics`), pure-Python metric generator, and OpenTelemetry collector configs.
+  - Objective: Build a production-grade Prometheus text format (version 0.0.4) metrics exporter in `src/music_recommender/telemetry.py` without third-party runtime dependencies, expose a standard `GET /metrics` endpoint in FastAPI (`api/main.py`), implement `export_prometheus_metrics()` on `RecommenderService`, track API request counts and latency distributions, and provide ready-to-use Prometheus scrape and OpenTelemetry Collector configuration templates in `configs/`.
+  - Acceptance Criteria:
+    - AC-1: Pure-Python Prometheus 0.0.4 exposition format metric formatter in `telemetry.py` supporting `GAUGE`, `COUNTER`, and `HISTOGRAM`/`SUMMARY` metric families with strict label escaping and comment formatting.
+    - AC-2: Exposes system info, service liveness, artifact inventory statistics, and cold-start bandit arm weights/champion metadata as standard Prometheus gauges.
+    - AC-3: Exposes streaming feedback queue telemetry (depth, capacity, utilization ratio, enqueued, flushed, dropped, flush errors) and maintenance worker daemon telemetry (status, cycles, sweeps, folded records, sweep latencies, drift evaluations/violations, rollbacks).
+    - AC-4: `RecommenderService.export_prometheus_metrics()` provides programmatic text export with optional custom labels and timestamp inclusion.
+    - AC-5: FastAPI application exposes `GET /metrics` with HTTP 200 and Content-Type `text/plain; version=0.0.4; charset=utf-8`.
+    - AC-6: HTTP request instrumentation middleware tracks endpoint hit counts and request duration percentiles in Prometheus metric families.
+    - AC-7: Production-ready collector configuration templates provided in `configs/prometheus.yml` and `configs/otel-collector-config.yaml`.
+    - AC-8: Comprehensive test suite across `tests/test_telemetry.py`, `tests/test_api.py`, and `tests/test_service.py` with 0 regressions across the entire repository.
+  - Implementation Tasks:
+    - Task 1: Update `PLAN.md` with Phase 135 roadmap and create `docs/PROGRESS.md`.
+    - Task 2: Implement core Prometheus exposition data structures and formatting utilities in `src/music_recommender/telemetry.py`.
+    - Task 3: Implement streaming queue, maintenance worker, and artifact metric extractors in `src/music_recommender/telemetry.py`.
+    - Task 4: Implement thread-safe request telemetry tracker in `src/music_recommender/telemetry.py`.
+    - Task 5: Integrate `export_prometheus_metrics()` and request recording into `RecommenderService` in `src/music_recommender/service.py`.
+    - Task 6: Expose `GET /metrics` endpoint and request tracking middleware in `api/main.py`.
+    - Task 7: Provide standard scrape and collector templates in `configs/prometheus.yml` and `configs/otel-collector-config.yaml`.
+    - Task 8: Implement unit tests in `tests/test_telemetry.py`.
+    - Task 9: Implement service integration tests for metrics export in `tests/test_service.py`.
+    - Task 10: Implement API integration tests for `GET /metrics` in `tests/test_api.py`.
+    - Task 11: Implement configuration validation tests for Prometheus and OpenTelemetry configs in `tests/test_telemetry.py`.
+    - Task 12: Run full test suite, lint, and typecheck verifications.
+    - Task 13: Update `README.md` documenting `/metrics` and OpenTelemetry collector setup.
+    - Task 14: Finalize progress records, push commits, and update draft PR.
 - Phase 136 — Alerting rule definitions & automated notification dispatch.
 - Phase 137 — CLI & Service metrics export tooling.
 - Phase 138 — Integration testing, dashboard templates, and 0.30.0 release.
