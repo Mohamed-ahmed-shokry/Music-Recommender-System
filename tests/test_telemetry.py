@@ -8,9 +8,11 @@ from music_recommender.telemetry import (
     MetricFamily,
     MetricSample,
     MetricType,
+    RequestTelemetryTracker,
     collect_service_metric_families,
     escape_help_string,
     escape_label_value,
+    export_prometheus_metrics,
     format_metric_value,
     render_prometheus_exposition,
 )
@@ -282,4 +284,83 @@ def test_collect_service_metric_families_disabled_components() -> None:
         for s in names["music_recommender_streaming_health"].samples
     }
     assert health_samples["disabled"] == 1
+
+
+def test_request_telemetry_tracker() -> None:
+    tracker = RequestTelemetryTracker(
+        latency_buckets=(0.01, 0.05, 0.1, float("inf"))
+    )
+
+    # Record 2 requests
+    tracker.record_request(
+        "/recommend/user", method="GET", status_code=200, duration_seconds=0.02
+    )
+    tracker.record_request(
+        "/recommend/user", method="GET", status_code=200, duration_seconds=0.08
+    )
+    tracker.record_request(
+        "/recommend/user", method="GET", status_code=500, duration_seconds=0.005
+    )
+
+    families = tracker.to_metric_families()
+    names = {f.name: f for f in families}
+
+    assert "music_recommender_http_requests_total" in names
+    req_samples = names["music_recommender_http_requests_total"].samples
+    assert len(req_samples) == 2
+
+    sc_counts = {s.labels["status"]: s.value for s in req_samples}
+    assert sc_counts["200"] == 2
+    assert sc_counts["500"] == 1
+
+    assert "music_recommender_http_request_duration_seconds" in names
+    hist_fam = names["music_recommender_http_request_duration_seconds"]
+
+    # Check sum and count
+    sum_samples = [s for s in hist_fam.samples if s.name.endswith("_sum")]
+    count_samples = [s for s in hist_fam.samples if s.name.endswith("_count")]
+    assert len(sum_samples) == 1
+    assert len(count_samples) == 1
+    assert sum_samples[0].value == 0.105
+    assert count_samples[0].value == 3
+
+    # Check bucket samples
+    bucket_samples = {
+        s.labels["le"]: s.value
+        for s in hist_fam.samples
+        if s.name.endswith("_bucket")
+    }
+    assert bucket_samples["0.01"] == 1  # 0.005 <= 0.01
+    assert bucket_samples["0.05"] == 2  # 0.005 and 0.02 <= 0.05
+    assert bucket_samples["0.1"] == 3   # 0.005, 0.02, 0.08 <= 0.1
+    assert bucket_samples["+Inf"] == 3
+
+    # Test reset
+    tracker.reset()
+    assert len(tracker.to_metric_families()[0].samples) == 0
+
+
+def test_export_prometheus_metrics() -> None:
+    tracker = RequestTelemetryTracker()
+    tracker.record_request(
+        "/health", method="GET", status_code=200, duration_seconds=0.001
+    )
+
+    text = export_prometheus_metrics(
+        service=None,
+        request_tracker=tracker,
+        custom_labels={"app": "recommender"},
+    )
+    assert text.endswith("\n")
+    assert "# HELP music_recommender_info" in text
+    assert 'music_recommender_info{app="recommender"' in text
+    assert "music_recommender_up 0" in text
+    assert "# HELP music_recommender_http_requests_total" in text
+    assert (
+        'music_recommender_http_requests_total{endpoint="/health",'
+        'method="GET",status="200"} 1'
+        in text
+    )
+    assert "# TYPE music_recommender_http_request_duration_seconds histogram" in text
+
 

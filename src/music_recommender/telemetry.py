@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 import re
 import sys
+import threading
+from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -462,4 +464,143 @@ def collect_service_metric_families(
             pass
 
     return families
+
+
+DEFAULT_LATENCY_BUCKETS: tuple[float, ...] = (
+    0.005,
+    0.01,
+    0.025,
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    1.0,
+    2.5,
+    5.0,
+    10.0,
+    float("inf"),
+)
+
+
+class RequestTelemetryTracker:
+    """Thread-safe collector for HTTP and service request metrics."""
+
+    def __init__(
+        self,
+        *,
+        latency_buckets: tuple[float, ...] = DEFAULT_LATENCY_BUCKETS,
+    ) -> None:
+        self._lock = threading.Lock()
+        self.latency_buckets = tuple(sorted(latency_buckets))
+        self._requests: dict[tuple[str, str, int], int] = defaultdict(int)
+        self._duration_sums: dict[tuple[str, str], float] = defaultdict(float)
+        self._duration_counts: dict[tuple[str, str], int] = defaultdict(int)
+        self._duration_buckets: dict[tuple[str, str, float], int] = defaultdict(int)
+
+    def record_request(
+        self,
+        endpoint: str,
+        method: str = "GET",
+        status_code: int = 200,
+        duration_seconds: float = 0.0,
+    ) -> None:
+        """Record an observed request and its execution latency in seconds."""
+        norm_endpoint = endpoint.strip() or "/"
+        norm_method = method.strip().upper() or "GET"
+        dur = max(0.0, float(duration_seconds))
+
+        with self._lock:
+            key = (norm_endpoint, norm_method, int(status_code))
+            self._requests[key] += 1
+
+            dur_key = (norm_endpoint, norm_method)
+            self._duration_sums[dur_key] += dur
+            self._duration_counts[dur_key] += 1
+            for b in self.latency_buckets:
+                if dur <= b:
+                    self._duration_buckets[(norm_endpoint, norm_method, b)] += 1
+
+    def to_metric_families(self) -> list[MetricFamily]:
+        """Convert recorded request telemetry into Prometheus metric families."""
+        with self._lock:
+            req_items = list(self._requests.items())
+            dur_sums = dict(self._duration_sums)
+            dur_counts = dict(self._duration_counts)
+            dur_buckets = dict(self._duration_buckets)
+
+        families: list[MetricFamily] = []
+
+        # 1. Total Requests Counter
+        req_fam = MetricFamily(
+            name="music_recommender_http_requests_total",
+            help_text="Total HTTP and service requests processed.",
+            metric_type=MetricType.COUNTER,
+        )
+        for (ep, m, sc), count in sorted(req_items):
+            req_fam.add_sample(
+                value=count,
+                labels={"endpoint": ep, "method": m, "status": str(sc)},
+            )
+        families.append(req_fam)
+
+        # 2. Latency Histogram
+        hist_fam = MetricFamily(
+            name="music_recommender_http_request_duration_seconds",
+            help_text="HTTP request duration distribution in seconds.",
+            metric_type=MetricType.HISTOGRAM,
+        )
+        for ep, m in sorted(dur_counts.keys()):
+            for b in self.latency_buckets:
+                b_count = dur_buckets.get((ep, m, b), 0)
+                le_str = "+Inf" if math.isinf(b) else str(b)
+                hist_fam.add_sample(
+                    name="music_recommender_http_request_duration_seconds_bucket",
+                    value=b_count,
+                    labels={"endpoint": ep, "method": m, "le": le_str},
+                )
+            hist_fam.add_sample(
+                name="music_recommender_http_request_duration_seconds_sum",
+                value=round(dur_sums.get((ep, m), 0.0), 6),
+                labels={"endpoint": ep, "method": m},
+            )
+            hist_fam.add_sample(
+                name="music_recommender_http_request_duration_seconds_count",
+                value=dur_counts.get((ep, m), 0),
+                labels={"endpoint": ep, "method": m},
+            )
+        families.append(hist_fam)
+
+        return families
+
+    def reset(self) -> None:
+        """Reset internal metrics storage."""
+        with self._lock:
+            self._requests.clear()
+            self._duration_sums.clear()
+            self._duration_counts.clear()
+            self._duration_buckets.clear()
+
+
+_GLOBAL_TRACKER = RequestTelemetryTracker()
+
+
+def get_global_request_tracker() -> RequestTelemetryTracker:
+    """Return the application-wide singleton request telemetry tracker."""
+    return _GLOBAL_TRACKER
+
+
+def export_prometheus_metrics(
+    service: Any | None,
+    *,
+    request_tracker: RequestTelemetryTracker | None = None,
+    custom_labels: dict[str, str] | None = None,
+) -> str:
+    """Export complete Prometheus text exposition document for the service."""
+    families = collect_service_metric_families(
+        service, custom_labels=custom_labels
+    )
+    tracker = request_tracker or get_global_request_tracker()
+    families.extend(tracker.to_metric_families())
+    return render_prometheus_exposition(families)
+
 
