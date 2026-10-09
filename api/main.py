@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from api.middleware import RequestSafetyMiddleware
@@ -27,6 +28,7 @@ from music_recommender.config import (
 from music_recommender.evaluate import load_ablation_summary_report
 from music_recommender.logging_setup import configure_logging
 from music_recommender.service import RecommenderService
+from music_recommender.telemetry import export_prometheus_metrics
 
 configure_logging()
 
@@ -204,6 +206,15 @@ def health_streaming(response: Response) -> dict[str, object]:
     if health_data.get("status") == "unhealthy":
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return health_data
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    """Return Prometheus text exposition format (0.0.4) metrics for scraping."""
+    return PlainTextResponse(
+        content=export_prometheus_metrics(service),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
 
 
 @app.get("/metadata")
