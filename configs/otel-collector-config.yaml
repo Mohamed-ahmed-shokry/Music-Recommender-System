@@ -1,0 +1,46 @@
+# OpenTelemetry Collector Configuration for Music Recommender System
+# Scrapes Prometheus metrics from /metrics and exports via OTLP and Prometheus
+
+receivers:
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: "music_recommender"
+          scrape_interval: 10s
+          scrape_timeout: 5s
+          metrics_path: "/metrics"
+          static_configs:
+            - targets: ["localhost:8000"]
+              labels:
+                service.name: "music-recommender"
+                service.namespace: "production"
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 256
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+
+exporters:
+  otlp:
+    endpoint: "localhost:4317"
+    tls:
+      insecure: true
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: "otel"
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    metrics:
+      receivers: [prometheus]
+      processors: [memory_limiter, batch]
+      exporters: [otlp, prometheus, debug]
+  telemetry:
+    logs:
+      level: info
