@@ -1005,6 +1005,7 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/health` | Artifact and service health (including `streaming_status`) |
 | `GET` | `/health/streaming` | Real-time streaming queue and maintenance health (200 OK or 503 Service Unavailable) |
 | `GET` | `/metrics` | Prometheus 0.0.4 text exposition metrics for Prometheus and OpenTelemetry collectors |
+| `GET` | `/alerts?dispatch=true` | Evaluate alert rules on live metrics, notify the webhook on state changes, and return rule states |
 | `GET` | `/metadata` | Training config, dataset fingerprint, artifact metadata |
 | `GET` | `/evaluation/ablation-summary` | Persisted aggregated knob-importance summary |
 | `GET` | `/catalog/artists?query=pop&limit=25` | Search and page through artists and metadata |
