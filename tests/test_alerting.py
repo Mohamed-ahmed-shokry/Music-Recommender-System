@@ -21,7 +21,7 @@ from music_recommender.alerting import (
     lookup_metric_value,
     render_prometheus_rules,
 )
-from music_recommender.telemetry import MetricFamily
+from music_recommender.telemetry import MetricFamily, collect_service_metric_families
 
 
 def _rule(**overrides: object) -> AlertRule:
@@ -324,3 +324,97 @@ def test_checked_in_rule_file_matches_generator() -> None:
 def test_prometheus_config_references_rule_file() -> None:
     cfg = yaml.safe_load((CONFIGS_DIR / "prometheus.yml").read_text(encoding="utf-8"))
     assert "alert-rules.yml" in " ".join(cfg["rule_files"])
+
+
+# --- integration with telemetry -------------------------------------------
+
+
+class _QueueMetrics:
+    queue_size = 900
+    max_queue_size = 1000
+    utilization_pct = 90.0
+    enqueued_count = 100
+    flushed_count = 10
+    dropped_count = 0
+    flush_errors = 0
+    flushes_count = 1
+
+
+class _WorkerMetrics:
+    is_running = True
+    is_closed = False
+    cycles_count = 1
+    sweeps_count = 1
+    records_folded_count = 1
+    errors_count = 0
+    last_sweep_duration_seconds = 0.1
+    min_sweep_duration_seconds = 0.1
+    max_sweep_duration_seconds = 0.1
+    avg_sweep_duration_seconds = 0.1
+    total_sweep_duration_seconds = 0.1
+    drift_evaluations_count = 1
+    drift_violations_count = 0
+    rollbacks_count = 0
+
+
+class _Holder:
+    def __init__(self, metrics: object) -> None:
+        self._metrics = metrics
+
+    def get_metrics(self) -> object:
+        return self._metrics
+
+
+class _FakeService:
+    artifact = None
+    cold_start_policy = None
+
+    def __init__(self) -> None:
+        self.queue_metrics = _QueueMetrics()
+        self.worker_metrics = _WorkerMetrics()
+        self.feedback_queue = _Holder(self.queue_metrics)
+        self.maintenance_worker = _Holder(self.worker_metrics)
+        self.health = "healthy"
+
+    def streaming_health(self) -> dict[str, str]:
+        return {"status": self.health}
+
+
+def test_default_rules_reference_emitted_metrics() -> None:
+    families = collect_service_metric_families(_FakeService())
+    for rule in DEFAULT_ALERT_RULES:
+        assert lookup_metric_value(families, rule.metric, rule.labels) is not None, (
+            rule.name
+        )
+
+
+def test_default_rules_fire_on_live_service_metrics() -> None:
+    service = _FakeService()
+    ev = AlertEvaluator()
+
+    def run() -> dict[str, str]:
+        ev.evaluate(collect_service_metric_families(service))
+        return {s["alert"]: s["status"] for s in ev.states()}
+
+    baseline = run()
+    assert baseline["ServiceDown"] == "inactive"
+    assert baseline["StreamingQueueHighUtilization"] == "pending"
+
+    service.queue_metrics.dropped_count = 5
+    service.worker_metrics.is_running = False
+    service.worker_metrics.drift_violations_count = 2
+    service.health = "unhealthy"
+    run()
+    states = run()
+    assert states["StreamingHealthUnhealthy"] == "firing"
+    assert states["MaintenanceWorkerStopped"] == "firing"
+    assert states["StreamingQueueHighUtilization"] == "firing"
+    # increase-mode alerts fired on the first delta and resolved on the next
+    assert states["StreamingRecordsDropped"] == "inactive"
+    assert states["BanditDriftViolation"] == "inactive"
+
+
+def test_service_down_fires_without_service() -> None:
+    ev = AlertEvaluator()
+    fired = ev.evaluate(collect_service_metric_families(None))
+    assert [t.rule.name for t in fired] == ["ServiceDown"]
