@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 import music_recommender.service as service_module
+from music_recommender.alerting import AlertEvaluator, AlertRule, WebhookDispatcher
 from music_recommender.artifacts import (
     build_artist_stats,
     build_recommender_artifact,
@@ -27,6 +28,7 @@ from music_recommender.bandit import (
     write_bandit_state,
 )
 from music_recommender.config import (
+    ALERT_WEBHOOK_URL_ENV_VAR,
     BANDIT_AUTO_ROLLBACK_ON_DRIFT_ENV_VAR,
     BANDIT_DRIFT_MAX_L2_ENV_VAR,
     BANDIT_DRIFT_MAX_REWARD_DROP_ENV_VAR,
@@ -2197,7 +2199,72 @@ def test_service_record_request(tmp_path: Path) -> None:
         'method="GET",status="200"}' in metrics_text
     )
 
+def _always_firing_rule() -> AlertRule:
+    return AlertRule(
+        name="HasUsers",
+        metric="music_recommender_artifact_users_count",
+        comparator=">",
+        threshold=0,
+        severity="warning",
+        summary="Artifacts are loaded.",
+    )
 
 
+def test_service_evaluate_alerts_dispatches_transitions(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    service.alert_evaluator = AlertEvaluator([_always_firing_rule()])
+    sent: list[dict[str, object]] = []
+    service.alert_dispatcher = WebhookDispatcher(
+        "http://hook", sender=lambda url, body, timeout: sent.append(json.loads(body))
+    )
 
+    result = service.evaluate_alerts()
+
+    assert result["firing_count"] == 1
+    assert result["webhook_configured"] is True
+    assert result["notifications_delivered"] == 1
+    assert [t["alert"] for t in result["transitions"]] == ["HasUsers"]
+    assert sent[0]["event"] == "firing"
+    assert sent[0]["source"] == "music-recommender"
+
+    again = service.evaluate_alerts()
+    assert again["firing_count"] == 1
+    assert again["transitions"] == []
+    assert len(sent) == 1  # no duplicate notification while still firing
+
+
+def test_service_evaluate_alerts_without_webhook_or_dispatch(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    service.alert_evaluator = AlertEvaluator([_always_firing_rule()])
+    assert service.alert_dispatcher is None
+    result = service.evaluate_alerts()
+    assert result["webhook_configured"] is False
+    assert result["notifications_delivered"] == 0
+    assert len(result["transitions"]) == 1
+
+    service.alert_evaluator = AlertEvaluator([_always_firing_rule()])
+    service.alert_dispatcher = WebhookDispatcher("http://hook", sender=_unreachable)
+    result = service.evaluate_alerts(dispatch=False)
+    assert result["notifications_delivered"] == 0
+    assert len(result["transitions"]) == 1
+
+
+def _unreachable(url: str, body: bytes, timeout: float) -> None:
+    raise AssertionError("webhook must not be called")
+
+
+def test_service_alert_webhook_from_env_and_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(ALERT_WEBHOOK_URL_ENV_VAR, "https://hooks.example/alerts")
+    service = create_service(tmp_path)
+    assert service.alert_dispatcher is not None
+    assert service.alert_dispatcher.url == "https://hooks.example/alerts"
+
+    monkeypatch.setenv(ALERT_WEBHOOK_URL_ENV_VAR, "ftp://nope")
+    with pytest.raises(ValueError, match=ALERT_WEBHOOK_URL_ENV_VAR):
+        create_service(tmp_path)
+
+    monkeypatch.delenv(ALERT_WEBHOOK_URL_ENV_VAR)
+    assert create_service(tmp_path).alert_dispatcher is None
 
