@@ -1,6 +1,7 @@
 # Prometheus alerting rules for the Music Recommender System.
 # GENERATED from music_recommender.alerting.DEFAULT_ALERT_RULES.
-# Regenerate with: uv run python -m music_recommender.alerting
+# Regenerate with:
+#   uv run python -m music_recommender.alerting configs/alert-rules.yml
 groups:
   - name: music_recommender_alerts
     interval: 15s

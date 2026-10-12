@@ -472,7 +472,8 @@ def render_prometheus_rules(
     lines = [
         "# Prometheus alerting rules for the Music Recommender System.",
         "# GENERATED from music_recommender.alerting.DEFAULT_ALERT_RULES.",
-        "# Regenerate with: uv run python -m music_recommender.alerting",
+        "# Regenerate with:",
+        "#   uv run python -m music_recommender.alerting configs/alert-rules.yml",
         "groups:",
         f"  - name: {group_name}",
         f"    interval: {interval}s",
@@ -491,7 +492,22 @@ def render_prometheus_rules(
     return "\n".join(lines) + "\n"
 
 
-if __name__ == "__main__":
+def main(argv: Sequence[str] | None = None) -> int:
+    """Write the generated rule file to PATH (or stdout when omitted)."""
     import sys
+    from pathlib import Path
 
-    sys.stdout.write(render_prometheus_rules())
+    args = list(sys.argv[1:] if argv is None else argv)
+    if len(args) > 1:
+        sys.stderr.write("usage: python -m music_recommender.alerting [PATH]\n")
+        return 2
+    text = render_prometheus_rules()
+    if args:
+        Path(args[0]).write_text(text, encoding="utf-8", newline="\n")
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
