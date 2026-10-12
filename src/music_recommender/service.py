@@ -418,6 +418,16 @@ class RecommenderService:
                 snapshot_on_sweep=self.snapshot_on_sweep,
                 auto_update_policy=self.auto_update_policy,
                 drift_guardrails_enabled=self.drift_guardrails_enabled,
+                drift_thresholds=self.drift_thresholds,
+                auto_rollback_on_drift=self.auto_rollback_on_drift,
+                champion_snapshot_path=self.champion_snapshot_path,
+                on_policy_updated=self._on_maintenance_policy_updated,
+                lock=self._sweep_lock,
+                auto_start=True,
+            )
+        else:
+            self.maintenance_worker = None
+
         self.alert_evaluator = alert_evaluator or AlertEvaluator()
         webhook_url = alert_webhook_url
         if webhook_url is None:
@@ -430,16 +440,6 @@ class RecommenderService:
             raise ValueError(
                 f"Invalid alert webhook URL (check {ALERT_WEBHOOK_URL_ENV_VAR}): {exc}"
             ) from exc
-
-                drift_thresholds=self.drift_thresholds,
-                auto_rollback_on_drift=self.auto_rollback_on_drift,
-                champion_snapshot_path=self.champion_snapshot_path,
-                on_policy_updated=self._on_maintenance_policy_updated,
-                lock=self._sweep_lock,
-                auto_start=True,
-            )
-        else:
-            self.maintenance_worker = None
 
     def _on_maintenance_policy_updated(self, new_policy: dict[str, float]) -> None:
         """Callback invoked by maintenance worker when a sweep derives a new policy."""
