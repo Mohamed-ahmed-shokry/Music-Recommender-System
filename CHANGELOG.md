@@ -9,6 +9,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Alerting Rule Definitions & Webhook Notification Dispatch (Phase 136):
+  - `src/music_recommender/alerting.py`: validated `AlertRule` model and `DEFAULT_ALERT_RULES` (service down, streaming health, queue utilization, dropped records, flush errors, stopped maintenance worker, sweep errors, drift violations, automatic rollbacks) over the Phase 135 metric families; `AlertEvaluator` with `pending → firing → resolved` state, `for_evaluations` debounce, and counter-increase rules.
+  - `WebhookDispatcher`: JSON POST per transition using the standard library, exponential-backoff retries, and failure isolation (errors are logged, never raised).
+  - `RecommenderService.evaluate_alerts()` and `GET /alerts` (`dispatch=false` evaluates without notifying; reports `ServiceDown` when artifacts are not loaded); webhook configured via `MUSIC_RECOMMENDER_ALERT_WEBHOOK_URL` or `alert_webhook_url=`.
+  - `configs/alert-rules.yml` generated from the same rule definitions (`python -m music_recommender.alerting configs/alert-rules.yml`), loaded by `configs/prometheus.yml` via `rule_files`, with a test guarding against drift.
 - Prometheus Metrics Exporter Endpoint & OpenTelemetry Collectors (Phase 135):
   - Pure-Python Prometheus 0.0.4 text exposition generator (`src/music_recommender/telemetry.py`): provides `MetricType` (`GAUGE`, `COUNTER`, `HISTOGRAM`, `SUMMARY`), `MetricFamily`, `MetricSample`, label sanitization/escaping, and deterministic text rendering without external dependencies.
   - Granular telemetry extraction (`collect_service_metric_families`): exposes `music_recommender_info`, `music_recommender_up`, artifact counts, cold-start bandit arm weights, champion snapshot info, streaming feedback queue metrics (depth, capacity, utilization ratio, enqueued, flushed, dropped, errors), maintenance worker timings/cycles/sweeps/drift/rollbacks, and streaming health status flags.
