@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
@@ -12,6 +14,8 @@ from music_recommender.alerting import (
     AlertMode,
     AlertRule,
     AlertSeverity,
+    AlertTransition,
+    WebhookDispatcher,
     lookup_metric_value,
 )
 from music_recommender.telemetry import MetricFamily
@@ -180,3 +184,108 @@ def test_transition_payload_is_json_ready() -> None:
         "value": 5,
         "timestamp": _fixed_clock(),
     }
+
+
+# --- webhook dispatcher ----------------------------------------------------
+
+
+def _transition(event: str = "firing") -> AlertTransition:
+    return AlertTransition(_rule(), event, 5.0, _fixed_clock())
+
+
+def test_dispatcher_rejects_bad_url_and_attempts() -> None:
+    with pytest.raises(ValueError, match="http"):
+        WebhookDispatcher("file:///etc/passwd")
+    with pytest.raises(ValueError, match="max_attempts"):
+        WebhookDispatcher("http://x", max_attempts=0)
+
+
+def test_dispatcher_posts_one_payload_per_transition() -> None:
+    sent: list[tuple[str, dict[str, object], float]] = []
+
+    def sender(url: str, body: bytes, timeout: float) -> None:
+        sent.append((url, json.loads(body), timeout))
+
+    d = WebhookDispatcher("http://hook", timeout_seconds=2.0, sender=sender)
+    assert d.dispatch([_transition(), _transition("resolved")]) == 2
+    assert [s[1]["event"] for s in sent] == ["firing", "resolved"]
+    assert sent[0][0] == "http://hook" and sent[0][2] == 2.0
+    assert sent[0][1]["source"] == "music-recommender"
+
+
+def test_dispatcher_retries_with_backoff_then_succeeds() -> None:
+    calls: list[int] = []
+    sleeps: list[float] = []
+
+    def flaky(url: str, body: bytes, timeout: float) -> None:
+        calls.append(1)
+        if len(calls) < 3:
+            raise OSError("boom")
+
+    d = WebhookDispatcher(
+        "http://hook", backoff_seconds=1.0, sender=flaky, sleep=sleeps.append
+    )
+    assert d.dispatch([_transition()]) == 1
+    assert len(calls) == 3
+    assert sleeps == [1.0, 2.0]
+
+
+def test_dispatcher_swallows_final_failure(caplog: pytest.LogCaptureFixture) -> None:
+    def broken(url: str, body: bytes, timeout: float) -> None:
+        raise OSError("down")
+
+    d = WebhookDispatcher(
+        "http://hook", max_attempts=2, sender=broken, sleep=lambda s: None
+    )
+    with caplog.at_level("WARNING", logger="music_recommender.alerting"):
+        assert d.dispatch([_transition()]) == 0
+    assert "attempt 2/2" in caplog.text
+
+
+def test_dispatcher_default_sender_posts_json_over_http() -> None:
+    received: list[tuple[str | None, dict[str, object]]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers["Content-Length"])
+            received.append(
+                (self.headers["Content-Type"], json.loads(self.rfile.read(length)))
+            )
+            self.send_response(204)
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/hook"
+        assert WebhookDispatcher(url).dispatch([_transition()]) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert received[0][0] == "application/json"
+    assert received[0][1]["alert"] == "HighThing"
+
+
+def test_dispatcher_default_sender_reports_http_errors() -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            self.send_response(500)
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/hook"
+        d = WebhookDispatcher(url, max_attempts=1)
+        assert d.dispatch([_transition()]) == 0
+    finally:
+        server.shutdown()
+        server.server_close()
