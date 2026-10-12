@@ -444,3 +444,54 @@ def _post_json(url: str, body: bytes, timeout: float) -> None:
         status = getattr(response, "status", 200)
         if status >= 400:
             raise OSError(f"webhook responded with HTTP {status}")
+
+
+def _format_number(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else repr(float(value))
+
+
+def _promql_expression(rule: AlertRule) -> str:
+    selector = rule.metric
+    if rule.labels:
+        matchers = ",".join(
+            f"{k}={json.dumps(v)}" for k, v in sorted(rule.labels.items())
+        )
+        selector = f"{selector}{{{matchers}}}"
+    if rule.mode is AlertMode.INCREASE:
+        selector = f"increase({selector}[{rule.window}])"
+    return f"{selector} {rule.comparator} {_format_number(rule.threshold)}"
+
+
+def render_prometheus_rules(
+    rules: Sequence[AlertRule] = DEFAULT_ALERT_RULES,
+    *,
+    group_name: str = "music_recommender_alerts",
+) -> str:
+    """Render ``rules`` as a Prometheus alerting rule file (YAML)."""
+    interval = PROMETHEUS_EVALUATION_INTERVAL_SECONDS
+    lines = [
+        "# Prometheus alerting rules for the Music Recommender System.",
+        "# GENERATED from music_recommender.alerting.DEFAULT_ALERT_RULES.",
+        "# Regenerate with: uv run python -m music_recommender.alerting",
+        "groups:",
+        f"  - name: {group_name}",
+        f"    interval: {interval}s",
+        "    rules:",
+    ]
+    for rule in rules:
+        lines.append(f"      - alert: {rule.name}")
+        lines.append(f"        expr: {json.dumps(_promql_expression(rule))}")
+        hold = (rule.for_evaluations - 1) * interval
+        if hold:
+            lines.append(f"        for: {hold}s")
+        lines.append("        labels:")
+        lines.append(f"          severity: {rule.severity}")
+        lines.append("        annotations:")
+        lines.append(f"          summary: {json.dumps(rule.summary)}")
+    return "\n".join(lines) + "\n"
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.stdout.write(render_prometheus_rules())
