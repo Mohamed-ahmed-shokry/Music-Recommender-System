@@ -21,6 +21,9 @@ from music_recommender.alerting import (
     lookup_metric_value,
     render_prometheus_rules,
 )
+from music_recommender.alerting import (
+    main as alerting_main,
+)
 from music_recommender.telemetry import MetricFamily, collect_service_metric_families
 
 
@@ -418,3 +421,18 @@ def test_service_down_fires_without_service() -> None:
     ev = AlertEvaluator()
     fired = ev.evaluate(collect_service_metric_families(None))
     assert [t.rule.name for t in fired] == ["ServiceDown"]
+
+
+def test_main_writes_rule_file_and_validates_args(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = tmp_path / "rules.yml"
+    assert alerting_main([str(target)]) == 0
+    assert target.read_text(encoding="utf-8") == render_prometheus_rules()
+    assert b"\r\n" not in target.read_bytes()
+
+    assert alerting_main([]) == 0
+    assert capsys.readouterr().out == render_prometheus_rules()
+
+    assert alerting_main(["a", "b"]) == 2
+    assert "usage" in capsys.readouterr().err
