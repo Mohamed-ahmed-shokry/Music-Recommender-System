@@ -6,16 +6,23 @@ notification dispatch, and generation of a Prometheus rule file.
 
 from __future__ import annotations
 
+import json
+import logging
 import operator
 import re
 import threading
+import time
+import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
+from urllib.parse import urlsplit
 
 from music_recommender.telemetry import MetricFamily
+
+logger = logging.getLogger("music_recommender.alerting")
 
 _NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _METRIC_RE = re.compile(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$")
@@ -367,3 +374,73 @@ class AlertEvaluator:
     def firing(self) -> list[dict[str, Any]]:
         """Return only the states currently firing."""
         return [s for s in self.states() if s["status"] == AlertStatus.FIRING]
+
+
+class WebhookDispatcher:
+    """Deliver alert transitions to an HTTP(S) webhook as JSON.
+
+    Delivery failures are retried and then logged; they never propagate to
+    the caller, so alerting cannot break request serving.
+    """
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        timeout_seconds: float = 5.0,
+        max_attempts: int = 3,
+        backoff_seconds: float = 0.5,
+        sender: Callable[[str, bytes, float], None] | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        if urlsplit(url).scheme not in ("http", "https"):
+            raise ValueError(f"Alert webhook URL must be http(s): '{url}'")
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be >= 1")
+        self.url = url
+        self.timeout_seconds = timeout_seconds
+        self.max_attempts = max_attempts
+        self.backoff_seconds = backoff_seconds
+        self._sender = sender or _post_json
+        self._sleep = sleep
+
+    def dispatch(self, transitions: Sequence[AlertTransition]) -> int:
+        """POST one payload per transition; return the delivered count."""
+        delivered = 0
+        for transition in transitions:
+            body = json.dumps(
+                {"source": "music-recommender", **transition.to_dict()}
+            ).encode("utf-8")
+            if self._deliver(transition.rule.name, body):
+                delivered += 1
+        return delivered
+
+    def _deliver(self, alert_name: str, body: bytes) -> bool:
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                self._sender(self.url, body, self.timeout_seconds)
+                return True
+            except Exception as exc:
+                logger.warning(
+                    "Alert webhook delivery failed for %s (attempt %d/%d): %s",
+                    alert_name,
+                    attempt,
+                    self.max_attempts,
+                    exc,
+                )
+                if attempt < self.max_attempts:
+                    self._sleep(self.backoff_seconds * 2 ** (attempt - 1))
+        return False
+
+
+def _post_json(url: str, body: bytes, timeout: float) -> None:
+    request = urllib.request.Request(  # noqa: S310 - scheme validated in __init__
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+        status = getattr(response, "status", 200)
+        if status >= 400:
+            raise OSError(f"webhook responded with HTTP {status}")
