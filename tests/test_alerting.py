@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
 import pytest
+import yaml
 
 from music_recommender.alerting import (
     DEFAULT_ALERT_RULES,
@@ -17,6 +19,7 @@ from music_recommender.alerting import (
     AlertTransition,
     WebhookDispatcher,
     lookup_metric_value,
+    render_prometheus_rules,
 )
 from music_recommender.telemetry import MetricFamily
 
@@ -289,3 +292,35 @@ def test_dispatcher_default_sender_reports_http_errors() -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+# --- Prometheus rule file --------------------------------------------------
+
+CONFIGS_DIR = Path(__file__).resolve().parent.parent / "configs"
+
+
+def test_render_prometheus_rules_structure() -> None:
+    doc = yaml.safe_load(render_prometheus_rules(DEFAULT_ALERT_RULES))
+    (group,) = doc["groups"]
+    assert [r["alert"] for r in group["rules"]] == [r.name for r in DEFAULT_ALERT_RULES]
+    by_name = {r["alert"]: r for r in group["rules"]}
+    assert by_name["ServiceDown"]["expr"] == "music_recommender_up == 0"
+    assert by_name["ServiceDown"]["labels"] == {"severity": "critical"}
+    assert "for" not in by_name["ServiceDown"]
+    assert by_name["StreamingHealthDegraded"]["expr"] == (
+        'music_recommender_streaming_health{status="degraded"} == 1'
+    )
+    assert by_name["StreamingQueueHighUtilization"]["for"] == "30s"
+    assert by_name["StreamingRecordsDropped"]["expr"] == (
+        "increase(music_recommender_streaming_records_dropped_total[5m]) > 0"
+    )
+
+
+def test_checked_in_rule_file_matches_generator() -> None:
+    on_disk = (CONFIGS_DIR / "alert-rules.yml").read_text(encoding="utf-8")
+    assert on_disk == render_prometheus_rules(DEFAULT_ALERT_RULES)
+
+
+def test_prometheus_config_references_rule_file() -> None:
+    cfg = yaml.safe_load((CONFIGS_DIR / "prometheus.yml").read_text(encoding="utf-8"))
+    assert "alert-rules.yml" in " ".join(cfg["rule_files"])
