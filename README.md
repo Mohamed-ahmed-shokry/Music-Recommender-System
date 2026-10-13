@@ -963,6 +963,28 @@ The service provides standard, pure-Python Prometheus text exposition (version 0
 4. **OpenTelemetry Collector Configuration**:
    An OpenTelemetry Collector pipeline template is provided in [`configs/otel-collector-config.yaml`](configs/otel-collector-config.yaml), configuring Prometheus metrics scraping, batch processing, memory limiting, and forwarding via OTLP and Prometheus exporters.
 
+### Alerting Rules & Webhook Notifications
+
+Threshold alerts over the metrics above are declared once in `music_recommender.alerting.DEFAULT_ALERT_RULES` (service down, degraded/unhealthy streaming health, queue utilization ≥ 80%, dropped records, flush errors, stopped maintenance worker, sweep errors, drift violations, automatic rollbacks) and reused in two places:
+
+1. **Prometheus** — [`configs/alert-rules.yml`](configs/alert-rules.yml) is generated from the same definitions and loaded through `rule_files` in [`configs/prometheus.yml`](configs/prometheus.yml). Regenerate after changing rules with:
+
+    ```bash
+    uv run python -m music_recommender.alerting configs/alert-rules.yml
+    ```
+
+    A test fails if the checked-in file drifts from the generator.
+
+2. **In-process evaluation with webhook dispatch** — `RecommenderService.evaluate_alerts()` (also `GET /alerts`) evaluates the rules against live metrics, tracks `pending → firing → resolved` state (rules can require several consecutive breaches via `for_evaluations`; counter rules compare growth between evaluations), and POSTs one JSON payload per firing/resolved transition to the webhook configured by `MUSIC_RECOMMENDER_ALERT_WEBHOOK_URL` (or `RecommenderService(alert_webhook_url=...)`). Deliveries are retried with exponential backoff; final failures are logged and never raised into request handling. An invalid (non-`http(s)`) URL is rejected at startup.
+
+    ```bash
+    export MUSIC_RECOMMENDER_ALERT_WEBHOOK_URL=https://hooks.example.com/alerts
+    curl "http://localhost:8000/alerts"                 # evaluate, notify, return states
+    curl "http://localhost:8000/alerts?dispatch=false"  # evaluate without notifying
+    ```
+
+    Evaluation runs when `GET /alerts` is called (for example from a cron job or uptime probe); there is no built-in background scheduler. When artifacts are not loaded, `/alerts` still returns HTTP 200 and reports `ServiceDown` as firing.
+
 ## API Reference
 
 Train before starting the API:
@@ -983,6 +1005,7 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/health` | Artifact and service health (including `streaming_status`) |
 | `GET` | `/health/streaming` | Real-time streaming queue and maintenance health (200 OK or 503 Service Unavailable) |
 | `GET` | `/metrics` | Prometheus 0.0.4 text exposition metrics for Prometheus and OpenTelemetry collectors |
+| `GET` | `/alerts?dispatch=true` | Evaluate alert rules on live metrics, notify the webhook on state changes, and return rule states |
 | `GET` | `/metadata` | Training config, dataset fingerprint, artifact metadata |
 | `GET` | `/evaluation/ablation-summary` | Persisted aggregated knob-importance summary |
 | `GET` | `/catalog/artists?query=pop&limit=25` | Search and page through artists and metadata |

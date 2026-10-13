@@ -8,6 +8,7 @@ from starlette.types import Message, Receive, Scope, Send
 
 import api.main as api_main
 from api.middleware import RequestSafetyMiddleware
+from music_recommender.alerting import AlertEvaluator
 
 
 class FakeService:
@@ -2381,3 +2382,45 @@ def test_metrics_route_tracks_request_counts_and_latency() -> None:
 
 
 
+
+
+def test_alerts_route_reports_service_down_when_service_is_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(api_main, "_fallback_alert_evaluator", AlertEvaluator())
+    with TestClient(api_main.app) as client:
+        api_main.service = None
+        api_main.service_load_error = "Model not trained."
+
+        first = client.get("/alerts")
+        assert first.status_code == 200
+        body = first.json()
+        assert body["firing_count"] == 1
+        firing = [a for a in body["alerts"] if a["status"] == "firing"]
+        assert [a["alert"] for a in firing] == ["ServiceDown"]
+        assert [t["event"] for t in body["transitions"]] == ["firing"]
+        assert body["webhook_configured"] is False
+
+        second = client.get("/alerts")
+        assert second.json()["transitions"] == []
+
+
+def test_alerts_route_delegates_to_service_and_honors_dispatch_flag() -> None:
+    calls: list[bool] = []
+
+    class AlertingService(FakeService):
+        def evaluate_alerts(self, *, dispatch: bool = True) -> dict[str, object]:
+            calls.append(dispatch)
+            return {
+                "alerts": [],
+                "firing_count": 0,
+                "transitions": [],
+                "webhook_configured": True,
+                "notifications_delivered": 0,
+            }
+
+    with TestClient(api_main.app) as client:
+        api_main.service = AlertingService()
+        assert client.get("/alerts").json()["webhook_configured"] is True
+        assert client.get("/alerts?dispatch=false").status_code == 200
+        assert calls == [True, False]

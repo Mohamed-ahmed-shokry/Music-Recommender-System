@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from api.middleware import RequestSafetyMiddleware
 from music_recommender import __version__
+from music_recommender.alerting import AlertEvaluator
 from music_recommender.bandit import (
     DriftSafetyThresholds,
     derive_cold_start_policy,
@@ -28,7 +29,10 @@ from music_recommender.config import (
 from music_recommender.evaluate import load_ablation_summary_report
 from music_recommender.logging_setup import configure_logging
 from music_recommender.service import RecommenderService
-from music_recommender.telemetry import export_prometheus_metrics
+from music_recommender.telemetry import (
+    collect_service_metric_families,
+    export_prometheus_metrics,
+)
 
 configure_logging()
 
@@ -39,6 +43,7 @@ _CORS_ORIGINS_RAW = os.getenv(_CORS_ORIGINS_ENV, "*")
 
 service: RecommenderService | None = None
 service_load_error: str | None = None
+_fallback_alert_evaluator = AlertEvaluator()
 
 ABLATION_SUMMARY_PATH = REPORTS_DIR / "ablation_summary.json"
 
@@ -215,6 +220,29 @@ def metrics() -> Response:
         content=export_prometheus_metrics(service),
         media_type="text/plain; version=0.0.4; charset=utf-8",
     )
+
+
+@app.get("/alerts")
+def alerts(dispatch: bool = True) -> dict[str, object]:
+    """Evaluate alert rules against live metrics and return their states.
+
+    State changes are posted to the configured alert webhook unless
+    ``dispatch=false``. When artifacts are not loaded the ``ServiceDown``
+    alert is reported instead of an HTTP error.
+    """
+    if service is not None:
+        return service.evaluate_alerts(dispatch=dispatch)
+    transitions = _fallback_alert_evaluator.evaluate(
+        collect_service_metric_families(None)
+    )
+    states = _fallback_alert_evaluator.states()
+    return {
+        "alerts": states,
+        "firing_count": sum(1 for a in states if a["status"] == "firing"),
+        "transitions": [t.to_dict() for t in transitions],
+        "webhook_configured": False,
+        "notifications_delivered": 0,
+    }
 
 
 @app.get("/metadata")

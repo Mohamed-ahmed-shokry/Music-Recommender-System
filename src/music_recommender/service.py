@@ -13,6 +13,7 @@ from typing import Any, Literal, cast
 
 import numpy as np
 
+from music_recommender.alerting import AlertEvaluator, WebhookDispatcher
 from music_recommender.artifacts import RecommenderArtifact, load_artifact
 from music_recommender.bandit import (
     SUPPORTED_BANDIT_POLICIES,
@@ -51,6 +52,7 @@ from music_recommender.bandit import (
 )
 from music_recommender.baselines import popular_artists
 from music_recommender.config import (
+    ALERT_WEBHOOK_URL_ENV_VAR,
     ARTIFACT_BUNDLE_PATH,
     BANDIT_ALPHA_DECAY_ENV_VAR,
     BANDIT_AUTO_ROLLBACK_ON_DRIFT_ENV_VAR,
@@ -148,6 +150,8 @@ class RecommenderService:
         auto_rollback_on_drift: bool | None = None,
         champion_snapshot_path: Path | str | None = None,
         drift_thresholds: DriftSafetyThresholds | None = None,
+        alert_webhook_url: str | None = None,
+        alert_evaluator: AlertEvaluator | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -423,6 +427,19 @@ class RecommenderService:
             )
         else:
             self.maintenance_worker = None
+
+        self.alert_evaluator = alert_evaluator or AlertEvaluator()
+        webhook_url = alert_webhook_url
+        if webhook_url is None:
+            webhook_url = os.getenv(ALERT_WEBHOOK_URL_ENV_VAR) or None
+        try:
+            self.alert_dispatcher: WebhookDispatcher | None = (
+                WebhookDispatcher(webhook_url.strip()) if webhook_url else None
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid alert webhook URL (check {ALERT_WEBHOOK_URL_ENV_VAR}): {exc}"
+            ) from exc
 
     def _on_maintenance_policy_updated(self, new_policy: dict[str, float]) -> None:
         """Callback invoked by maintenance worker when a sweep derives a new policy."""
@@ -776,6 +793,29 @@ class RecommenderService:
             },
             "off_policy_evaluation": ope_result,
         }
+    def evaluate_alerts(self, *, dispatch: bool = True) -> dict[str, Any]:
+        """Evaluate alert rules on live metrics and notify on state changes.
+
+        Firing/resolved transitions are POSTed to the configured webhook when
+        ``dispatch`` is true; delivery failures are logged, never raised.
+        """
+        from music_recommender.telemetry import collect_service_metric_families
+
+        transitions = self.alert_evaluator.evaluate(
+            collect_service_metric_families(self)
+        )
+        delivered = 0
+        if dispatch and self.alert_dispatcher is not None and transitions:
+            delivered = self.alert_dispatcher.dispatch(transitions)
+        alerts = self.alert_evaluator.states()
+        return {
+            "alerts": alerts,
+            "firing_count": sum(1 for a in alerts if a["status"] == "firing"),
+            "transitions": [t.to_dict() for t in transitions],
+            "webhook_configured": self.alert_dispatcher is not None,
+            "notifications_delivered": delivered,
+        }
+
 
     def export_prometheus_metrics(
         self,
