@@ -39,29 +39,30 @@ Production observability pipelines require standard metric export formats for sc
     - Task 12: Run full test suite, lint, and typecheck verifications. ✓
     - Task 13: Update `README.md` documenting `/metrics` and OpenTelemetry collector setup. ✓
     - Task 14: Finalize progress records, push commits, and update draft PR. ✓
-- Phase 136 — Alerting rule definitions & automated notification dispatch (in progress):
+- Phase 136 — Alerting rule definitions & automated notification dispatch:
+  Threshold rules over Prometheus metric families, pending/firing/resolved evaluator, webhook notifications, and generated Prometheus rules. ✓
   - Objective: Add a pure-Python alerting layer (`src/music_recommender/alerting.py`) that declares threshold rules over the Phase 135 metric families, evaluates them with pending→firing→resolved state, dispatches transition notifications to a webhook, exposes the state via `GET /alerts`, and ships a matching Prometheus rule file generated from the same rule definitions.
   - Scope: `AlertRule` / default rule set (service down, degraded/unhealthy streaming health, high queue utilization, dropped records, flush errors, maintenance worker stopped, maintenance errors, drift violations, rollbacks); `AlertEvaluator` with `for_evaluations` debounce; `WebhookDispatcher` (stdlib `urllib`, retries, injectable sender, failures never raise into serving); `RecommenderService.evaluate_alerts()` + `MUSIC_RECOMMENDER_ALERT_WEBHOOK_URL`; `GET /alerts`; `configs/alert-rules.yml` + `rule_files` in `configs/prometheus.yml`; README/CHANGELOG docs.
   - Acceptance Criteria (each verified by tests in `tests/test_alerting.py`, `tests/test_service.py`, `tests/test_api.py`):
-    - AC-1: Rule model validates names, comparators, thresholds, and severities; invalid rules raise `ValueError`.
-    - AC-2: Default rules cover every condition listed in Scope and reference only metric names emitted by `telemetry.py`.
-    - AC-3: Evaluator transitions inactive→pending→firing after `for_evaluations` consecutive breaches and firing→resolved on recovery; missing metrics never fire.
-    - AC-4: Webhook dispatcher POSTs a JSON payload per transition, retries on failure, and swallows/logs final failures.
-    - AC-5: `RecommenderService.evaluate_alerts()` evaluates live metrics and dispatches to the configured webhook (constructor arg or env var).
-    - AC-6: `GET /alerts` returns HTTP 200 with rule states (also when the service is not loaded, reporting the `ServiceDown` alert).
-    - AC-7: `configs/alert-rules.yml` is valid YAML, referenced from `configs/prometheus.yml`, and byte-identical to the output of the generator from the default rules.
-    - AC-8: Full suite, ruff, and mypy show 0 regressions.
+    - AC-1: Rule model validates names, comparators, thresholds, and severities; invalid rules raise `ValueError`. ✓
+    - AC-2: Default rules cover every condition listed in Scope and reference only metric names emitted by `telemetry.py`. ✓
+    - AC-3: Evaluator transitions inactive→pending→firing after `for_evaluations` consecutive breaches and firing→resolved on recovery; missing metrics never fire. ✓
+    - AC-4: Webhook dispatcher POSTs a JSON payload per transition, retries on failure, and swallows/logs final failures. ✓
+    - AC-5: `RecommenderService.evaluate_alerts()` evaluates live metrics and dispatches to the configured webhook (constructor arg or env var). ✓
+    - AC-6: `GET /alerts` returns HTTP 200 with rule states (also when the service is not loaded, reporting the `ServiceDown` alert). ✓
+    - AC-7: `configs/alert-rules.yml` is valid YAML, referenced from `configs/prometheus.yml`, and byte-identical to the output of the generator from the default rules. ✓
+    - AC-8: Full suite, ruff, and mypy show 0 regressions. ✓
   - Validation plan: focused pytest per module; end-to-end run of a real FastAPI TestClient against a stubbed webhook receiver; full `pytest`, `ruff check`, `mypy`.
   - Exclusions: CLI `export-metrics` (Phase 137), dashboards/release (Phase 138), Alertmanager routing config (out of scope; Prometheus rules only).
   - Implementation Tasks:
-    - Task 1: Roadmap entry and progress record.
-    - Task 2: Rule model, validation, and default rules.
-    - Task 3: Evaluator with state machine.
-    - Task 4: Webhook dispatcher.
-    - Task 5: Prometheus rule-file generator and `configs/alert-rules.yml`.
-    - Task 6: Service integration.
-    - Task 7: `GET /alerts` endpoint.
-    - Task 8: Docs, final verification, PR.
+    - Task 1: Roadmap entry and progress record. ✓
+    - Task 2: Rule model, validation, and default rules. ✓
+    - Task 3: Evaluator with state machine. ✓
+    - Task 4: Webhook dispatcher. ✓
+    - Task 5: Prometheus rule-file generator and `configs/alert-rules.yml`. ✓
+    - Task 6: Service integration. ✓
+    - Task 7: `GET /alerts` endpoint. ✓
+    - Task 8: Docs, final verification, PR. ✓
 - Phase 137 — CLI & Service metrics export tooling.
 - Phase 138 — Integration testing, dashboard templates, and 0.30.0 release.
 
