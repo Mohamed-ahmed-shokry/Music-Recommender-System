@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -194,6 +195,36 @@ def _format_artifact_age(created_at: str) -> str:
 
 def _parse_csv_option(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+_VALID_CLI_LABEL_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _parse_label_option(labels: list[str] | None) -> dict[str, str]:
+    """Parse a list of 'key=value' label strings into a dictionary.
+
+    Validates that label names conform to Prometheus label naming conventions.
+    """
+    result: dict[str, str] = {}
+    if not labels:
+        return result
+    for entry in labels:
+        entry_str = entry.strip()
+        if not entry_str:
+            continue
+        if "=" not in entry_str:
+            raise ValueError(
+                f"Invalid label format '{entry}'; expected 'key=value'"
+            )
+        k, v = entry_str.split("=", 1)
+        key = k.strip()
+        val = v.strip()
+        if not _VALID_CLI_LABEL_NAME_RE.match(key):
+            raise ValueError(
+                f"Invalid Prometheus label name: '{key}'"
+            )
+        result[key] = val
+    return result
 
 
 @app.command()
