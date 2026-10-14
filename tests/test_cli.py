@@ -19,6 +19,7 @@ from music_recommender.cli import (
     _check_quality_threshold,
     _format_artifact_age,
     _parse_csv_option,
+    _parse_label_option,
 )
 from music_recommender.tracking import ExperimentTrackingError
 
@@ -3142,6 +3143,28 @@ def test_bandit_observability_cli(tmp_path: Path) -> None:
     assert data["snapshots"]["champion"] == champ.name
     assert data["off_policy_evaluation"] is not None
     assert "ci_95" in data["off_policy_evaluation"]["metrics"]["ips"]
+
+
+def test_parse_label_option() -> None:
+    assert _parse_label_option(None) == {}
+    assert _parse_label_option([]) == {}
+    assert _parse_label_option([""]) == {}
+    assert _parse_label_option(["env=prod", "region=us-east-1"]) == {
+        "env": "prod",
+        "region": "us-east-1",
+    }
+    assert _parse_label_option(["service=music=recommender"]) == {
+        "service": "music=recommender",
+    }
+
+    with pytest.raises(ValueError, match="Invalid label format"):
+        _parse_label_option(["no_equal_sign"])
+
+    with pytest.raises(ValueError, match="Invalid Prometheus label name"):
+        _parse_label_option(["invalid-name=value"])
+
+    with pytest.raises(ValueError, match="Invalid Prometheus label name"):
+        _parse_label_option(["123start_with_num=value"])
 
 
 
