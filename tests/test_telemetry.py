@@ -13,6 +13,7 @@ from music_recommender.telemetry import (
     collect_service_metric_families,
     escape_help_string,
     escape_label_value,
+    export_metrics_json,
     export_prometheus_metrics,
     format_metric_value,
     render_prometheus_exposition,
@@ -363,6 +364,41 @@ def test_export_prometheus_metrics() -> None:
         in text
     )
     assert "# TYPE music_recommender_http_request_duration_seconds histogram" in text
+
+
+def test_export_metrics_json() -> None:
+    import json
+
+    tracker = RequestTelemetryTracker()
+    tracker.record_request(
+        "/alerts", method="GET", status_code=200, duration_seconds=0.005
+    )
+
+    json_text = export_metrics_json(
+        service=None,
+        request_tracker=tracker,
+        custom_labels={"region": "eu-west-1"},
+    )
+    assert json_text.endswith("\n")
+    data = json.loads(json_text)
+    assert "metrics" in data
+    assert isinstance(data["metrics"], list)
+
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    assert "music_recommender_info" in metrics_by_name
+    info_m = metrics_by_name["music_recommender_info"]
+    assert info_m["type"] == "gauge"
+    assert info_m["samples"][0]["labels"]["region"] == "eu-west-1"
+
+    assert "music_recommender_up" in metrics_by_name
+    assert metrics_by_name["music_recommender_up"]["samples"][0]["value"] == 0
+
+    assert "music_recommender_http_requests_total" in metrics_by_name
+    http_m = metrics_by_name["music_recommender_http_requests_total"]
+    assert http_m["type"] == "counter"
+    sample = http_m["samples"][0]
+    assert sample["labels"]["endpoint"] == "/alerts"
+    assert sample["value"] == 1
 
 
 def test_telemetry_configs_valid_yaml() -> None:
