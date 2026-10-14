@@ -63,7 +63,35 @@ Production observability pipelines require standard metric export formats for sc
     - Task 6: Service integration. ✓
     - Task 7: `GET /alerts` endpoint. ✓
     - Task 8: Docs, final verification, PR. ✓
-- Phase 137 — CLI & Service metrics export tooling.
+- Phase 137 — CLI & Service metrics export tooling (in progress):
+  - Objective: Deliver operator CLI tooling (`music-recommender export-metrics`) to export system and service metrics in Prometheus text exposition (0.0.4) format or structured JSON directly from the terminal or scripts, supporting stdout and file output destinations, custom labels, timestamp suppression/inclusion, and graceful uninitialized/offline handling.
+  - Scope:
+    - CLI command `export-metrics` in `src/music_recommender/cli.py` with options: `--output / -o`, `--format` (`prometheus` | `json`), `--label / -l` (multi-value `key=value`), and `--include-timestamps / --no-timestamps`.
+    - Custom label parser helper `_parse_label_option` in `cli.py` with validation against Prometheus label identifier conventions.
+    - JSON export serializer for metric families in `src/music_recommender/telemetry.py`.
+    - Graceful fallback: when model artifacts are not found or corrupted, export baseline service metrics (`music_recommender_up 0` and runtime/version info) rather than crashing or terminating with unhandled stack trace.
+    - Integration into `RecommenderService.export_metrics_dict()` / JSON export helper.
+    - Unit tests in `tests/test_cli.py` and `tests/test_telemetry.py`.
+    - CLI documentation updates in `README.md` and changelog entry in `CHANGELOG.md`.
+  - Acceptance Criteria (each verified by tests in `tests/test_cli.py` and `tests/test_telemetry.py`):
+    - AC-1: `music-recommender export-metrics` outputs valid Prometheus exposition text (0.0.4) to stdout by default with exit code 0.
+    - AC-2: `music-recommender export-metrics --format json` outputs valid structured JSON representation of metric families to stdout with exit code 0.
+    - AC-3: `--output / -o <path>` writes metrics to the specified file path, creates parent directories if necessary, and reports success.
+    - AC-4: `--label / -l <key=value>` parses and attaches custom labels to exported metric families, rejecting invalid label key identifiers with a clean exit code 1 error.
+    - AC-5: `--include-timestamps` and `--no-timestamps` control timestamp inclusion on metric samples.
+    - AC-6: When model artifacts are missing or uninitialized, `export-metrics` succeeds with exit code 0, outputting offline/down metrics (`music_recommender_up 0`).
+    - AC-7: Full test suite, ruff linting, and mypy typechecking pass with 0 regressions.
+  - Validation plan: focused pytest tests in `tests/test_cli.py` and `tests/test_telemetry.py`; end-to-end CLI execution with `--output`, `--format json`, and custom labels; full `pytest`, `ruff check`, `mypy`.
+  - Exclusions: Grafana dashboard templates and 0.30.0 release packaging (deferred to Phase 138).
+  - Implementation Tasks:
+    - Task 1: Update `PLAN.md` with Phase 137 roadmap and create `docs/PROGRESS.md`.
+    - Task 2: Implement JSON metric serialization in `src/music_recommender/telemetry.py`.
+    - Task 3: Implement custom label option parser `_parse_label_option` in `src/music_recommender/cli.py`.
+    - Task 4: Implement `export-metrics` command in `src/music_recommender/cli.py`.
+    - Task 5: Add comprehensive CLI tests in `tests/test_cli.py`.
+    - Task 6: Add telemetry tests for JSON metric serialization in `tests/test_telemetry.py`.
+    - Task 7: Update `README.md` and `CHANGELOG.md`.
+    - Task 8: Run full validation suite (lint, typecheck, tests) and finalize PR.
 - Phase 138 — Integration testing, dashboard templates, and 0.30.0 release.
 
 ## Previous milestone (0.29.0) — shipped
