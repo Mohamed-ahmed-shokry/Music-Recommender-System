@@ -832,6 +832,23 @@ class RecommenderService:
             custom_labels=custom_labels,
         )
 
+    def export_metrics_json(
+        self,
+        *,
+        custom_labels: dict[str, str] | None = None,
+        request_tracker: Any | None = None,
+        indent: int | None = 2,
+    ) -> str:
+        """Export service state and telemetry in structured JSON format."""
+        from music_recommender.telemetry import export_metrics_json
+
+        return export_metrics_json(
+            self,
+            request_tracker=request_tracker,
+            custom_labels=custom_labels,
+            indent=indent,
+        )
+
     def record_request(
         self,
         endpoint: str,
