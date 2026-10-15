@@ -3167,4 +3167,97 @@ def test_parse_label_option() -> None:
         _parse_label_option(["123start_with_num=value"])
 
 
+def test_export_metrics_default_prometheus() -> None:
+    result = runner.invoke(cli.app, ["export-metrics"])
+    assert result.exit_code == 0
+    assert "music_recommender_info{" in result.output
+    assert "music_recommender_up" in result.output
+    assert "# HELP" in result.output
+    assert "# TYPE" in result.output
+
+
+def test_export_metrics_json_format() -> None:
+    result = runner.invoke(cli.app, ["export-metrics", "--format", "json"])
+    assert result.exit_code == 0
+    parsed = json.loads(result.output)
+    assert "metrics" in parsed
+    names = {m["name"] for m in parsed["metrics"]}
+    assert "music_recommender_info" in names
+    assert "music_recommender_up" in names
+
+
+def test_export_metrics_custom_labels_and_timestamps() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "export-metrics",
+            "--format",
+            "json",
+            "--label",
+            "cluster=us-east-1a",
+            "--label",
+            "env=staging",
+            "--include-timestamps",
+        ],
+    )
+    assert result.exit_code == 0
+    parsed = json.loads(result.output)
+    assert "metrics" in parsed
+    metrics_by_name = {m["name"]: m for m in parsed["metrics"]}
+    assert "music_recommender_info" in metrics_by_name
+    info_labels = metrics_by_name["music_recommender_info"]["samples"][0]["labels"]
+    assert info_labels.get("cluster") == "us-east-1a"
+    assert info_labels.get("env") == "staging"
+
+    for metric in parsed["metrics"]:
+        for sample in metric["samples"]:
+            assert sample.get("timestamp_ms") is not None
+
+
+def test_export_metrics_to_output_file(tmp_path: Path) -> None:
+    out_file = tmp_path / "nested" / "metrics.prom"
+    result = runner.invoke(
+        cli.app,
+        [
+            "export-metrics",
+            "-o",
+            str(out_file),
+            "-l",
+            "tier=production",
+        ],
+    )
+    assert result.exit_code == 0
+    assert f"Metrics successfully exported to {out_file}" in result.output
+    assert out_file.exists()
+    content = out_file.read_text(encoding="utf-8")
+    assert "music_recommender_up" in content
+    assert 'tier="production"' in content
+
+
+def test_export_metrics_invalid_format() -> None:
+    result = runner.invoke(cli.app, ["export-metrics", "--format", "yaml"])
+    assert result.exit_code == 1
+    assert "Unsupported format 'yaml'" in result.output
+
+
+def test_export_metrics_invalid_label() -> None:
+    result = runner.invoke(cli.app, ["export-metrics", "--label", "invalid-key=val"])
+    assert result.exit_code == 1
+    assert "Invalid Prometheus label name" in result.output
+
+
+def test_export_metrics_uninitialized_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fail_artifacts():
+        raise RuntimeError("Artifact storage missing")
+
+    monkeypatch.setattr(
+        "music_recommender.service.RecommenderService.from_artifacts",
+        _fail_artifacts,
+    )
+    result = runner.invoke(cli.app, ["export-metrics"])
+    assert result.exit_code == 0
+    assert "music_recommender_up 0" in result.output
+
+
+
 
