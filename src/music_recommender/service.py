@@ -822,6 +822,7 @@ class RecommenderService:
         *,
         custom_labels: dict[str, str] | None = None,
         request_tracker: Any | None = None,
+        include_timestamps: bool = False,
     ) -> str:
         """Export service state and telemetry in Prometheus text format (0.0.4)."""
         from music_recommender.telemetry import export_prometheus_metrics
@@ -830,6 +831,7 @@ class RecommenderService:
             self,
             request_tracker=request_tracker,
             custom_labels=custom_labels,
+            include_timestamps=include_timestamps,
         )
 
     def export_metrics_json(
@@ -837,6 +839,7 @@ class RecommenderService:
         *,
         custom_labels: dict[str, str] | None = None,
         request_tracker: Any | None = None,
+        include_timestamps: bool = False,
         indent: int | None = 2,
     ) -> str:
         """Export service state and telemetry in structured JSON format."""
@@ -846,6 +849,7 @@ class RecommenderService:
             self,
             request_tracker=request_tracker,
             custom_labels=custom_labels,
+            include_timestamps=include_timestamps,
             indent=indent,
         )
 
