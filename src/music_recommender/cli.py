@@ -8,7 +8,7 @@ import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 import numpy as np
 import typer
@@ -108,6 +108,10 @@ from music_recommender.service import RecommenderService
 from music_recommender.surfaces import (
     compare_surface_metrics,
     write_surface_comparison_report,
+)
+from music_recommender.telemetry import (
+    export_metrics_json,
+    export_prometheus_metrics,
 )
 from music_recommender.track_evaluate import (
     ablate_track_parameter_settings,
@@ -3514,6 +3518,102 @@ def bandit_sweep(
     except (FileNotFoundError, ValueError) as error:
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
+
+
+@app.command()
+def export_metrics(
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help=(
+                "Target file path to write exported metrics to. "
+                "Defaults to standard output."
+            ),
+        ),
+    ] = None,
+    format: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Export format: 'prometheus' (0.0.4 text) or 'json'.",
+        ),
+    ] = "prometheus",
+    label: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--label",
+            "-l",
+            help=(
+                "Custom label(s) to attach in 'key=value' format. "
+                "Can be specified multiple times."
+            ),
+        ),
+    ] = None,
+    include_timestamps: Annotated[
+        bool,
+        typer.Option(
+            "--include-timestamps",
+            help="Whether to include current timestamp in exported metric samples.",
+        ),
+    ] = False,
+) -> None:
+    """Export recommender system metrics in Prometheus or structured JSON format."""
+    normalized_format = format.strip().lower()
+    if normalized_format not in ("prometheus", "json"):
+        typer.secho(
+            f"Error: Unsupported format '{format}'. "
+            "Supported formats are: prometheus, json",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        custom_labels = _parse_label_option(label)
+    except ValueError as val_err:
+        typer.secho(f"Error: {val_err}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from val_err
+
+    # Gracefully attempt to load the live service from artifacts; if unavailable,
+    # export baseline service telemetry indicating service unavailability.
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable for metrics export: %s", exc)
+        service = None
+
+    if normalized_format == "json":
+        rendered = export_metrics_json(
+            service=service,
+            custom_labels=custom_labels or None,
+            include_timestamps=include_timestamps,
+            indent=2,
+        )
+    else:
+        rendered = export_prometheus_metrics(
+            service=service,
+            custom_labels=custom_labels or None,
+            include_timestamps=include_timestamps,
+        )
+
+    if output is not None:
+        try:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(rendered, encoding="utf-8")
+            typer.echo(f"Metrics successfully exported to {output}")
+        except OSError as os_err:
+            typer.secho(
+                f"Error writing metrics to {output}: {os_err}",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=1) from os_err
+    else:
+        typer.echo(rendered, nl=False)
 
 
 if __name__ == "__main__":
