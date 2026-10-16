@@ -2715,8 +2715,7 @@ def test_simulate_bandit_cli_epsilon_greedy(tmp_path: Path) -> None:
     )
     assert res.exit_code == 0
     assert (
-        "Cold-start exploration bandit simulation (policy=epsilon_greedy"
-        in res.output
+        "Cold-start exploration bandit simulation (policy=epsilon_greedy" in res.output
     )
     assert state_file.exists()
 
@@ -2830,9 +2829,7 @@ def test_bandit_snapshot_cli_tag_champion(tmp_path: Path) -> None:
         write_bandit_state,
     )
 
-    bandit = LinUCBContextualBandit(
-        ["popular", "balanced", "long_tail"], context_dim=3
-    )
+    bandit = LinUCBContextualBandit(["popular", "balanced", "long_tail"], context_dim=3)
     state = snapshot_bandit_state(bandit)
     state_file = write_bandit_state(state, tmp_path, state_name="active_state")
     sn_dir = tmp_path / "snapshots"
@@ -2890,9 +2887,7 @@ def test_bandit_rollback_cli(tmp_path: Path) -> None:
         write_bandit_state,
     )
 
-    bandit = LinUCBContextualBandit(
-        ["popular", "balanced", "long_tail"], context_dim=3
-    )
+    bandit = LinUCBContextualBandit(["popular", "balanced", "long_tail"], context_dim=3)
     bandit.update("popular", [1.0, 0.0, 0.0], 1.0)
     champ_state = snapshot_bandit_state(bandit)
 
@@ -2944,9 +2939,7 @@ def test_bandit_drift_cli_check_safety(tmp_path: Path) -> None:
         write_bandit_state,
     )
 
-    bandit = LinUCBContextualBandit(
-        ["popular", "balanced", "long_tail"], context_dim=3
-    )
+    bandit = LinUCBContextualBandit(["popular", "balanced", "long_tail"], context_dim=3)
     base_state = snapshot_bandit_state(bandit)
     sn_dir = tmp_path / "snapshots"
     snap_path = save_bandit_snapshot(base_state, snapshot_dir=sn_dir, label="base")
@@ -2999,9 +2992,7 @@ def test_bandit_sweep_cli_with_guardrails_and_auto_rollback(tmp_path: Path) -> N
         write_bandit_state,
     )
 
-    bandit = LinUCBContextualBandit(
-        ["popular", "balanced", "long_tail"], context_dim=3
-    )
+    bandit = LinUCBContextualBandit(["popular", "balanced", "long_tail"], context_dim=3)
     base_state = snapshot_bandit_state(bandit)
     state_file = write_bandit_state(base_state, tmp_path, state_name="active_state")
     sn_dir = tmp_path / "snapshots"
@@ -3010,8 +3001,7 @@ def test_bandit_sweep_cli_with_guardrails_and_auto_rollback(tmp_path: Path) -> N
 
     journal = tmp_path / "feedback.json"
     records = [
-        {"arm": "popular", "context": [1.0, 1.0, 1.0], "reward": 10.0}
-        for _ in range(5)
+        {"arm": "popular", "context": [1.0, 1.0, 1.0], "reward": 10.0} for _ in range(5)
     ]
     append_bandit_feedback_batch(records, journal)
 
@@ -3049,9 +3039,7 @@ def test_bandit_status_json_output(tmp_path: Path) -> None:
     )
 
     runner = CliRunner()
-    bandit = LinUCBContextualBandit(
-        ["popular", "balanced", "long_tail"], context_dim=3
-    )
+    bandit = LinUCBContextualBandit(["popular", "balanced", "long_tail"], context_dim=3)
     state = snapshot_bandit_state(bandit)
     state_file = write_bandit_state(state, tmp_path, state_name="status_state")
 
@@ -3084,9 +3072,7 @@ def test_bandit_observability_cli(tmp_path: Path) -> None:
     )
 
     runner = CliRunner()
-    bandit = LinUCBContextualBandit(
-        ["popular", "balanced", "long_tail"], context_dim=3
-    )
+    bandit = LinUCBContextualBandit(["popular", "balanced", "long_tail"], context_dim=3)
     state = snapshot_bandit_state(bandit)
     state_file = write_bandit_state(state, tmp_path, state_name="obs_state")
     sn_dir = tmp_path / "snapshots"
@@ -3257,7 +3243,3 @@ def test_export_metrics_uninitialized_fallback(monkeypatch: pytest.MonkeyPatch) 
     result = runner.invoke(cli.app, ["export-metrics"])
     assert result.exit_code == 0
     assert "music_recommender_up 0" in result.output
-
-
-
-
