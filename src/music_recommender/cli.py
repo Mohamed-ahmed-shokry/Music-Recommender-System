@@ -217,16 +217,12 @@ def _parse_label_option(labels: list[str] | None) -> dict[str, str]:
         if not entry_str:
             continue
         if "=" not in entry_str:
-            raise ValueError(
-                f"Invalid label format '{entry}'; expected 'key=value'"
-            )
+            raise ValueError(f"Invalid label format '{entry}'; expected 'key=value'")
         k, v = entry_str.split("=", 1)
         key = k.strip()
         val = v.strip()
         if not _VALID_CLI_LABEL_NAME_RE.match(key):
-            raise ValueError(
-                f"Invalid Prometheus label name: '{key}'"
-            )
+            raise ValueError(f"Invalid Prometheus label name: '{key}'")
         result[key] = val
     return result
 
@@ -2153,8 +2149,7 @@ def simulate_bandit(
         "linucb,thompson_sampling,epsilon_greedy",
         "--policies",
         help=(
-            "Comma-separated policy types to benchmark when "
-            "--compare-policies is set."
+            "Comma-separated policy types to benchmark when --compare-policies is set."
         ),
     ),
     report_name: str | None = typer.Option(
@@ -2199,9 +2194,7 @@ def simulate_bandit(
         )
 
         if compare_policies:
-            policy_names = tuple(
-                p.strip() for p in policies.split(",") if p.strip()
-            )
+            policy_names = tuple(p.strip() for p in policies.split(",") if p.strip())
             policy_specs = [
                 {
                     "name": p,
@@ -2861,9 +2854,7 @@ def bandit_observability(
     st_cfg = state.get("config", {}) if state else {}
     pol_model = str(st_cfg.get("policy_type", "linucb")) if state else None
     alpha_val = float(st_cfg.get("alpha", 1.0)) if state else None
-    ctx_feat: list[str] = (
-        list(state.get("context_features") or []) if state else []
-    )
+    ctx_feat: list[str] = list(state.get("context_features") or []) if state else []
     total_sel = (
         sum(
             int(arm.get("selections", 0))
@@ -2950,7 +2941,6 @@ def bandit_observability(
                         )
                     elif v is not None:
                         typer.echo(f"    {m_key.upper():<14}: {v:.4f}")
-
 
 
 @app.command()
@@ -3433,11 +3423,7 @@ def bandit_sweep(
 
         if enable_guardrails and folded > 0:
             champ = get_champion_snapshot(sn_dir)
-            ref_st = (
-                load_bandit_snapshot(champ)
-                if champ and champ.is_file()
-                else state
-            )
+            ref_st = load_bandit_snapshot(champ) if champ and champ.is_file() else state
             ref_nm = champ.name if champ and champ.is_file() else "prior_state"
             drift_thresh = DriftSafetyThresholds(
                 max_l2_drift=max_l2,
@@ -3471,8 +3457,7 @@ def bandit_sweep(
             encoding="utf-8",
         )
         typer.echo(
-            f"Folded {folded} pending feedback record(s) "
-            f"(gamma={gamma}) into: {st_p}"
+            f"Folded {folded} pending feedback record(s) (gamma={gamma}) into: {st_p}"
         )
         if snapshot_on_sweep:
             snap = save_bandit_snapshot(
