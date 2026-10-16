@@ -1033,9 +1033,7 @@ class TestStreamingFeedbackQueue:
             StreamingFeedbackQueue(journal, max_queue_size=0, auto_start=False)
         with pytest.raises(ValueError, match="batch_size must be positive"):
             StreamingFeedbackQueue(journal, batch_size=0, auto_start=False)
-        with pytest.raises(
-            ValueError, match="flush_interval_seconds must be positive"
-        ):
+        with pytest.raises(ValueError, match="flush_interval_seconds must be positive"):
             StreamingFeedbackQueue(
                 journal, flush_interval_seconds=0.0, auto_start=False
             )
@@ -1047,7 +1045,9 @@ class TestStreamingFeedbackQueue:
             TypeError, match="backpressure must be BackpressureStrategy"
         ):
             StreamingFeedbackQueue(
-                journal, backpressure=123, auto_start=False  # type: ignore[arg-type]
+                journal,
+                backpressure=123,
+                auto_start=False,  # type: ignore[arg-type]
             )
 
     def test_enqueue_validates_record(self, tmp_path: Path) -> None:
@@ -1270,9 +1270,7 @@ class TestStreamingFeedbackQueue:
             with concurrent.futures.ThreadPoolExecutor(
                 max_workers=num_threads
             ) as executor:
-                futures = [
-                    executor.submit(worker, idx) for idx in range(num_threads)
-                ]
+                futures = [executor.submit(worker, idx) for idx in range(num_threads)]
                 concurrent.futures.wait(futures)
 
             queue.flush()
@@ -2679,9 +2677,7 @@ class TestPhase125Reports:
 
 
 class TestBanditMaintenanceWorker:
-    def _create_state_and_journal(
-        self, tmp_path: Path
-    ) -> tuple[Path, Path, Path]:
+    def _create_state_and_journal(self, tmp_path: Path) -> tuple[Path, Path, Path]:
         bandit = LinUCBContextualBandit(
             DEFAULT_COLD_START_ARMS,
             len(DEFAULT_CONTEXT_FEATURES),
@@ -2853,9 +2849,7 @@ class TestBanditMaintenanceWorker:
 
     def test_coordination_with_streaming_queue(self, tmp_path: Path) -> None:
         state_f, journal_f, snap_d = self._create_state_and_journal(tmp_path)
-        queue = StreamingFeedbackQueue(
-            journal_f, max_queue_size=100, auto_start=False
-        )
+        queue = StreamingFeedbackQueue(journal_f, max_queue_size=100, auto_start=False)
         queue.enqueue({"context": [1.0, 0.0, 0.5], "arm": "popular", "reward": 0.9})
         queue.enqueue({"context": [0.0, 1.0, 0.5], "arm": "balanced", "reward": 0.3})
         assert queue.queue_depth == 2
@@ -3182,6 +3176,3 @@ class TestOPEConfidenceIntervals:
             assert isinstance(ci, list)
             assert len(ci) == 2
             assert ci[0] <= ci[1]
-
-
-
