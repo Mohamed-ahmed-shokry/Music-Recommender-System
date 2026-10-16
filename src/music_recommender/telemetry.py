@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import sys
 import threading
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -86,6 +88,17 @@ class MetricSample:
             line = f"{line} {self.timestamp_ms}"
         return line
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert sample to dictionary representation."""
+        data: dict[str, Any] = {
+            "name": self.name,
+            "value": self.value,
+            "labels": dict(self.labels),
+        }
+        if self.timestamp_ms is not None:
+            data["timestamp_ms"] = self.timestamp_ms
+        return data
+
 
 @dataclass
 class MetricFamily:
@@ -119,6 +132,20 @@ class MetricFamily:
                 timestamp_ms=timestamp_ms,
             )
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert metric family to dictionary representation."""
+        type_str = (
+            self.metric_type.value
+            if isinstance(self.metric_type, MetricType)
+            else str(self.metric_type)
+        )
+        return {
+            "name": self.name,
+            "help": self.help_text,
+            "type": type_str,
+            "samples": [s.to_dict() for s in self.samples],
+        }
 
     def format_exposition(self) -> str:
         """Render the metric family including # HELP and # TYPE headers."""
@@ -590,11 +617,37 @@ def get_global_request_tracker() -> RequestTelemetryTracker:
     return _GLOBAL_TRACKER
 
 
+def _apply_timestamps(
+    families: list[MetricFamily],
+    timestamp_ms: int,
+) -> list[MetricFamily]:
+    """Return new MetricFamily list with timestamp_ms applied to all samples."""
+    new_families: list[MetricFamily] = []
+    for fam in families:
+        new_fam = MetricFamily(
+            name=fam.name,
+            help_text=fam.help_text,
+            metric_type=fam.metric_type,
+        )
+        for s in fam.samples:
+            new_fam.samples.append(
+                MetricSample(
+                    name=s.name,
+                    value=s.value,
+                    labels=s.labels,
+                    timestamp_ms=timestamp_ms,
+                )
+            )
+        new_families.append(new_fam)
+    return new_families
+
+
 def export_prometheus_metrics(
     service: Any | None,
     *,
     request_tracker: RequestTelemetryTracker | None = None,
     custom_labels: dict[str, str] | None = None,
+    include_timestamps: bool = False,
 ) -> str:
     """Export complete Prometheus text exposition document for the service."""
     families = collect_service_metric_families(
@@ -602,6 +655,32 @@ def export_prometheus_metrics(
     )
     tracker = request_tracker or get_global_request_tracker()
     families.extend(tracker.to_metric_families())
+    if include_timestamps:
+        now_ms = int(time.time() * 1000)
+        families = _apply_timestamps(families, now_ms)
     return render_prometheus_exposition(families)
+
+
+def export_metrics_json(
+    service: Any | None,
+    *,
+    request_tracker: RequestTelemetryTracker | None = None,
+    custom_labels: dict[str, str] | None = None,
+    include_timestamps: bool = False,
+    indent: int | None = 2,
+) -> str:
+    """Export complete metrics in structured JSON format for the service."""
+    families = collect_service_metric_families(
+        service, custom_labels=custom_labels
+    )
+    tracker = request_tracker or get_global_request_tracker()
+    families.extend(tracker.to_metric_families())
+    if include_timestamps:
+        now_ms = int(time.time() * 1000)
+        families = _apply_timestamps(families, now_ms)
+    metrics_data = {
+        "metrics": [f.to_dict() for f in families if f.samples]
+    }
+    return json.dumps(metrics_data, indent=indent) + "\n"
 
 

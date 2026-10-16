@@ -9,6 +9,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- CLI & Service Metrics Export Tooling (Phase 137):
+  - CLI `export-metrics` command (`music-recommender export-metrics`): exports full system, artifact, streaming, maintenance, and request telemetry in Prometheus text exposition (0.0.4) or structured JSON format (`--format prometheus|json`).
+  - Custom labels & timestamp support: `--label / -l key=value` option with strict Prometheus label name regex validation, and `--include-timestamps` option applying millisecond timestamps across all exported metric samples.
+  - Flexible output destinations: writes directly to stdout or persists to a file via `--output / -o` (automatically creating parent directory structures).
+  - Telemetry & Service serialization enhancements: `MetricFamily.to_dict()` and `MetricSample.to_dict()` serialization models, `export_metrics_json()` helper in `telemetry.py` and `RecommenderService.export_metrics_json()`, supporting custom labels, indentation, and timestamp injection.
+  - Resilient uninitialized fallback: gracefully falls back to baseline operational telemetry (`music_recommender_up 0`) when model artifacts or services are uninitialized.
+
 - Alerting Rule Definitions & Webhook Notification Dispatch (Phase 136):
   - `src/music_recommender/alerting.py`: validated `AlertRule` model and `DEFAULT_ALERT_RULES` (service down, streaming health, queue utilization, dropped records, flush errors, stopped maintenance worker, sweep errors, drift violations, automatic rollbacks) over the Phase 135 metric families; `AlertEvaluator` with `pending → firing → resolved` state, `for_evaluations` debounce, and counter-increase rules.
   - `WebhookDispatcher`: JSON POST per transition using the standard library, exponential-backoff retries, and failure isolation (errors are logged, never raised).

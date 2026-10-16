@@ -963,6 +963,24 @@ The service provides standard, pure-Python Prometheus text exposition (version 0
 4. **OpenTelemetry Collector Configuration**:
    An OpenTelemetry Collector pipeline template is provided in [`configs/otel-collector-config.yaml`](configs/otel-collector-config.yaml), configuring Prometheus metrics scraping, batch processing, memory limiting, and forwarding via OTLP and Prometheus exporters.
 
+5. **CLI Metrics Export Tooling**:
+   The recommender metrics can be exported directly from the command line for offline evaluation, debugging, ingestion pipelines, or cron-based scraping:
+   ```bash
+   # Export Prometheus 0.0.4 text format to stdout
+   uv run python -m music_recommender.cli export-metrics
+
+   # Export formatted JSON to stdout
+   uv run python -m music_recommender.cli export-metrics --format json
+
+   # Export to a file with custom monitoring labels and timestamps
+   uv run python -m music_recommender.cli export-metrics \
+     --format prometheus \
+     -o /var/log/metrics/recommender.prom \
+     -l env=production \
+     -l region=us-east-1 \
+     --include-timestamps
+   ```
+
 ### Alerting Rules & Webhook Notifications
 
 Threshold alerts over the metrics above are declared once in `music_recommender.alerting.DEFAULT_ALERT_RULES` (service down, degraded/unhealthy streaming health, queue utilization ≥ 80%, dropped records, flush errors, stopped maintenance worker, sweep errors, drift violations, automatic rollbacks) and reused in two places:
