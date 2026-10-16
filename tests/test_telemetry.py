@@ -198,8 +198,7 @@ def test_collect_service_metric_families_mock_service() -> None:
     assert names["music_recommender_artifact_users_count"].samples[0].value == 1500
     assert names["music_recommender_artifact_artists_count"].samples[0].value == 400
     assert (
-        names["music_recommender_artifact_interactions_count"].samples[0].value
-        == 35000
+        names["music_recommender_artifact_interactions_count"].samples[0].value == 35000
     )
 
     # Bandit arms
@@ -218,9 +217,7 @@ def test_collect_service_metric_families_mock_service() -> None:
     # Streaming queue
     assert names["music_recommender_streaming_queue_enabled"].samples[0].value == 1
     assert names["music_recommender_streaming_queue_size"].samples[0].value == 42
-    assert (
-        names["music_recommender_streaming_queue_capacity"].samples[0].value == 1000
-    )
+    assert names["music_recommender_streaming_queue_capacity"].samples[0].value == 1000
     assert (
         names["music_recommender_streaming_queue_utilization_ratio"].samples[0].value
         == 0.042
@@ -237,9 +234,7 @@ def test_collect_service_metric_families_mock_service() -> None:
     # Maintenance worker
     assert names["music_recommender_maintenance_enabled"].samples[0].value == 1
     assert names["music_recommender_maintenance_running"].samples[0].value == 1
-    assert (
-        names["music_recommender_maintenance_sweeps_total"].samples[0].value == 4
-    )
+    assert names["music_recommender_maintenance_sweeps_total"].samples[0].value == 4
     assert (
         names["music_recommender_maintenance_records_folded_total"].samples[0].value
         == 58
@@ -289,9 +284,7 @@ def test_collect_service_metric_families_disabled_components() -> None:
 
 
 def test_request_telemetry_tracker() -> None:
-    tracker = RequestTelemetryTracker(
-        latency_buckets=(0.01, 0.05, 0.1, float("inf"))
-    )
+    tracker = RequestTelemetryTracker(latency_buckets=(0.01, 0.05, 0.1, float("inf")))
 
     # Record 2 requests
     tracker.record_request(
@@ -328,13 +321,11 @@ def test_request_telemetry_tracker() -> None:
 
     # Check bucket samples
     bucket_samples = {
-        s.labels["le"]: s.value
-        for s in hist_fam.samples
-        if s.name.endswith("_bucket")
+        s.labels["le"]: s.value for s in hist_fam.samples if s.name.endswith("_bucket")
     }
     assert bucket_samples["0.01"] == 1  # 0.005 <= 0.01
     assert bucket_samples["0.05"] == 2  # 0.005 and 0.02 <= 0.05
-    assert bucket_samples["0.1"] == 3   # 0.005, 0.02, 0.08 <= 0.1
+    assert bucket_samples["0.1"] == 3  # 0.005, 0.02, 0.08 <= 0.1
     assert bucket_samples["+Inf"] == 3
 
     # Test reset
@@ -360,8 +351,7 @@ def test_export_prometheus_metrics() -> None:
     assert "# HELP music_recommender_http_requests_total" in text
     assert (
         'music_recommender_http_requests_total{endpoint="/health",'
-        'method="GET",status="200"} 1'
-        in text
+        'method="GET",status="200"} 1' in text
     )
     assert "# TYPE music_recommender_http_request_duration_seconds histogram" in text
 
@@ -438,6 +428,3 @@ def test_telemetry_configs_valid_yaml() -> None:
     assert "service" in otel_data
     assert "pipelines" in otel_data["service"]
     assert "metrics" in otel_data["service"]["pipelines"]
-
-
-
