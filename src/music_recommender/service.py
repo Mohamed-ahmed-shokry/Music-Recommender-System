@@ -336,9 +336,7 @@ class RecommenderService:
                     "on",
                 )
             else:
-                self.drift_guardrails_enabled = (
-                    DEFAULT_BANDIT_ENABLE_DRIFT_GUARDRAILS
-                )
+                self.drift_guardrails_enabled = DEFAULT_BANDIT_ENABLE_DRIFT_GUARDRAILS
 
         if drift_max_l2 is not None:
             self.drift_max_l2: float | None = float(drift_max_l2)
@@ -361,9 +359,7 @@ class RecommenderService:
             )
 
         if drift_max_reward_drop is not None:
-            self.drift_max_reward_drop: float | None = float(
-                drift_max_reward_drop
-            )
+            self.drift_max_reward_drop: float | None = float(drift_max_reward_drop)
         else:
             env_drop = os.getenv(BANDIT_DRIFT_MAX_REWARD_DROP_ENV_VAR)
             self.drift_max_reward_drop = (
@@ -384,14 +380,10 @@ class RecommenderService:
                     "on",
                 )
             else:
-                self.auto_rollback_on_drift = (
-                    DEFAULT_BANDIT_AUTO_ROLLBACK_ON_DRIFT
-                )
+                self.auto_rollback_on_drift = DEFAULT_BANDIT_AUTO_ROLLBACK_ON_DRIFT
 
         self.champion_snapshot_path = (
-            Path(champion_snapshot_path)
-            if champion_snapshot_path is not None
-            else None
+            Path(champion_snapshot_path) if champion_snapshot_path is not None else None
         )
         if drift_thresholds is not None:
             self.drift_thresholds = drift_thresholds
@@ -406,9 +398,7 @@ class RecommenderService:
             )
 
         if maintenance_worker is not None:
-            self.maintenance_worker: BanditMaintenanceWorker | None = (
-                maintenance_worker
-            )
+            self.maintenance_worker: BanditMaintenanceWorker | None = maintenance_worker
         elif enable_maintenance:
             self.maintenance_worker = BanditMaintenanceWorker(
                 interval_seconds=self.maintenance_interval_seconds,
@@ -752,15 +742,9 @@ class RecommenderService:
             "drift_violations_count": (
                 m_dict.get("drift_violations_count", 0) if m_dict else 0
             ),
-            "rollbacks_count": (
-                m_dict.get("rollbacks_count", 0) if m_dict else 0
-            ),
-            "last_drift_result": (
-                m_dict.get("last_drift_result") if m_dict else None
-            ),
-            "last_rollback_at": (
-                m_dict.get("last_rollback_at") if m_dict else None
-            ),
+            "rollbacks_count": (m_dict.get("rollbacks_count", 0) if m_dict else 0),
+            "last_drift_result": (m_dict.get("last_drift_result") if m_dict else None),
+            "last_rollback_at": (m_dict.get("last_rollback_at") if m_dict else None),
             "last_rollback_reason": (
                 m_dict.get("last_rollback_reason") if m_dict else None
             ),
@@ -793,6 +777,7 @@ class RecommenderService:
             },
             "off_policy_evaluation": ope_result,
         }
+
     def evaluate_alerts(self, *, dispatch: bool = True) -> dict[str, Any]:
         """Evaluate alert rules on live metrics and notify on state changes.
 
@@ -815,7 +800,6 @@ class RecommenderService:
             "webhook_configured": self.alert_dispatcher is not None,
             "notifications_delivered": delivered,
         }
-
 
     def export_prometheus_metrics(
         self,
@@ -918,9 +902,7 @@ class RecommenderService:
                 else BANDIT_FEEDBACK_PATH
             )
             sn_dir = (
-                Path(snapshot_dir)
-                if snapshot_dir is not None
-                else BANDIT_SNAPSHOTS_DIR
+                Path(snapshot_dir) if snapshot_dir is not None else BANDIT_SNAPSHOTS_DIR
             )
             state = load_bandit_state(state_path)
             if context_features is not None:
@@ -1070,9 +1052,7 @@ class RecommenderService:
         """Tag a persisted bandit snapshot as the verified champion."""
         with self._sweep_lock:
             sn_dir = (
-                Path(snapshot_dir)
-                if snapshot_dir is not None
-                else BANDIT_SNAPSHOTS_DIR
+                Path(snapshot_dir) if snapshot_dir is not None else BANDIT_SNAPSHOTS_DIR
             )
             tagged = tag_champion_snapshot(snapshot_path, snapshot_dir=sn_dir)
             loaded = load_bandit_snapshot(tagged)
@@ -1095,9 +1075,7 @@ class RecommenderService:
     ) -> dict[str, Any] | None:
         """Resolve and return metadata of the active champion snapshot, if any."""
         sn_dir = (
-            Path(snapshot_dir)
-            if snapshot_dir is not None
-            else BANDIT_SNAPSHOTS_DIR
+            Path(snapshot_dir) if snapshot_dir is not None else BANDIT_SNAPSHOTS_DIR
         )
         found = get_champion_snapshot(sn_dir)
         if found is None or not found.is_file():
@@ -1109,9 +1087,7 @@ class RecommenderService:
             "filename": found.name,
             "label": snap_meta.get("label"),
             "is_champion": bool(snap_meta.get("is_champion", False)),
-            "created_at": (
-                snap_meta.get("created_at") or loaded.get("generated_at")
-            ),
+            "created_at": (snap_meta.get("created_at") or loaded.get("generated_at")),
             "total_selections": sum(
                 int(arm.get("selections", 0))
                 for arm in loaded.get("arms", {}).values()
@@ -1135,9 +1111,7 @@ class RecommenderService:
                 else BANDIT_STATE_PATH
             )
             sn_dir = (
-                Path(snapshot_dir)
-                if snapshot_dir is not None
-                else BANDIT_SNAPSHOTS_DIR
+                Path(snapshot_dir) if snapshot_dir is not None else BANDIT_SNAPSHOTS_DIR
             )
             rollback_meta = rollback_bandit_state(
                 target_state_path=target,
@@ -1167,13 +1141,9 @@ class RecommenderService:
         thresholds: DriftSafetyThresholds | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Evaluate drift safety between current state and a reference snapshot."""
-        st_path = (
-            Path(state_path) if state_path is not None else BANDIT_STATE_PATH
-        )
+        st_path = Path(state_path) if state_path is not None else BANDIT_STATE_PATH
         sn_dir = (
-            Path(snapshot_dir)
-            if snapshot_dir is not None
-            else BANDIT_SNAPSHOTS_DIR
+            Path(snapshot_dir) if snapshot_dir is not None else BANDIT_SNAPSHOTS_DIR
         )
         current_state = load_bandit_state(st_path)
 
@@ -1268,9 +1238,7 @@ class RecommenderService:
     ) -> dict[str, Any]:
         """Compare multiple contextual bandit policies on interaction data."""
         data_p = (
-            Path(interactions_path)
-            if interactions_path is not None
-            else RAW_DATA_PATH
+            Path(interactions_path) if interactions_path is not None else RAW_DATA_PATH
         )
         if not data_p.exists():
             raise FileNotFoundError(f"Interactions data not found: {data_p}")
