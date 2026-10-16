@@ -79,9 +79,7 @@ class MetricSample:
             line = f"{self.name} {val_str}"
         else:
             sorted_labels = sorted(self.labels.items())
-            label_parts = [
-                f'{k}="{escape_label_value(v)}"' for k, v in sorted_labels
-            ]
+            label_parts = [f'{k}="{escape_label_value(v)}"' for k, v in sorted_labels]
             line = f"{self.name}{{{','.join(label_parts)}}} {val_str}"
 
         if self.timestamp_ms is not None:
@@ -650,9 +648,7 @@ def export_prometheus_metrics(
     include_timestamps: bool = False,
 ) -> str:
     """Export complete Prometheus text exposition document for the service."""
-    families = collect_service_metric_families(
-        service, custom_labels=custom_labels
-    )
+    families = collect_service_metric_families(service, custom_labels=custom_labels)
     tracker = request_tracker or get_global_request_tracker()
     families.extend(tracker.to_metric_families())
     if include_timestamps:
@@ -670,17 +666,11 @@ def export_metrics_json(
     indent: int | None = 2,
 ) -> str:
     """Export complete metrics in structured JSON format for the service."""
-    families = collect_service_metric_families(
-        service, custom_labels=custom_labels
-    )
+    families = collect_service_metric_families(service, custom_labels=custom_labels)
     tracker = request_tracker or get_global_request_tracker()
     families.extend(tracker.to_metric_families())
     if include_timestamps:
         now_ms = int(time.time() * 1000)
         families = _apply_timestamps(families, now_ms)
-    metrics_data = {
-        "metrics": [f.to_dict() for f in families if f.samples]
-    }
+    metrics_data = {"metrics": [f.to_dict() for f in families if f.samples]}
     return json.dumps(metrics_data, indent=indent) + "\n"
-
-
