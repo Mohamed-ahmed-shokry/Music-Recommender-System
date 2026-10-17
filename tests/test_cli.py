@@ -3243,3 +3243,45 @@ def test_export_metrics_uninitialized_fallback(monkeypatch: pytest.MonkeyPatch) 
     result = runner.invoke(cli.app, ["export-metrics"])
     assert result.exit_code == 0
     assert "music_recommender_up 0" in result.output
+
+
+def test_validate_dashboard_cli_default_success() -> None:
+    res = runner.invoke(cli.app, ["validate-dashboard"])
+    assert res.exit_code == 0
+    assert "Validation PASSED" in res.output
+    assert "Music Recommender System - Overview" in res.output
+    assert "Panels: 23" in res.output
+
+
+def test_validate_dashboard_cli_json_output() -> None:
+    res = runner.invoke(cli.app, ["validate-dashboard", "--json"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert data["is_valid"] is True
+    assert data["dashboard_title"] == "Music Recommender System - Overview"
+    assert data["total_panels"] == 23
+    assert "music_recommender_up" in data["referenced_metrics"]
+
+
+def test_validate_dashboard_cli_invalid_file_fails(tmp_path: Path) -> None:
+    bad_dash = tmp_path / "bad.json"
+    bad_dash.write_text(
+        json.dumps(
+            {
+                "title": "Bad Dashboard",
+                "panels": [
+                    {
+                        "title": "P1",
+                        "targets": [
+                            {"expr": "music_recommender_totally_fictional_gauge"}
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    res = runner.invoke(cli.app, ["validate-dashboard", str(bad_dash)])
+    assert res.exit_code == 1
+    assert "Validation FAILED" in res.output
+    assert "references unknown metric" in res.output
