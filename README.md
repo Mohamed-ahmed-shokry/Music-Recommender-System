@@ -38,6 +38,7 @@ portfolio-ready architecture.
 - [Evaluation](#evaluation)
 - [Experiment Tracking](#experiment-tracking)
 - [Artifact Bundle](#artifact-bundle)
+- [Observability & Monitoring](#observability--monitoring)
 - [Data Contract](#data-contract)
 - [Logging](#logging)
 - [Model Card](#model-card)
@@ -1526,6 +1527,34 @@ tags, and the complete metrics document as a JSON artifact. Open
 `--tracking-uri` can be omitted when `MLFLOW_TRACKING_URI` is set. Tracking is
 opt-in, so the default train and evaluate workflows do not require MLflow.
 
+## Observability & Monitoring
+
+The system includes a production-grade Prometheus telemetry, alerting, and Grafana observability stack:
+
+- **Prometheus Text Exposition**: Scrape `/metrics` on FastAPI service (Content-Type `text/plain; version=0.0.4; charset=utf-8`).
+- **Telemetry Subsystems Tracked**:
+  - Service liveness (`music_recommender_up`) and environment info (`music_recommender_info`).
+  - Active model artifact metrics (indexed users, artists, interactions count).
+  - Contextual bandit exploration arm weights and champion snapshot indicator.
+  - Real-time streaming feedback queue depth, capacity, utilization ratio, and dropped records.
+  - Asynchronous maintenance worker daemon status, sweep cycles, duration profiling, and drift rollbacks.
+  - HTTP request rate counters and latency distribution histograms (p50, p95, p99).
+- **Automated Threshold Alerting**: Evaluates 10 default operational threshold rules with pending/firing/resolved debouncing and webhook dispatch. Inspected live via `GET /alerts` and defined for Prometheus in `configs/alert-rules.yml`.
+- **Operator Metrics Exporter CLI**: Export telemetry directly from the terminal or cron jobs in Prometheus text or structured JSON format:
+  ```bash
+  uv run music-recommender export-metrics
+  uv run music-recommender export-metrics --format json --output metrics.json
+  ```
+- **Grafana Dashboard Templates**: Shipped in `configs/grafana/dashboards/music-recommender-overview.json` with automated provisioning configurations. Validate dashboards against known metric schemas:
+  ```bash
+  uv run music-recommender validate-dashboard
+  ```
+- **Full Docker Observability Stack**: Spin up API, dashboard, Prometheus, and Grafana in one command:
+  ```bash
+  docker compose --profile observability up -d
+  ```
+  Access Grafana at `http://localhost:3000` (default credentials: `admin` / `admin`).
+
 ## Artifact Bundle
 
 Training creates a versioned artifact bundle at:
@@ -1817,9 +1846,23 @@ See [PLAN.md](PLAN.md) for the full phased plan.
   `GET/POST /bandit/snapshots/champion`). ✓ (0.29.0)
 - Observability Tooling, Queue Depth & Sweep Telemetry CLI/API Instrumentation:
   Comprehensive telemetry metrics across streaming feedback ingestion (queue capacity, utilization, backpressure, batch flushes) and background maintenance sweeps (sweep duration min/max/avg profiling); off-policy evaluation 95% confidence intervals; streaming health status evaluation (healthy, degraded, unhealthy); operator CLI diagnostics (`bandit-observability`, `bandit-status --json`); and REST API telemetry endpoints (`GET /health/streaming`, `GET /bandit/observability`, and `streaming_status` in `GET /health`). ✓ (0.29.0)
-- Streamlit Dashboard Observability & 0.29.0 Release:
-  Operator dashboard on the Cold-Start Bandit tab exposing real-time streaming health banners, queue metrics & flush controls, maintenance daemon telemetry & sweep trigger, champion snapshot indicator & tagging, state rollback, automated drift safety verification & breach alerts, observability diagnostics expander, and OPE 95% confidence intervals. ✓ (0.29.0)
-- Next: Streaming metrics Prometheus / OpenTelemetry exporter and alerting integration.
+- Production Telemetry Exporters & Prometheus Scraping:
+  Standard Prometheus text exposition endpoint (`/metrics`), pure-Python metric
+  formatter, and OpenTelemetry collector configurations in `configs/`. ✓ (0.30.0)
+- Alerting Rule Definitions & Automated Webhook Dispatch:
+  Threshold rules over Prometheus metric families, pending/firing/resolved evaluator,
+  webhook notifications, generated Prometheus rules (`configs/alert-rules.yml`),
+  and `GET /alerts` endpoint. ✓ (0.30.0)
+- Operator CLI Metrics Export Tooling:
+  `music-recommender export-metrics` CLI command supporting Prometheus 0.0.4 text
+  and structured JSON format, stdout or file output destinations, custom labels,
+  timestamp inclusion, and uninitialized fallback handling. ✓ (0.30.0)
+- Grafana Dashboard Templates & Observability Parity:
+  Production-grade Grafana dashboard templates (`configs/grafana/dashboards/music-recommender-overview.json`),
+  automated datasource and dashboard provisioning, dashboard Prometheus metric validator
+  (`music-recommender validate-dashboard`), end-to-end integration test suite,
+  and Docker Compose observability stack. ✓ (0.30.0)
+- Next: Distributed multi-node model training and serving orchestration.
 - Deferred: two-tower neural candidate retrieval (PyTorch / ONNX runtime) until
   a real-scale catalog is available; the sample dataset cannot validate a
   neural retrieval model.

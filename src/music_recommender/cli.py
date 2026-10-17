@@ -112,6 +112,7 @@ from music_recommender.surfaces import (
 from music_recommender.telemetry import (
     export_metrics_json,
     export_prometheus_metrics,
+    validate_dashboard_metrics,
 )
 from music_recommender.track_evaluate import (
     ablate_track_parameter_settings,
@@ -217,16 +218,12 @@ def _parse_label_option(labels: list[str] | None) -> dict[str, str]:
         if not entry_str:
             continue
         if "=" not in entry_str:
-            raise ValueError(
-                f"Invalid label format '{entry}'; expected 'key=value'"
-            )
+            raise ValueError(f"Invalid label format '{entry}'; expected 'key=value'")
         k, v = entry_str.split("=", 1)
         key = k.strip()
         val = v.strip()
         if not _VALID_CLI_LABEL_NAME_RE.match(key):
-            raise ValueError(
-                f"Invalid Prometheus label name: '{key}'"
-            )
+            raise ValueError(f"Invalid Prometheus label name: '{key}'")
         result[key] = val
     return result
 
@@ -2153,8 +2150,7 @@ def simulate_bandit(
         "linucb,thompson_sampling,epsilon_greedy",
         "--policies",
         help=(
-            "Comma-separated policy types to benchmark when "
-            "--compare-policies is set."
+            "Comma-separated policy types to benchmark when --compare-policies is set."
         ),
     ),
     report_name: str | None = typer.Option(
@@ -2199,9 +2195,7 @@ def simulate_bandit(
         )
 
         if compare_policies:
-            policy_names = tuple(
-                p.strip() for p in policies.split(",") if p.strip()
-            )
+            policy_names = tuple(p.strip() for p in policies.split(",") if p.strip())
             policy_specs = [
                 {
                     "name": p,
@@ -2861,9 +2855,7 @@ def bandit_observability(
     st_cfg = state.get("config", {}) if state else {}
     pol_model = str(st_cfg.get("policy_type", "linucb")) if state else None
     alpha_val = float(st_cfg.get("alpha", 1.0)) if state else None
-    ctx_feat: list[str] = (
-        list(state.get("context_features") or []) if state else []
-    )
+    ctx_feat: list[str] = list(state.get("context_features") or []) if state else []
     total_sel = (
         sum(
             int(arm.get("selections", 0))
@@ -2950,7 +2942,6 @@ def bandit_observability(
                         )
                     elif v is not None:
                         typer.echo(f"    {m_key.upper():<14}: {v:.4f}")
-
 
 
 @app.command()
@@ -3433,11 +3424,7 @@ def bandit_sweep(
 
         if enable_guardrails and folded > 0:
             champ = get_champion_snapshot(sn_dir)
-            ref_st = (
-                load_bandit_snapshot(champ)
-                if champ and champ.is_file()
-                else state
-            )
+            ref_st = load_bandit_snapshot(champ) if champ and champ.is_file() else state
             ref_nm = champ.name if champ and champ.is_file() else "prior_state"
             drift_thresh = DriftSafetyThresholds(
                 max_l2_drift=max_l2,
@@ -3471,8 +3458,7 @@ def bandit_sweep(
             encoding="utf-8",
         )
         typer.echo(
-            f"Folded {folded} pending feedback record(s) "
-            f"(gamma={gamma}) into: {st_p}"
+            f"Folded {folded} pending feedback record(s) (gamma={gamma}) into: {st_p}"
         )
         if snapshot_on_sweep:
             snap = save_bandit_snapshot(
@@ -3614,6 +3600,55 @@ def export_metrics(
             raise typer.Exit(code=1) from os_err
     else:
         typer.echo(rendered, nl=False)
+
+
+@app.command("validate-dashboard")
+def validate_dashboard_cmd(
+    dashboard: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to the Grafana dashboard JSON file to validate.",
+            exists=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("configs/grafana/dashboards/music-recommender-overview.json"),
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Output validation results as a formatted JSON payload.",
+        ),
+    ] = False,
+) -> None:
+    """Validate that Grafana dashboard panels reference known Prometheus metrics."""
+    result = validate_dashboard_metrics(dashboard)
+
+    if json_output:
+        typer.echo(json.dumps(result.to_dict(), indent=2))
+    else:
+        if result.is_valid:
+            typer.secho(
+                f"Validation PASSED: '{result.dashboard_title}' ({dashboard})",
+                fg=typer.colors.GREEN,
+                bold=True,
+            )
+            typer.echo(
+                f"Panels: {result.total_panels} | Queries: {result.total_queries} | "
+                f"Metrics: {len(result.referenced_metrics)}"
+            )
+        else:
+            typer.secho(
+                f"Validation FAILED: '{result.dashboard_title}' ({dashboard})",
+                fg=typer.colors.RED,
+                bold=True,
+                err=True,
+            )
+            for err in result.errors:
+                typer.secho(f" - {err}", fg=typer.colors.RED, err=True)
+
+    if not result.is_valid:
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

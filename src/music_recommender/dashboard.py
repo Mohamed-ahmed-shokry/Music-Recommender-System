@@ -887,9 +887,7 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                 f"Dropped records: **{queue_metrics.get('dropped_count', 0)}** | "
                 f"Flush errors: **{queue_metrics.get('flush_errors', 0)}**"
             )
-        flush_q_btn = st.button(
-            "Flush Feedback Queue", key="btn_flush_feedback_queue"
-        )
+        flush_q_btn = st.button("Flush Feedback Queue", key="btn_flush_feedback_queue")
         if flush_q_btn:
             if hasattr(service, "flush_feedback"):
                 try:
@@ -1034,9 +1032,7 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                 if hasattr(service, "tag_champion_snapshot"):
                     try:
                         service.tag_champion_snapshot(snap_to_tag)
-                        st.success(
-                            f"Snapshot `{snap_to_tag}` tagged as champion."
-                        )
+                        st.success(f"Snapshot `{snap_to_tag}` tagged as champion.")
                     except Exception as error:
                         st.error(f"Champion tagging failed: {error}")
                 else:
@@ -1051,12 +1047,8 @@ def _render_bandit_tab(service: RecommenderService) -> None:
             if st.button("Roll Back State", key="btn_rollback_bandit_state"):
                 if hasattr(service, "rollback_bandit_state"):
                     try:
-                        service.rollback_bandit_state(
-                            snapshot_path=snap_to_rollback
-                        )
-                        st.success(
-                            f"Rolled back active state to `{snap_to_rollback}`."
-                        )
+                        service.rollback_bandit_state(snapshot_path=snap_to_rollback)
+                        st.success(f"Rolled back active state to `{snap_to_rollback}`.")
                     except Exception as error:
                         st.error(f"State rollback failed: {error}")
                 else:
@@ -1128,9 +1120,7 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                 guardrails = status.get("drift_guardrails", {})
                 thresholds = guardrails.get("thresholds", {})
                 st.markdown("##### Automated Drift Guardrails")
-                g_enabled = (
-                    "Enabled" if guardrails.get("enabled") else "Disabled"
-                )
+                g_enabled = "Enabled" if guardrails.get("enabled") else "Disabled"
                 g_rollback = (
                     "Enabled" if guardrails.get("auto_rollback") else "Disabled"
                 )
@@ -1283,9 +1273,7 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                 ope_summary = ope_res["summary"]
                 ope_metrics = ope_res["metrics"]
                 m_cols = st.columns(4)
-                m_cols[0].metric(
-                    "Records Evaluated", ope_summary["records_evaluated"]
-                )
+                m_cols[0].metric("Records Evaluated", ope_summary["records_evaluated"])
                 m_cols[1].metric("Match Rate", f"{ope_summary['match_rate']:.1%}")
                 m_cols[2].metric(
                     "Effective Sample Size",
@@ -1320,9 +1308,7 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                         "Std Error": ope_metrics["direct_method"].get(
                             "standard_error", "-"
                         ),
-                        "95% CI": _fmt_ci(
-                            ope_metrics["direct_method"].get("ci_95")
-                        ),
+                        "95% CI": _fmt_ci(ope_metrics["direct_method"].get("ci_95")),
                     },
                     {
                         "Estimator": "Doubly Robust (DR)",
@@ -1330,9 +1316,7 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                         "Std Error": ope_metrics["doubly_robust"].get(
                             "standard_error", "-"
                         ),
-                        "95% CI": _fmt_ci(
-                            ope_metrics["doubly_robust"].get("ci_95")
-                        ),
+                        "95% CI": _fmt_ci(ope_metrics["doubly_robust"].get("ci_95")),
                     },
                 ]
                 st.dataframe(pd.DataFrame(est_rows), hide_index=True, width="stretch")
@@ -1409,9 +1393,7 @@ def _render_bandit_tab(service: RecommenderService) -> None:
         ):
             if hasattr(service, "bandit_observability"):
                 try:
-                    obs_data = service.bandit_observability(
-                        include_ope=include_ope_obs
-                    )
+                    obs_data = service.bandit_observability(include_ope=include_ope_obs)
                     st.success("Observability diagnostics loaded.")
                     st.json(obs_data)
                 except Exception as error:

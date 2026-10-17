@@ -918,9 +918,7 @@ def test_dashboard_bandit_tab_derivation_ope_and_benchmark() -> None:
 
     # 2. Run OPE
     ope_button = next(
-        button
-        for button in app.button
-        if button.label == "Run Off-Policy Evaluation"
+        button for button in app.button if button.label == "Run Off-Policy Evaluation"
     )
     ope_button.click().run()
     assert not app.exception
@@ -929,9 +927,7 @@ def test_dashboard_bandit_tab_derivation_ope_and_benchmark() -> None:
 
     # 3. Run Benchmark
     bench_button = next(
-        button
-        for button in app.button
-        if button.label == "Run Policy Benchmark"
+        button for button in app.button if button.label == "Run Policy Benchmark"
     )
     bench_button.click().run()
     assert not app.exception
@@ -1368,8 +1364,7 @@ def test_dashboard_bandit_tab_streaming_queue_metrics_and_flush() -> None:
     assert not app.exception
     assert service.last_flush_called is True
     assert any(
-        "Streaming feedback queue flushed successfully." in s.value
-        for s in app.success
+        "Streaming feedback queue flushed successfully." in s.value for s in app.success
     )
 
 
@@ -1383,9 +1378,7 @@ def test_dashboard_bandit_tab_maintenance_daemon_and_sweep() -> None:
     ).run()
 
     assert not app.exception
-    assert any(
-        "Asynchronous Maintenance Daemon" in m.value for m in app.markdown
-    )
+    assert any("Asynchronous Maintenance Daemon" in m.value for m in app.markdown)
     assert any(metric.label == "Daemon Status" for metric in app.metric)
     assert any(metric.label == "Sweep Interval" for metric in app.metric)
     assert any(metric.label == "Cycles Executed" for metric in app.metric)
@@ -1394,17 +1387,14 @@ def test_dashboard_bandit_tab_maintenance_daemon_and_sweep() -> None:
     assert any(metric.label == "Avg Sweep" for metric in app.metric)
 
     trigger_button = next(
-        button
-        for button in app.button
-        if button.label == "Trigger Maintenance Sweep"
+        button for button in app.button if button.label == "Trigger Maintenance Sweep"
     )
     trigger_button.click().run()
 
     assert not app.exception
     assert service.last_trigger_sweep_called is True
     assert any(
-        "Maintenance sweep triggered:" in s.value
-        and "record(s) folded." in s.value
+        "Maintenance sweep triggered:" in s.value and "record(s) folded." in s.value
         for s in app.success
     )
 
@@ -1429,8 +1419,7 @@ def test_dashboard_bandit_tab_champion_tagging_and_rollback() -> None:
 
     assert not app.exception
     assert any(
-        "Champion Snapshot Management & State Rollback" in m.value
-        for m in app.markdown
+        "Champion Snapshot Management & State Rollback" in m.value for m in app.markdown
     )
 
     tag_button = next(
@@ -1482,9 +1471,7 @@ def test_dashboard_bandit_tab_drift_safety_evaluation_pass_and_breach() -> None:
     verify_button.click().run()
 
     assert not app.exception
-    assert any(
-        "Drift Safety Check: **PASSED**" in s.value for s in app.success
-    )
+    assert any("Drift Safety Check: **PASSED**" in s.value for s in app.success)
 
     class BreachSafetyService(FakeDashboardService):
         def evaluate_bandit_drift_safety(
@@ -1520,9 +1507,7 @@ def test_dashboard_bandit_tab_drift_safety_evaluation_pass_and_breach() -> None:
     ).run()
 
     verify_button_breach = next(
-        button
-        for button in breach_app.button
-        if button.label == "Verify Drift Safety"
+        button for button in breach_app.button if button.label == "Verify Drift Safety"
     )
     verify_button_breach.click().run()
 
@@ -1575,8 +1560,7 @@ def test_dashboard_bandit_tab_streaming_health_banners() -> None:
         for w in app_degraded.warning
     )
     assert any(
-        "Queue utilization exceeds 80%." in w.value
-        for w in app_degraded.warning
+        "Queue utilization exceeds 80%." in w.value for w in app_degraded.warning
     )
 
     class UnhealthyHealthService(FakeDashboardService):
@@ -1602,8 +1586,7 @@ def test_dashboard_bandit_tab_streaming_health_banners() -> None:
         for e in app_unhealthy.error
     )
     assert any(
-        "Worker daemon stopped unexpectedly." in w.value
-        for w in app_unhealthy.warning
+        "Worker daemon stopped unexpectedly." in w.value for w in app_unhealthy.warning
     )
 
 
@@ -1624,9 +1607,7 @@ def test_dashboard_bandit_tab_observability_expander() -> None:
     load_obs_btn.click().run()
 
     assert not app.exception
-    assert any(
-        "Observability diagnostics loaded." in s.value for s in app.success
-    )
+    assert any("Observability diagnostics loaded." in s.value for s in app.success)
     assert len(app.json) > 0
 
 
@@ -1639,18 +1620,12 @@ def test_dashboard_bandit_tab_ope_confidence_intervals() -> None:
     ).run()
 
     ope_button = next(
-        button
-        for button in app.button
-        if button.label == "Run Off-Policy Evaluation"
+        button for button in app.button if button.label == "Run Off-Policy Evaluation"
     )
     ope_button.click().run()
 
     assert not app.exception
-    ope_df = next(
-        df.value
-        for df in app.dataframe
-        if "Estimator" in df.value.columns
-    )
+    ope_df = next(df.value for df in app.dataframe if "Estimator" in df.value.columns)
     assert "95% CI" in ope_df.columns
     ips_row = ope_df[ope_df["Estimator"] == "Inverse Propensity (IPS)"].iloc[0]
     assert ips_row["95% CI"] == "[0.6200, 0.8200]"
@@ -1658,13 +1633,5 @@ def test_dashboard_bandit_tab_ope_confidence_intervals() -> None:
     assert dm_row["95% CI"] == "[0.6300, 0.7900]"
     dr_row = ope_df[ope_df["Estimator"] == "Doubly Robust (DR)"].iloc[0]
     assert dr_row["95% CI"] == "[0.6500, 0.8100]"
-    snips_row = ope_df[
-        ope_df["Estimator"] == "Self-Normalized (SnIPS)"
-    ].iloc[0]
+    snips_row = ope_df[ope_df["Estimator"] == "Self-Normalized (SnIPS)"].iloc[0]
     assert snips_row["95% CI"] == "-"
-
-
-
-
-
-

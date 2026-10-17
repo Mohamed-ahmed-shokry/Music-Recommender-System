@@ -11,6 +11,7 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 _VALID_NAME_RE = re.compile(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$")
@@ -79,9 +80,7 @@ class MetricSample:
             line = f"{self.name} {val_str}"
         else:
             sorted_labels = sorted(self.labels.items())
-            label_parts = [
-                f'{k}="{escape_label_value(v)}"' for k, v in sorted_labels
-            ]
+            label_parts = [f'{k}="{escape_label_value(v)}"' for k, v in sorted_labels]
             line = f"{self.name}{{{','.join(label_parts)}}} {val_str}"
 
         if self.timestamp_ms is not None:
@@ -650,9 +649,7 @@ def export_prometheus_metrics(
     include_timestamps: bool = False,
 ) -> str:
     """Export complete Prometheus text exposition document for the service."""
-    families = collect_service_metric_families(
-        service, custom_labels=custom_labels
-    )
+    families = collect_service_metric_families(service, custom_labels=custom_labels)
     tracker = request_tracker or get_global_request_tracker()
     families.extend(tracker.to_metric_families())
     if include_timestamps:
@@ -670,17 +667,181 @@ def export_metrics_json(
     indent: int | None = 2,
 ) -> str:
     """Export complete metrics in structured JSON format for the service."""
-    families = collect_service_metric_families(
-        service, custom_labels=custom_labels
-    )
+    families = collect_service_metric_families(service, custom_labels=custom_labels)
     tracker = request_tracker or get_global_request_tracker()
     families.extend(tracker.to_metric_families())
     if include_timestamps:
         now_ms = int(time.time() * 1000)
         families = _apply_timestamps(families, now_ms)
-    metrics_data = {
-        "metrics": [f.to_dict() for f in families if f.samples]
-    }
+    metrics_data = {"metrics": [f.to_dict() for f in families if f.samples]}
     return json.dumps(metrics_data, indent=indent) + "\n"
 
 
+KNOWN_PROMETHEUS_METRIC_NAMES: frozenset[str] = frozenset(
+    {
+        "music_recommender_info",
+        "music_recommender_up",
+        "music_recommender_artifact_users_count",
+        "music_recommender_artifact_artists_count",
+        "music_recommender_artifact_interactions_count",
+        "music_recommender_bandit_arms_count",
+        "music_recommender_bandit_arm_weight",
+        "music_recommender_bandit_champion_info",
+        "music_recommender_streaming_queue_enabled",
+        "music_recommender_streaming_queue_size",
+        "music_recommender_streaming_queue_capacity",
+        "music_recommender_streaming_queue_utilization_ratio",
+        "music_recommender_streaming_records_enqueued_total",
+        "music_recommender_streaming_records_flushed_total",
+        "music_recommender_streaming_records_dropped_total",
+        "music_recommender_streaming_flush_errors_total",
+        "music_recommender_streaming_flushes_total",
+        "music_recommender_maintenance_enabled",
+        "music_recommender_maintenance_running",
+        "music_recommender_maintenance_cycles_total",
+        "music_recommender_maintenance_sweeps_total",
+        "music_recommender_maintenance_records_folded_total",
+        "music_recommender_maintenance_errors_total",
+        "music_recommender_maintenance_sweep_duration_seconds",
+        "music_recommender_maintenance_drift_evaluations_total",
+        "music_recommender_maintenance_drift_violations_total",
+        "music_recommender_maintenance_rollbacks_total",
+        "music_recommender_streaming_health",
+        "music_recommender_http_requests_total",
+        "music_recommender_http_request_duration_seconds",
+        "music_recommender_http_request_duration_seconds_bucket",
+        "music_recommender_http_request_duration_seconds_sum",
+        "music_recommender_http_request_duration_seconds_count",
+    }
+)
+
+
+@dataclass(frozen=True)
+class DashboardValidationResult:
+    """Validation report for Grafana dashboard Prometheus metric bindings."""
+
+    is_valid: bool
+    dashboard_title: str
+    total_panels: int
+    total_queries: int
+    referenced_metrics: set[str] = field(default_factory=set)
+    unknown_metrics: set[str] = field(default_factory=set)
+    errors: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert validation summary into JSON-serializable dictionary."""
+        return {
+            "is_valid": self.is_valid,
+            "dashboard_title": self.dashboard_title,
+            "total_panels": self.total_panels,
+            "total_queries": self.total_queries,
+            "referenced_metrics": sorted(self.referenced_metrics),
+            "unknown_metrics": sorted(self.unknown_metrics),
+            "errors": list(self.errors),
+        }
+
+
+_PROMETHEUS_METRIC_REF_RE = re.compile(r"\b(music_recommender_[a-zA-Z0-9_]+)\b")
+
+
+def validate_dashboard_metrics(
+    dashboard_data: dict[str, Any] | str | Path,
+    *,
+    allowed_metrics: frozenset[str] | set[str] | None = None,
+) -> DashboardValidationResult:
+    """Validate that Grafana dashboard panels bind to valid Prometheus metric names."""
+    valid_names = (
+        allowed_metrics
+        if allowed_metrics is not None
+        else KNOWN_PROMETHEUS_METRIC_NAMES
+    )
+    errors: list[str] = []
+
+    if isinstance(dashboard_data, (str, Path)):
+        p = Path(dashboard_data)
+        if not p.is_file():
+            return DashboardValidationResult(
+                is_valid=False,
+                dashboard_title=str(dashboard_data),
+                total_panels=0,
+                total_queries=0,
+                errors=[f"Dashboard file does not exist: {p}"],
+            )
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception as err:
+            return DashboardValidationResult(
+                is_valid=False,
+                dashboard_title=str(dashboard_data),
+                total_panels=0,
+                total_queries=0,
+                errors=[f"Failed to parse dashboard JSON: {err}"],
+            )
+    elif isinstance(dashboard_data, dict):
+        data = dashboard_data
+    else:
+        return DashboardValidationResult(
+            is_valid=False,
+            dashboard_title="Unknown",
+            total_panels=0,
+            total_queries=0,
+            errors=[f"Invalid dashboard data type: {type(dashboard_data).__name__}"],
+        )
+
+    title = str(data.get("title", "Untitled Dashboard"))
+    panels: list[dict[str, Any]] = []
+
+    def _collect_panels(panel_list: list[Any]) -> None:
+        for p_item in panel_list:
+            if isinstance(p_item, dict):
+                panels.append(p_item)
+                if "panels" in p_item and isinstance(p_item["panels"], list):
+                    _collect_panels(p_item["panels"])
+
+    raw_panels = data.get("panels", [])
+    if isinstance(raw_panels, list):
+        _collect_panels(raw_panels)
+
+    total_queries = 0
+    referenced_metrics: set[str] = set()
+    unknown_metrics: set[str] = set()
+
+    for p_idx, panel in enumerate(panels):
+        panel_title = panel.get("title", f"Panel #{p_idx}")
+        targets = panel.get("targets", [])
+        if not isinstance(targets, list):
+            continue
+        for target in targets:
+            if not isinstance(target, dict):
+                continue
+            expr = target.get("expr")
+            if not expr or not isinstance(expr, str):
+                continue
+            total_queries += 1
+            matches = _PROMETHEUS_METRIC_REF_RE.findall(expr)
+            for m in matches:
+                referenced_metrics.add(m)
+                if m not in valid_names:
+                    unknown_metrics.add(m)
+                    errors.append(
+                        f"Panel '{panel_title}' references unknown metric '{m}' "
+                        f"in expression: {expr}"
+                    )
+
+    if not panels:
+        errors.append("Dashboard contains no panels.")
+
+    is_valid = len(errors) == 0 and len(referenced_metrics) > 0
+    if not errors and not referenced_metrics:
+        errors.append("Dashboard contains no Prometheus metric references.")
+        is_valid = False
+
+    return DashboardValidationResult(
+        is_valid=is_valid,
+        dashboard_title=title,
+        total_panels=len(panels),
+        total_queries=total_queries,
+        referenced_metrics=referenced_metrics,
+        unknown_metrics=unknown_metrics,
+        errors=errors,
+    )

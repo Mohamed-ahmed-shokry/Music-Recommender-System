@@ -2052,8 +2052,7 @@ def test_service_sweep_bandit_feedback_drift_guardrail(tmp_path: Path) -> None:
 
     # Append feedback that causes drift beyond max_l2_drift=0.01
     feedback = [
-        {"context": [1.0, 1.0, 1.0], "arm": "popular", "reward": 5.0}
-        for _ in range(10)
+        {"context": [1.0, 1.0, 1.0], "arm": "popular", "reward": 5.0} for _ in range(10)
     ]
     append_bandit_feedback_batch(feedback, j_p)
 
@@ -2199,6 +2198,7 @@ def test_service_record_request(tmp_path: Path) -> None:
         'method="GET",status="200"}' in metrics_text
     )
 
+
 def _always_firing_rule() -> AlertRule:
     return AlertRule(
         name="HasUsers",
@@ -2267,4 +2267,3 @@ def test_service_alert_webhook_from_env_and_validation(
 
     monkeypatch.delenv(ALERT_WEBHOOK_URL_ENV_VAR)
     assert create_service(tmp_path).alert_dispatcher is None
-
