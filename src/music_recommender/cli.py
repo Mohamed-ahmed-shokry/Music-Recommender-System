@@ -112,6 +112,7 @@ from music_recommender.surfaces import (
 from music_recommender.telemetry import (
     export_metrics_json,
     export_prometheus_metrics,
+    validate_dashboard_metrics,
 )
 from music_recommender.track_evaluate import (
     ablate_track_parameter_settings,
@@ -3599,6 +3600,55 @@ def export_metrics(
             raise typer.Exit(code=1) from os_err
     else:
         typer.echo(rendered, nl=False)
+
+
+@app.command("validate-dashboard")
+def validate_dashboard_cmd(
+    dashboard: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to the Grafana dashboard JSON file to validate.",
+            exists=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = Path("configs/grafana/dashboards/music-recommender-overview.json"),
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Output validation results as a formatted JSON payload.",
+        ),
+    ] = False,
+) -> None:
+    """Validate that Grafana dashboard panels reference known Prometheus metrics."""
+    result = validate_dashboard_metrics(dashboard)
+
+    if json_output:
+        typer.echo(json.dumps(result.to_dict(), indent=2))
+    else:
+        if result.is_valid:
+            typer.secho(
+                f"Validation PASSED: '{result.dashboard_title}' ({dashboard})",
+                fg=typer.colors.GREEN,
+                bold=True,
+            )
+            typer.echo(
+                f"Panels: {result.total_panels} | Queries: {result.total_queries} | "
+                f"Metrics: {len(result.referenced_metrics)}"
+            )
+        else:
+            typer.secho(
+                f"Validation FAILED: '{result.dashboard_title}' ({dashboard})",
+                fg=typer.colors.RED,
+                bold=True,
+                err=True,
+            )
+            for err in result.errors:
+                typer.secho(f" - {err}", fg=typer.colors.RED, err=True)
+
+    if not result.is_valid:
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":
