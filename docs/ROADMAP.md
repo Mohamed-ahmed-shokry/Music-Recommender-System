@@ -57,18 +57,19 @@ Complete Milestone 0.30.0 by repairing broken CI formatting across all affected 
 - External cloud monitoring integrations like Datadog or CloudWatch agent configs (out of scope for pure Prometheus/Grafana stack).
 
 ### 6. Micro-Task Breakdown
-- [ ] Task 1: Initialize Phase 138 roadmap and update `PLAN.md`.
-- [ ] Task 2: Format existing source files (`bandit.py`, `cli.py`, `dashboard.py`, `service.py`, `telemetry.py`).
-- [ ] Task 3: Format existing test files (`test_api.py`, `test_bandit.py`, `test_bandit_snapshots.py`, `test_cli.py`, `test_config.py`, `test_dashboard.py`, `test_service.py`, `test_telemetry.py`).
-- [ ] Task 4: Verify formatting and CI parity locally (`ruff format --check .`, `ruff check .`).
-- [ ] Task 5: Create Grafana dashboard template `configs/grafana/dashboards/music-recommender-overview.json`.
-- [ ] Task 6: Create Grafana provisioning configurations `dashboards.yaml` and `datasources.yaml`.
-- [ ] Task 7: Update `compose.yaml` with Prometheus and Grafana observability services and verify with `docker compose config --quiet`.
-- [ ] Task 8: Implement dashboard metric validator helper in `src/music_recommender/telemetry.py`.
-- [ ] Task 9: Implement `validate-dashboard` CLI command in `src/music_recommender/cli.py`.
-- [ ] Task 10: Implement unit tests for dashboard validation in `tests/test_telemetry.py` and `tests/test_cli.py`.
-- [ ] Task 11: Implement end-to-end observability integration test suite `tests/test_observability_integration.py`.
-- [ ] Task 12: Bump package version to `0.30.0` in `pyproject.toml` and test `uv build`.
-- [ ] Task 13: Update `README.md` and `CHANGELOG.md` with 0.30.0 observability guides and release notes.
+- [x] Task 1: Initialize Phase 138 roadmap and update `PLAN.md`.
+- [x] Task 2: Format existing source files (`bandit.py`, `cli.py`, `dashboard.py`, `service.py`, `telemetry.py`).
+- [x] Task 3: Format existing test files (`test_api.py`, `test_bandit.py`, `test_bandit_snapshots.py`, `test_cli.py`, `test_config.py`, `test_dashboard.py`, `test_service.py`, `test_telemetry.py`).
+- [x] Task 4: Verify formatting and CI parity locally (`ruff format --check .`, `ruff check .`).
+- [x] Task 5: Create Grafana dashboard template `configs/grafana/dashboards/music-recommender-overview.json`.
+- [x] Task 6: Create Grafana provisioning configurations `dashboards.yaml` and `datasources.yaml`.
+- [x] Task 7: Update `compose.yaml` with Prometheus and Grafana observability services and verify with `docker compose config --quiet`.
+- [x] Task 8: Implement dashboard metric validator helper in `src/music_recommender/telemetry.py`.
+- [x] Task 9: Implement `validate-dashboard` CLI command in `src/music_recommender/cli.py`.
+- [x] Task 10: Implement unit tests for dashboard validation in `tests/test_telemetry.py` and `tests/test_cli.py`.
+- [x] Task 11: Implement end-to-end observability integration test suite `tests/test_observability_integration.py`.
+- [x] Task 12: Bump package version to `0.30.0` in `pyproject.toml` and test `uv build`.
+- [x] Task 13: Update `README.md` and `CHANGELOG.md` with 0.30.0 observability guides and release notes.
 - [ ] Task 14: Update `docs/PROGRESS.md` and `PLAN.md` marking Phase 138 and Milestone 0.30.0 complete.
 - [ ] Task 15: Run full CI parity suite locally, push micro-commits, monitor remote GitHub Actions run to green, and open draft PR.
+
