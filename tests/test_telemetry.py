@@ -17,6 +17,7 @@ from music_recommender.telemetry import (
     export_prometheus_metrics,
     format_metric_value,
     render_prometheus_exposition,
+    validate_dashboard_metrics,
 )
 
 
@@ -428,3 +429,68 @@ def test_telemetry_configs_valid_yaml() -> None:
     assert "service" in otel_data
     assert "pipelines" in otel_data["service"]
     assert "metrics" in otel_data["service"]["pipelines"]
+
+
+def test_validate_dashboard_metrics_valid_overview() -> None:
+    overview_path = (
+        Path(__file__).parent.parent
+        / "configs"
+        / "grafana"
+        / "dashboards"
+        / "music-recommender-overview.json"
+    )
+    result = validate_dashboard_metrics(overview_path)
+    assert result.is_valid
+    assert result.dashboard_title == "Music Recommender System - Overview"
+    assert result.total_panels == 23
+    assert result.total_queries >= 20
+    assert len(result.referenced_metrics) >= 15
+    assert len(result.unknown_metrics) == 0
+    assert len(result.errors) == 0
+
+    as_dict = result.to_dict()
+    assert as_dict["is_valid"] is True
+    assert "music_recommender_up" in as_dict["referenced_metrics"]
+
+
+def test_validate_dashboard_metrics_invalid_and_edge_cases(tmp_path: Path) -> None:
+    # 1. Non-existent file
+    missing = tmp_path / "nonexistent.json"
+    res_missing = validate_dashboard_metrics(missing)
+    assert not res_missing.is_valid
+    assert any("does not exist" in e for e in res_missing.errors)
+
+    # 2. Malformed JSON
+    bad_json = tmp_path / "bad.json"
+    bad_json.write_text("{not valid json", encoding="utf-8")
+    res_bad = validate_dashboard_metrics(bad_json)
+    assert not res_bad.is_valid
+    assert any("Failed to parse" in e for e in res_bad.errors)
+
+    # 3. Invalid data type
+    res_type = validate_dashboard_metrics(12345)  # type: ignore[arg-type]
+    assert not res_type.is_valid
+    assert any("Invalid dashboard data type" in e for e in res_type.errors)
+
+    # 4. Unknown metrics detection
+    bad_metric_dash = {
+        "title": "Bad Metric Dashboard",
+        "panels": [
+            {
+                "title": "Panel 1",
+                "targets": [
+                    {"expr": "rate(music_recommender_fictional_metric_total[5m])"}
+                ],
+            }
+        ],
+    }
+    res_unknown = validate_dashboard_metrics(bad_metric_dash)
+    assert not res_unknown.is_valid
+    assert "music_recommender_fictional_metric_total" in res_unknown.unknown_metrics
+    assert any("references unknown metric" in e for e in res_unknown.errors)
+
+    # 5. Empty panels
+    empty_dash = {"title": "Empty Dashboard", "panels": []}
+    res_empty = validate_dashboard_metrics(empty_dash)
+    assert not res_empty.is_valid
+    assert any("contains no panels" in e for e in res_empty.errors)
