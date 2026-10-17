@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -131,7 +131,7 @@ def test_observability_pipeline_api_and_service_integration() -> None:
         orig_service = api_main.service
         orig_err = api_main.service_load_error
         try:
-            api_main.service = MockIntegratedService()
+            api_main.service = cast(Any, MockIntegratedService())
             api_main.service_load_error = None
 
             health_resp = client.get("/health")
