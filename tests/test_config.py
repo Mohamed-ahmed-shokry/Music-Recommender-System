@@ -91,8 +91,7 @@ def test_bandit_drift_guardrails_config_constants() -> None:
     )
     assert BANDIT_DRIFT_MAX_L2_ENV_VAR == "MUSIC_RECOMMENDER_BANDIT_DRIFT_MAX_L2"
     assert (
-        BANDIT_DRIFT_MIN_COSINE_ENV_VAR
-        == "MUSIC_RECOMMENDER_BANDIT_DRIFT_MIN_COSINE"
+        BANDIT_DRIFT_MIN_COSINE_ENV_VAR == "MUSIC_RECOMMENDER_BANDIT_DRIFT_MIN_COSINE"
     )
     assert (
         BANDIT_DRIFT_MAX_REWARD_DROP_ENV_VAR

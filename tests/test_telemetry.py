@@ -17,6 +17,7 @@ from music_recommender.telemetry import (
     export_prometheus_metrics,
     format_metric_value,
     render_prometheus_exposition,
+    validate_dashboard_metrics,
 )
 
 
@@ -198,8 +199,7 @@ def test_collect_service_metric_families_mock_service() -> None:
     assert names["music_recommender_artifact_users_count"].samples[0].value == 1500
     assert names["music_recommender_artifact_artists_count"].samples[0].value == 400
     assert (
-        names["music_recommender_artifact_interactions_count"].samples[0].value
-        == 35000
+        names["music_recommender_artifact_interactions_count"].samples[0].value == 35000
     )
 
     # Bandit arms
@@ -218,9 +218,7 @@ def test_collect_service_metric_families_mock_service() -> None:
     # Streaming queue
     assert names["music_recommender_streaming_queue_enabled"].samples[0].value == 1
     assert names["music_recommender_streaming_queue_size"].samples[0].value == 42
-    assert (
-        names["music_recommender_streaming_queue_capacity"].samples[0].value == 1000
-    )
+    assert names["music_recommender_streaming_queue_capacity"].samples[0].value == 1000
     assert (
         names["music_recommender_streaming_queue_utilization_ratio"].samples[0].value
         == 0.042
@@ -237,9 +235,7 @@ def test_collect_service_metric_families_mock_service() -> None:
     # Maintenance worker
     assert names["music_recommender_maintenance_enabled"].samples[0].value == 1
     assert names["music_recommender_maintenance_running"].samples[0].value == 1
-    assert (
-        names["music_recommender_maintenance_sweeps_total"].samples[0].value == 4
-    )
+    assert names["music_recommender_maintenance_sweeps_total"].samples[0].value == 4
     assert (
         names["music_recommender_maintenance_records_folded_total"].samples[0].value
         == 58
@@ -289,9 +285,7 @@ def test_collect_service_metric_families_disabled_components() -> None:
 
 
 def test_request_telemetry_tracker() -> None:
-    tracker = RequestTelemetryTracker(
-        latency_buckets=(0.01, 0.05, 0.1, float("inf"))
-    )
+    tracker = RequestTelemetryTracker(latency_buckets=(0.01, 0.05, 0.1, float("inf")))
 
     # Record 2 requests
     tracker.record_request(
@@ -328,13 +322,11 @@ def test_request_telemetry_tracker() -> None:
 
     # Check bucket samples
     bucket_samples = {
-        s.labels["le"]: s.value
-        for s in hist_fam.samples
-        if s.name.endswith("_bucket")
+        s.labels["le"]: s.value for s in hist_fam.samples if s.name.endswith("_bucket")
     }
     assert bucket_samples["0.01"] == 1  # 0.005 <= 0.01
     assert bucket_samples["0.05"] == 2  # 0.005 and 0.02 <= 0.05
-    assert bucket_samples["0.1"] == 3   # 0.005, 0.02, 0.08 <= 0.1
+    assert bucket_samples["0.1"] == 3  # 0.005, 0.02, 0.08 <= 0.1
     assert bucket_samples["+Inf"] == 3
 
     # Test reset
@@ -360,8 +352,7 @@ def test_export_prometheus_metrics() -> None:
     assert "# HELP music_recommender_http_requests_total" in text
     assert (
         'music_recommender_http_requests_total{endpoint="/health",'
-        'method="GET",status="200"} 1'
-        in text
+        'method="GET",status="200"} 1' in text
     )
     assert "# TYPE music_recommender_http_request_duration_seconds histogram" in text
 
@@ -440,4 +431,66 @@ def test_telemetry_configs_valid_yaml() -> None:
     assert "metrics" in otel_data["service"]["pipelines"]
 
 
+def test_validate_dashboard_metrics_valid_overview() -> None:
+    overview_path = (
+        Path(__file__).parent.parent
+        / "configs"
+        / "grafana"
+        / "dashboards"
+        / "music-recommender-overview.json"
+    )
+    result = validate_dashboard_metrics(overview_path)
+    assert result.is_valid
+    assert result.dashboard_title == "Music Recommender System - Overview"
+    assert result.total_panels == 23
+    assert result.total_queries >= 20
+    assert len(result.referenced_metrics) >= 15
+    assert len(result.unknown_metrics) == 0
+    assert len(result.errors) == 0
 
+    as_dict = result.to_dict()
+    assert as_dict["is_valid"] is True
+    assert "music_recommender_up" in as_dict["referenced_metrics"]
+
+
+def test_validate_dashboard_metrics_invalid_and_edge_cases(tmp_path: Path) -> None:
+    # 1. Non-existent file
+    missing = tmp_path / "nonexistent.json"
+    res_missing = validate_dashboard_metrics(missing)
+    assert not res_missing.is_valid
+    assert any("does not exist" in e for e in res_missing.errors)
+
+    # 2. Malformed JSON
+    bad_json = tmp_path / "bad.json"
+    bad_json.write_text("{not valid json", encoding="utf-8")
+    res_bad = validate_dashboard_metrics(bad_json)
+    assert not res_bad.is_valid
+    assert any("Failed to parse" in e for e in res_bad.errors)
+
+    # 3. Invalid data type
+    res_type = validate_dashboard_metrics(12345)  # type: ignore[arg-type]
+    assert not res_type.is_valid
+    assert any("Invalid dashboard data type" in e for e in res_type.errors)
+
+    # 4. Unknown metrics detection
+    bad_metric_dash = {
+        "title": "Bad Metric Dashboard",
+        "panels": [
+            {
+                "title": "Panel 1",
+                "targets": [
+                    {"expr": "rate(music_recommender_fictional_metric_total[5m])"}
+                ],
+            }
+        ],
+    }
+    res_unknown = validate_dashboard_metrics(bad_metric_dash)
+    assert not res_unknown.is_valid
+    assert "music_recommender_fictional_metric_total" in res_unknown.unknown_metrics
+    assert any("references unknown metric" in e for e in res_unknown.errors)
+
+    # 5. Empty panels
+    empty_dash = {"title": "Empty Dashboard", "panels": []}
+    res_empty = validate_dashboard_metrics(empty_dash)
+    assert not res_empty.is_valid
+    assert any("contains no panels" in e for e in res_empty.errors)

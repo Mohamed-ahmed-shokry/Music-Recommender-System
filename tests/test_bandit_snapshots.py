@@ -384,4 +384,3 @@ def test_rollback_bandit_state_missing_snapshot_raises(tmp_path: Path) -> None:
             target_state_path=tmp_path / "active.json",
             snapshot_dir=tmp_path / "empty_dir",
         )
-

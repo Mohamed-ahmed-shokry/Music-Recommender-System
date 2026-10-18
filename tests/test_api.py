@@ -63,9 +63,7 @@ class FakeService:
             },
         }
 
-    def bandit_observability(
-        self, *, include_ope: bool = False
-    ) -> dict[str, object]:
+    def bandit_observability(self, *, include_ope: bool = False) -> dict[str, object]:
         obs: dict[str, object] = {
             "timestamp": "2026-10-06T00:00:00Z",
             "health": self.streaming_health(),
@@ -2377,11 +2375,6 @@ def test_metrics_route_tracks_request_counts_and_latency() -> None:
         assert "music_recommender_http_requests_total" in content
         assert "# HELP music_recommender_http_request_duration_seconds" in content
         assert "music_recommender_http_request_duration_seconds_count" in content
-
-
-
-
-
 
 
 def test_alerts_route_reports_service_down_when_service_is_none(

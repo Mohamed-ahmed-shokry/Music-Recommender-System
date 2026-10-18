@@ -811,9 +811,7 @@ class DriftSafetyThresholds:
                 if data.get("max_reward_drop") is not None
                 else None
             ),
-            allow_dominant_arm_change=bool(
-                data.get("allow_dominant_arm_change", True)
-            ),
+            allow_dominant_arm_change=bool(data.get("allow_dominant_arm_change", True)),
         )
 
 
@@ -3248,9 +3246,7 @@ class BanditMaintenanceWorker:
         elif isinstance(drift_thresholds, DriftSafetyThresholds):
             self.drift_thresholds = drift_thresholds
         elif isinstance(drift_thresholds, dict):
-            self.drift_thresholds = DriftSafetyThresholds.from_dict(
-                drift_thresholds
-            )
+            self.drift_thresholds = DriftSafetyThresholds.from_dict(drift_thresholds)
         else:
             raise TypeError(
                 "drift_thresholds must be DriftSafetyThresholds or dict, "
@@ -3258,9 +3254,7 @@ class BanditMaintenanceWorker:
             )
         self.auto_rollback_on_drift = bool(auto_rollback_on_drift)
         self.champion_snapshot_path = (
-            Path(champion_snapshot_path)
-            if champion_snapshot_path is not None
-            else None
+            Path(champion_snapshot_path) if champion_snapshot_path is not None else None
         )
 
         self._lock: threading.Lock | threading.RLock = (
@@ -3386,9 +3380,7 @@ class BanditMaintenanceWorker:
                         self.champion_snapshot_path is not None
                         and self.champion_snapshot_path.is_file()
                     ):
-                        baseline_st = load_bandit_snapshot(
-                            self.champion_snapshot_path
-                        )
+                        baseline_st = load_bandit_snapshot(self.champion_snapshot_path)
                         ref_name = self.champion_snapshot_path.name
                     else:
                         champ = get_champion_snapshot(self.snapshot_dir)
@@ -3435,16 +3427,13 @@ class BanditMaintenanceWorker:
                                     rb_err,
                                 )
                                 self.state_path.write_text(
-                                    json.dumps(state, indent=2, sort_keys=True)
-                                    + "\n",
+                                    json.dumps(state, indent=2, sort_keys=True) + "\n",
                                     encoding="utf-8",
                                 )
 
                             if self.on_policy_updated is not None:
                                 try:
-                                    restored_st = load_bandit_state(
-                                        self.state_path
-                                    )
+                                    restored_st = load_bandit_state(self.state_path)
                                     restored_policy = derive_cold_start_policy(
                                         restored_st,
                                         temperature=self.policy_temperature,

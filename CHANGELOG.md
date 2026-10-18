@@ -5,9 +5,18 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.30.0] - 2026-10-17
 
 ### Added
+
+- Grafana Dashboard Templates & Observability Parity (Phase 138):
+  - Production Grafana dashboard template (`configs/grafana/dashboards/music-recommender-overview.json`): 23 panels visualizing 7 telemetry subsystems: service status & runtime info, artifact counts, HTTP traffic & latency distributions (p50/p95/p99), streaming feedback queue depth/utilization, asynchronous maintenance worker latencies & drift rollbacks, and cold-start bandit arm weights.
+  - Automated Grafana provisioning: `configs/grafana/provisioning/dashboards/dashboards.yaml` and `configs/grafana/provisioning/datasources/datasources.yaml` configuring Prometheus datasource and dashboard provider.
+  - Docker Compose observability profile: added `prometheus` and `grafana` services to `compose.yaml` run via `docker compose --profile observability up`.
+  - Dashboard Prometheus metric validator: `validate_dashboard_metrics()` in `src/music_recommender/telemetry.py` validating that dashboard PromQL expressions bind to known metric families.
+  - Operator CLI dashboard validation command: `music-recommender validate-dashboard` with `--json` option and descriptive status messages.
+  - End-to-end observability integration test suite (`tests/test_observability_integration.py`): tests verifying Prometheus scrape compatibility, alert rules, and dashboard panel bindings.
+  - Restored repository-wide `ruff format --check .` compliance across all modules.
 
 - CLI & Service Metrics Export Tooling (Phase 137):
   - CLI `export-metrics` command (`music-recommender export-metrics`): exports full system, artifact, streaming, maintenance, and request telemetry in Prometheus text exposition (0.0.4) or structured JSON format (`--format prometheus|json`).
