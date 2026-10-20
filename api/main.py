@@ -245,6 +245,33 @@ def alerts(dispatch: bool = True) -> dict[str, object]:
     }
 
 
+@app.get("/maintenance/status")
+def maintenance_status() -> dict[str, object]:
+    """Return the maintenance worker status and metrics if active."""
+    svc = get_service()
+    status = svc.maintenance_status()
+    if status is None:
+        return {"active": False, "message": "Maintenance worker not configured"}
+    return {"active": True, **status}
+
+
+class TriggerFoldRequest(BaseModel):
+    """Request body for triggering a manual maintenance fold."""
+
+    model_config = {"extra": "forbid"}
+
+
+@app.post("/maintenance/trigger")
+def trigger_fold(payload: TriggerFoldRequest | None = None) -> dict[str, object]:
+    """Trigger an immediate bandit feedback fold (manual sweep)."""
+    svc = get_service()
+    try:
+        result = svc.trigger_maintenance_sweep()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fold failed: {e}") from e
+    return {"success": True, **result}
+
+
 @app.get("/metadata")
 def metadata() -> dict[str, object]:
     """Return loaded artifact metadata."""
