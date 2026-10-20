@@ -3,7 +3,34 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.30.0) — shipped
+## Current milestone (0.31.0) — in progress
+
+Scheduled Online Bandit Fold. The 0.24.0 idempotent sweep and 0.30.0
+observability stack make it safe and measurable to automate the folding of
+live bandit feedback. This milestone adds a maintenance daemon that runs the
+idempotent sweep on a configurable schedule, emits Prometheus metrics for
+each sweep cycle, and integrates with the alerting rules for operational
+visibility.
+
+- Phase 139 — Maintenance daemon framework: `MaintenanceDaemon` class in
+  `src/music_recommender/maintenance.py` with configurable interval, graceful
+  shutdown, structured logging, and a `run_once()` method for testing.
+- Phase 140 — Scheduled bandit sweep: integrate `sweep_bandit_feedback` into
+  the daemon with configurable interval (default 1 hour), expose sweep
+  telemetry (duration, records folded, errors) via Prometheus, and add
+  `MUSIC_RECOMMENDER_MAINTENANCE_INTERVAL` env var.
+- Phase 141 — CLI control: `maintenance-daemon` command to start the daemon,
+  `maintenance-status` to inspect daemon state, and `trigger-fold` for
+  ad-hoc manual folds.
+- Phase 142 — Service integration: `RecommenderService.start_maintenance()`
+  and `stop_maintenance()` lifecycle hooks; `/maintenance/status` endpoint.
+- Phase 143 — Docker Compose integration: optional `maintenance` service in
+  `compose.yaml` with health check.
+- Phase 144 — Tests and docs: unit tests for daemon and sweep integration,
+  API tests for maintenance endpoints, CLI tests, README and CHANGELOG updates.
+- Phase 145 — Release 0.31.0: version bump, docs, CHANGELOG, full CI verification.
+
+## Previous milestone (0.30.0) — shipped
 
 Production Telemetry Exporters, Prometheus Metrics Scraping, and Alerting Rules.
 Production observability pipelines require standard metric export formats for scraping by Prometheus or OpenTelemetry collectors and actionable threshold alerts:
