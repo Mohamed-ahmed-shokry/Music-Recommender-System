@@ -3507,6 +3507,226 @@ def bandit_sweep(
 
 
 @app.command()
+def maintenance_daemon(
+    artifact_path: str = typer.Option(
+        str(ARTIFACT_BUNDLE_PATH),
+        "--artifact-path",
+        help="Path to the trained artifact bundle.",
+    ),
+    interval: float = typer.Option(
+        3600.0,
+        "--interval",
+        help="Maintenance sweep interval in seconds.",
+    ),
+    threshold: int = typer.Option(
+        1,
+        "--threshold",
+        help="Minimum pending feedback records required to execute a fold.",
+    ),
+    gamma: float = typer.Option(
+        1.0,
+        "--gamma",
+        help="Recency discount factor gamma in range (0, 1].",
+    ),
+    snapshot_on_sweep: bool = typer.Option(
+        False,
+        "--snapshot-on-sweep",
+        help="Automatically create a state snapshot when new records are folded.",
+    ),
+    snapshot_dir: str = typer.Option(
+        str(BANDIT_SNAPSHOTS_DIR),
+        "--snapshot-dir",
+        help="Directory where snapshots are saved if --snapshot-on-sweep is active.",
+    ),
+    enable_guardrails: bool = typer.Option(
+        False,
+        "--enable-guardrails",
+        help="Enable drift safety guardrails evaluation after folding.",
+    ),
+    auto_rollback: bool = typer.Option(
+        False,
+        "--auto-rollback",
+        help="Automatically revert state if drift safety guardrails are violated.",
+    ),
+    max_l2: float = typer.Option(
+        DEFAULT_BANDIT_DRIFT_MAX_L2,
+        "--max-l2",
+        help="Maximum allowable L2 drift threshold for guardrails.",
+    ),
+    min_cosine: float = typer.Option(
+        DEFAULT_BANDIT_DRIFT_MIN_COSINE,
+        "--min-cosine",
+        help="Minimum allowable cosine similarity threshold for guardrails.",
+    ),
+    max_reward_drop: float = typer.Option(
+        DEFAULT_BANDIT_DRIFT_MAX_REWARD_DROP,
+        "--max-reward-drop",
+        help="Maximum allowable mean reward drop threshold for guardrails.",
+    ),
+) -> None:
+    """Start the bandit maintenance daemon for scheduled feedback folding."""
+    from music_recommender.service import RecommenderService
+
+    if interval <= 0:
+        typer.secho(
+            "Error: --interval must be a positive number.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if threshold < 1:
+        typer.secho(
+            "Error: --threshold must be a positive integer.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if not np.isfinite(gamma) or gamma <= 0.0 or gamma > 1.0:
+        typer.secho(
+            f"Error: gamma must be in the range (0, 1], got {gamma}.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    service = RecommenderService.from_artifacts(
+        artifact_path=artifact_path,
+        enable_maintenance=True,
+        maintenance_interval_seconds=interval,
+    )
+    worker = service.maintenance_worker
+    if worker is None:
+        typer.secho(
+            "Error: Failed to create maintenance worker.", fg=typer.colors.RED, err=True
+        )
+        raise typer.Exit(code=1)
+
+    # Override worker settings from CLI options
+    worker.min_pending_records = threshold
+    worker.gamma = gamma
+    worker.snapshot_on_sweep = snapshot_on_sweep
+    worker.snapshot_dir = Path(snapshot_dir)
+    worker.drift_guardrails_enabled = enable_guardrails
+    worker.auto_rollback_on_drift = auto_rollback
+    worker.drift_thresholds = DriftSafetyThresholds(
+        max_l2_drift=max_l2,
+        min_cosine_similarity=min_cosine,
+        max_reward_drop=max_reward_drop,
+    )
+
+    typer.echo(
+        f"Starting maintenance daemon (interval={interval}s, threshold={threshold})... "
+        "Press Ctrl+C to stop."
+    )
+    import time
+
+    try:
+        while True:
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        typer.echo("\nMaintenance daemon stopped.")
+    finally:
+        service.stop_maintenance()
+
+
+@app.command()
+def maintenance_status(
+    artifact_path: str = typer.Option(
+        str(ARTIFACT_BUNDLE_PATH),
+        "--artifact-path",
+        help="Path to the trained artifact bundle.",
+    ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit JSON output for monitoring pipelines.",
+    ),
+) -> None:
+    """Report the maintenance worker status and metrics."""
+    from music_recommender.service import RecommenderService
+
+    service = RecommenderService.from_artifacts(
+        artifact_path=artifact_path,
+        enable_maintenance=True,
+    )
+    status = service.maintenance_status()
+    if status is None:
+        typer.secho("Maintenance worker not active.", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=0)
+
+    if as_json:
+        typer.echo(json.dumps(status, indent=2))
+        return
+
+    typer.echo("Bandit Maintenance Worker Status:")
+    typer.echo(f"  Running: {status.get('is_running', False)}")
+    typer.echo(f"  Interval: {status.get('interval_seconds', 0)}s")
+    typer.echo(f"  Cycles: {status.get('cycles_count', 0)}")
+    typer.echo(f"  Sweeps: {status.get('sweeps_count', 0)}")
+    typer.echo(f"  Records Folded: {status.get('records_folded_count', 0)}")
+    typer.echo(f"  Errors: {status.get('errors_count', 0)}")
+    last_sweep = status.get("last_sweep_at")
+    if last_sweep:
+        typer.echo(f"  Last Sweep: {last_sweep}")
+    last_duration = status.get("last_sweep_duration_seconds")
+    if last_duration is not None:
+        typer.echo(f"  Last Duration: {last_duration:.3f}s")
+    avg_duration = status.get("avg_sweep_duration_seconds")
+    if avg_duration is not None:
+        typer.echo(f"  Avg Duration: {avg_duration:.3f}s")
+
+
+@app.command()
+def trigger_fold(
+    artifact_path: str = typer.Option(
+        str(ARTIFACT_BUNDLE_PATH),
+        "--artifact-path",
+        help="Path to the trained artifact bundle.",
+    ),
+    state_path: str = typer.Option(
+        str(BANDIT_STATE_PATH),
+        "--state-path",
+        help="Path to the persisted bandit state.",
+    ),
+    journal_path: str = typer.Option(
+        str(BANDIT_FEEDBACK_PATH),
+        "--journal-path",
+        help="Path to the feedback journal.",
+    ),
+    gamma: float = typer.Option(
+        1.0,
+        "--gamma",
+        help="Recency discount factor gamma in range (0, 1].",
+    ),
+) -> None:
+    """Trigger an immediate bandit feedback fold (manual sweep)."""
+    from music_recommender.service import RecommenderService
+
+    if not np.isfinite(gamma) or gamma <= 0.0 or gamma > 1.0:
+        typer.secho(
+            f"Error: gamma must be in the range (0, 1], got {gamma}.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    service = RecommenderService.from_artifacts(
+        artifact_path=artifact_path,
+        enable_maintenance=False,
+    )
+    try:
+        result = service.trigger_maintenance_sweep()
+        typer.echo(f"Folded {result.get('records_folded_count', 0)} record(s).")
+        if result.get("errors_count", 0) > 0:
+            typer.secho(
+                f"Errors: {result.get('errors_count', 0)}", fg=typer.colors.YELLOW
+            )
+    except Exception as e:
+        typer.secho(f"Error during fold: {e}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from e
+
+
+@app.command()
 def export_metrics(
     output: Annotated[
         Path | None,
