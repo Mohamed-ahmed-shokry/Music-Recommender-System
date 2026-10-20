@@ -5,6 +5,41 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] - 2026-10-21
+
+### Added
+
+- Scheduled Online Bandit Fold (Phases 139-142): operationalize the cold-start
+  bandit feedback loop with dedicated CLI, API, and Docker Compose controls for
+  the `BanditMaintenanceWorker` background daemon.
+  - **CLI commands** (`src/music_recommender/cli.py`):
+    - `maintenance-daemon`: starts the maintenance worker as a scheduled daemon
+      with configurable interval, pending-record threshold, gamma, snapshot
+      options, drift guardrails, and auto-rollback.
+    - `maintenance-status`: reports worker metrics (running state, cycle/sweep
+      counts, records folded, errors, interval, last sweep timing) with optional
+      JSON output (`--json`) for monitoring pipelines.
+    - `trigger-fold`: invokes an immediate manual feedback fold, with optional
+      gamma override and graceful error handling for missing state files.
+  - **REST API endpoints** (`api/main.py`):
+    - `GET /maintenance/status`: returns worker metrics and status when active,
+      or `{"active": false, "message": "Maintenance worker not configured"}`.
+    - `POST /maintenance/trigger`: triggers an immediate manual fold, returning
+      the sweep outcome (records folded, errors).
+  - **Docker Compose integration** (`compose.yaml`):
+    - Optional `maintenance` service running the daemon with health check
+      against `/maintenance/status`, enabled via `docker compose --profile
+      maintenance up`.
+  - **Tests** (`tests/test_cli.py`, `tests/test_api.py`): unit tests for all
+    three CLI commands and both API endpoints.
+  - **Documentation**: README updated with usage examples for CLI, Python
+    `RecommenderService`, REST API, and Docker Compose deployment.
+
+### Tests
+
+- 1172 tests pass; added 10 new tests covering maintenance CLI commands and
+  API endpoints.
+
 ## [0.30.0] - 2026-10-17
 
 ### Added

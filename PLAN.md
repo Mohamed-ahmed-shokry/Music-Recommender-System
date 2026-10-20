@@ -13,13 +13,13 @@ for the maintenance worker to expose operational visibility and control.
 
 - Phase 139 — CLI control: `maintenance-daemon` command to start the worker,
   `maintenance-status` to inspect worker state, and `trigger-fold` for
-  ad-hoc manual folds.
+  ad-hoc manual folds. ✅
 - Phase 140 — API endpoints: `/maintenance/status` to return worker metrics,
-  `POST /maintenance/trigger` to invoke an immediate sweep.
+  `POST /maintenance/trigger` to invoke an immediate sweep. ✅
 - Phase 141 — Docker Compose integration: optional `maintenance` service in
-  `compose.yaml` with health check, using the existing `BanditMaintenanceWorker`.
+  `compose.yaml` with health check, using the existing `BanditMaintenanceWorker`. ✅
 - Phase 142 — Tests and docs: unit tests for CLI commands, API tests for
-  maintenance endpoints, README and CHANGELOG updates.
+  maintenance endpoints, README and CHANGELOG updates. ✅ (tests done)
 - Phase 143 — Release 0.31.0: version bump, docs, CHANGELOG, full CI verification.
 
 ## Previous milestone (0.30.0) — shipped
