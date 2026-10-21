@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.31.0) — in progress
+## Current milestone (0.31.0) — shipped
 
 Scheduled Online Bandit Fold. The 0.24.0 idempotent sweep, 0.30.0
 observability stack, and existing `BanditMaintenanceWorker` in `bandit.py`
@@ -19,8 +19,8 @@ for the maintenance worker to expose operational visibility and control.
 - Phase 141 — Docker Compose integration: optional `maintenance` service in
   `compose.yaml` with health check, using the existing `BanditMaintenanceWorker`. ✅
 - Phase 142 — Tests and docs: unit tests for CLI commands, API tests for
-  maintenance endpoints, README and CHANGELOG updates. ✅ (tests done)
-- Phase 143 — Release 0.31.0: version bump, docs, CHANGELOG, full CI verification.
+  maintenance endpoints, README and CHANGELOG updates. ✅
+- Phase 143 — Release 0.31.0: version bump, docs, CHANGELOG, full CI verification. ✅
 
 ## Previous milestone (0.30.0) — shipped
 
