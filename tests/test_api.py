@@ -255,6 +255,29 @@ class FakeService:
             status["gamma"] = gamma
         return status
 
+    def maintenance_status(self) -> dict[str, object] | None:
+        return {
+            "is_running": True,
+            "is_closed": False,
+            "cycles_count": 5,
+            "sweeps_count": 3,
+            "errors_count": 0,
+            "records_folded_count": 10,
+            "interval_seconds": 3600.0,
+            "last_sweep_at": "2026-01-01T00:00:00+00:00",
+            "last_sweep_duration_seconds": 0.05,
+            "avg_sweep_duration_seconds": 0.04,
+            "min_sweep_duration_seconds": 0.02,
+            "max_sweep_duration_seconds": 0.08,
+        }
+
+    def trigger_maintenance_sweep(self) -> dict[str, object]:
+        self.last_sweep_called = True
+        return {
+            "records_folded_count": 2,
+            "errors_count": 0,
+        }
+
     def evaluate_bandit_off_policy(
         self,
         *,
@@ -1125,6 +1148,35 @@ def test_bandit_update_route_corrupt_state_is_unprocessable() -> None:
 
     assert response.status_code == 422
     assert "Failed to parse bandit state" in response.json()["detail"]
+
+
+def test_maintenance_status_route() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.get("/maintenance/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["active"] is True
+    assert body["is_running"] is True
+    assert body["sweeps_count"] == 3
+    assert body["records_folded_count"] == 10
+
+
+def test_trigger_fold_route() -> None:
+    with TestClient(api_main.app) as client:
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        response = client.post("/maintenance/trigger")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["records_folded_count"] == 2
+    assert api_main.service.last_sweep_called is True
 
 
 def test_bandit_snapshots_list_route() -> None:

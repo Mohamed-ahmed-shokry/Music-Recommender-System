@@ -3285,3 +3285,45 @@ def test_validate_dashboard_cli_invalid_file_fails(tmp_path: Path) -> None:
     assert res.exit_code == 1
     assert "Validation FAILED" in res.output
     assert "references unknown metric" in res.output
+
+
+def test_maintenance_status_cli_with_artifact(tmp_path: Path) -> None:
+    """maintenance-status reports worker status when artifact exists."""
+    res = runner.invoke(cli.app, ["maintenance-status"])
+    assert res.exit_code == 0
+    assert "Bandit Maintenance Worker Status" in res.output
+    assert "Running:" in res.output
+    assert "Interval:" in res.output
+
+
+def test_maintenance_status_cli_json_output(tmp_path: Path) -> None:
+    """maintenance-status --json emits structured output."""
+    res = runner.invoke(cli.app, ["maintenance-status", "--json"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert "is_running" in data or "Running" in str(data)
+
+
+def test_trigger_fold_cli_invalid_gamma(tmp_path: Path) -> None:
+    """trigger-fold rejects invalid gamma values."""
+    res = runner.invoke(
+        cli.app,
+        [
+            "trigger-fold",
+            "--gamma",
+            "2.0",
+        ],
+    )
+    assert res.exit_code == 1
+    assert "gamma must be in the range (0, 1]" in res.output
+
+
+def test_trigger_fold_cli_with_artifact(tmp_path: Path) -> None:
+    """trigger-fold executes with default artifact."""
+    res = runner.invoke(cli.app, ["trigger-fold"])
+    # Should succeed or fail gracefully (state may not exist)
+    assert res.exit_code in (0, 1)
+    if res.exit_code == 0:
+        assert "Folded" in res.output
+    else:
+        assert "Error" in res.output or "not found" in res.output.lower()

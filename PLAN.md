@@ -3,7 +3,26 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.30.0) — shipped
+## Current milestone (0.31.0) — shipped
+
+Scheduled Online Bandit Fold. The 0.24.0 idempotent sweep, 0.30.0
+observability stack, and existing `BanditMaintenanceWorker` in `bandit.py`
+make it safe and measurable to automate the folding of live bandit feedback.
+This milestone adds CLI control, API endpoints, and Docker Compose integration
+for the maintenance worker to expose operational visibility and control.
+
+- Phase 139 — CLI control: `maintenance-daemon` command to start the worker,
+  `maintenance-status` to inspect worker state, and `trigger-fold` for
+  ad-hoc manual folds. ✅
+- Phase 140 — API endpoints: `/maintenance/status` to return worker metrics,
+  `POST /maintenance/trigger` to invoke an immediate sweep. ✅
+- Phase 141 — Docker Compose integration: optional `maintenance` service in
+  `compose.yaml` with health check, using the existing `BanditMaintenanceWorker`. ✅
+- Phase 142 — Tests and docs: unit tests for CLI commands, API tests for
+  maintenance endpoints, README and CHANGELOG updates. ✅
+- Phase 143 — Release 0.31.0: version bump, docs, CHANGELOG, full CI verification. ✅
+
+## Previous milestone (0.30.0) — shipped
 
 Production Telemetry Exporters, Prometheus Metrics Scraping, and Alerting Rules.
 Production observability pipelines require standard metric export formats for scraping by Prometheus or OpenTelemetry collectors and actionable threshold alerts:

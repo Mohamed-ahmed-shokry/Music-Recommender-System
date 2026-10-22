@@ -852,23 +852,73 @@ To operationalize the cold-start bandit in production environments:
    uv run python -m music_recommender.cli bandit-rollback --reason "Sudden reward drop detected"
 
    # Run automated sweeping with drift safety guardrails and auto-rollback enabled
-   uv run python -m music_recommender.cli bandit-sweep --threshold 50 --enable-guardrails --auto-rollback
-   ```
+uv run python -m music_recommender.cli bandit-sweep --threshold 50 --enable-guardrails --auto-rollback
+    ```
 
-   In Python via `RecommenderService`:
-   ```python
-   # Tag a champion snapshot
-   service.tag_champion_snapshot("bandit_state_20261006T200000Z_prod.json")
+    In Python via `RecommenderService`:
+    ```python
+    # Tag a champion snapshot
+    service.tag_champion_snapshot("bandit_state_20261006T200000Z_prod.json")
 
-   # Evaluate drift safety
-   safety = service.evaluate_drift_safety(
-       max_l2_drift=2.5,
-       min_cosine_similarity=0.8,
-       max_reward_drop=0.1,
-   )
-   if not safety["is_safe"]:
-       service.rollback_bandit_state(reason="Drift guardrail threshold exceeded")
-   ```
+    # Evaluate drift safety
+    safety = service.evaluate_drift_safety(
+        max_l2_drift=2.5,
+        min_cosine_similarity=0.8,
+        max_reward_drop=0.1,
+    )
+    if not safety["is_safe"]:
+        service.rollback_bandit_state(reason="Drift guardrail threshold exceeded")
+    ```
+
+5. **Maintenance Daemon for Scheduled Feedback Folding**:
+    Run a dedicated maintenance worker that periodically sweeps pending feedback into the bandit state, with Prometheus telemetry and health checks:
+    ```bash
+    # Start the maintenance daemon (default: 1 hour interval, threshold=1)
+    uv run python -m music_recommender.cli maintenance-daemon
+
+    # Custom interval (e.g., 30 minutes)
+    uv run python -m music_recommender.cli maintenance-daemon --interval 1800 --threshold 10
+
+    # With drift guardrails and auto-rollback
+    uv run python -m music_recommender.cli maintenance-daemon --interval 1800 --enable-guardrails --auto-rollback --max-l2 2.5
+
+    # Check maintenance worker status
+    uv run python -m music_recommender.cli maintenance-status
+
+    # Trigger an immediate manual fold
+    uv run python -m music_recommender.cli trigger-fold
+    ```
+
+    In Python via `RecommenderService`:
+    ```python
+    # Start/stop the maintenance worker
+    service = RecommenderService.from_artifacts(enable_maintenance=True, maintenance_interval_seconds=3600)
+    service.start_maintenance()
+
+    # Get worker status and metrics
+    status = service.maintenance_status()
+    print(f"Sweeps: {status['sweeps_count']}, Records folded: {status['records_folded_count']}")
+
+    # Trigger immediate sweep
+    result = service.trigger_maintenance_sweep()
+    print(f"Folded {result['records_folded_count']} records")
+
+    service.stop_maintenance()
+    ```
+
+    Via REST API:
+    ```bash
+    # Get maintenance worker status
+    curl http://localhost:8000/maintenance/status
+
+    # Trigger immediate fold
+    curl -X POST http://localhost:8000/maintenance/trigger
+    ```
+
+    The maintenance worker can also be deployed as a standalone container via Docker Compose:
+    ```bash
+    docker compose --profile maintenance up -d maintenance
+    ```
 
 
 ### Multi-Policy Benchmarking, State Derivation, and Off-Policy Evaluation (OPE)
