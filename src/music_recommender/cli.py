@@ -3539,6 +3539,14 @@ def maintenance_daemon(
         "--interval",
         help="Maintenance sweep interval in seconds.",
     ),
+    heartbeat_path: str | None = typer.Option(
+        None,
+        "--heartbeat-path",
+        help=(
+            "Optional path for a JSON heartbeat file written every cycle so "
+            "container health checks can verify loop liveness without HTTP."
+        ),
+    ),
     threshold: int = typer.Option(
         1,
         "--threshold",
@@ -3641,8 +3649,11 @@ def maintenance_daemon(
     )
     import time
 
+    heartbeat = Path(heartbeat_path) if heartbeat_path else None
     try:
         while True:
+            if heartbeat is not None:
+                _write_maintenance_heartbeat(heartbeat, service.maintenance_worker)
             time.sleep(interval)
     except KeyboardInterrupt:
         typer.echo("\nMaintenance daemon stopped.")
