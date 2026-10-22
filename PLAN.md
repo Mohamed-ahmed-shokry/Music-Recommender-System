@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.32.0) — in progress
+## Current milestone (0.32.0) — shipped (branch `phase/144-maintenance-hardening`, draft PR #20)
 
 Maintenance daemon operational hardening. The 0.31.0 release exposed the
 `BanditMaintenanceWorker` through CLI, API, and Docker Compose, but the compose
@@ -14,18 +14,21 @@ a heartbeat file written by the daemon and validated by the compose health
 check, maintenance worker visibility in the dashboard, and release packaging.
 
 - Phase 144 — Daemon heartbeat: `maintenance-daemon --heartbeat-path` writes a
-  JSON heartbeat (timestamp, interval, worker metrics snapshot) on start and
-  after every daemon cycle; compose healthcheck validates heartbeat freshness.
+  JSON heartbeat (timestamp, running flag, worker metrics snapshot) every
+  daemon cycle; compose healthcheck validates heartbeat freshness. ✅
+  (`85b3622`, `3ed70e4`, tests `a9731cd`/`85b81fc`)
 - Phase 145 — Dashboard visibility: the Cold-Start Bandit tab renders the
   maintenance worker status (running, cycles, sweeps, folded records, errors)
-  when the service reports an active worker.
+  when the service reports an active worker. ✅ (`1d11674`, `aa9fdb3`)
 - Phase 146 — Compose hardening: `maintenance` service healthcheck switches to
-  the heartbeat freshness probe (bash + /tmp heartbeat tmpfs) so the container
-  reports healthy only while the daemon loop is alive.
+  the heartbeat freshness probe (/tmp heartbeat tmpfs) so the container reports
+  healthy only while the daemon loop is alive. ✅ (`3477085`)
 - Phase 147 — Tests and docs: heartbeat unit tests, dashboard render tests,
-  compose YAML validation, README/CHANGELOG updates.
+  compose YAML validation, README/CHANGELOG updates. ✅ (`a9731cd`,
+  `85b81fc`, `aa9fdb3`, `c2b6f6d`, `676a30e`)
 - Phase 148 — Release 0.32.0: version bump, lockfile refresh, full CI-parity
-  suite, push, draft PR, and green remote CI.
+  suite, remote CI green (run 39847823632: Test/lint/build + container both
+  success). ✅ (`5d4c8c7`, `08f4a95`)
 
 ## Previous milestone (0.31.0) — shipped
 
