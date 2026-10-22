@@ -3381,3 +3381,34 @@ def test_write_maintenance_heartbeat_survives_broken_worker(tmp_path: Path) -> N
     data = json.loads(heartbeat.read_text(encoding="utf-8"))
     assert data["running"] is True
     assert "sweeps_count" not in data
+
+
+def test_maintenance_daemon_writes_heartbeat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The daemon loop beats once immediately, then sleeps until interrupted."""
+    import time as time_module
+
+    heartbeat = tmp_path / "maintenance_heartbeat.json"
+
+    def interrupt(_seconds: float) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(time_module, "sleep", interrupt)
+
+    res = runner.invoke(
+        cli.app,
+        [
+            "maintenance-daemon",
+            "--heartbeat-path",
+            str(heartbeat),
+            "--interval",
+            "60",
+        ],
+    )
+
+    assert res.exit_code == 0
+    assert "Maintenance daemon stopped." in res.output
+    data = json.loads(heartbeat.read_text(encoding="utf-8"))
+    assert data["running"] is True
+    assert data["is_running"] is True
