@@ -828,6 +828,17 @@ def _render_bandit_tab(service: RecommenderService) -> None:
             f"**{status['journal']['pending']}** pending (no fold yet)."
         )
 
+    worker_metrics = status.get("maintenance_worker")
+    if worker_metrics:
+        daemon_state = "running" if worker_metrics.get("is_running") else "stopped"
+        st.caption(
+            f"Maintenance daemon: **{daemon_state}** — "
+            f"{worker_metrics.get('cycles_count', 0)} cycle(s), "
+            f"{worker_metrics.get('sweeps_count', 0)} sweep(s) folding "
+            f"{worker_metrics.get('records_folded_count', 0)} record(s), "
+            f"{worker_metrics.get('errors_count', 0)} error(s)."
+        )
+
     fold_col1, fold_col2 = st.columns([2, 2])
     with fold_col1:
         gamma_input = st.slider(
