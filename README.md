@@ -879,6 +879,11 @@ uv run python -m music_recommender.cli bandit-sweep --threshold 50 --enable-guar
     # Custom interval (e.g., 30 minutes)
     uv run python -m music_recommender.cli maintenance-daemon --interval 1800 --threshold 10
 
+    # Write a JSON heartbeat every cycle so external health checks can verify
+    # loop liveness (epoch timestamp + worker metrics; no HTTP endpoint served)
+    uv run python -m music_recommender.cli maintenance-daemon --interval 1800 \
+      --heartbeat-path reports/maintenance_heartbeat.json
+
     # With drift guardrails and auto-rollback
     uv run python -m music_recommender.cli maintenance-daemon --interval 1800 --enable-guardrails --auto-rollback --max-l2 2.5
 
@@ -919,6 +924,13 @@ uv run python -m music_recommender.cli bandit-sweep --threshold 50 --enable-guar
     ```bash
     docker compose --profile maintenance up -d maintenance
     ```
+
+    In containerized deployments the daemon writes `/tmp/maintenance_heartbeat.json`
+    and the compose healthcheck considers the container healthy only while that
+    heartbeat is fresh (timestamp within 2x the sweep interval) and reports
+    `"running": true` — so a wedged or exited daemon loop turns the container
+    unhealthy for Orchestrator restarts without the worker serving any HTTP
+    endpoint.
 
 
 ### Multi-Policy Benchmarking, State Derivation, and Off-Policy Evaluation (OPE)
