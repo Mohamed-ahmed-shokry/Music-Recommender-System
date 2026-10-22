@@ -22,7 +22,7 @@
 | Task 8 | Dashboard maintenance worker block | Done | `1d11674` |
 | Task 9 | Dashboard render tests | Done | `aa9fdb3` |
 | Task 10 | Release 0.32.0 (version, lock, changelog, build) | Done | `5d4c8c7`, `08f4a95`, `676a30e` |
-| Task 11 | Final CI parity + push + draft PR + remote CI green | In Progress | PR #20 open; final push/E2E pending |
+| Task 11 | Final CI parity + push + draft PR + remote CI green | Done | PR #20; CI run 39847823632 (Test/lint/build ✅ 1m49s + container ✅ 1m37s); e2e daemon heartbeat verified with real artifact load (18 cycles @ 2s interval) |
 
 ---
 
@@ -58,6 +58,10 @@
 | `uv build` (post-phase) | ✅ built `music_recommender_system-0.32.0.tar.gz` + wheel |
 | `uv lock` after version bump | ✅ resolved 114 packages (avoids CI `--locked` desync failure seen in 0.31.0) |
 | `docker compose config --quiet` | ⛔ docker unavailable locally — YAML parse + service/healthcheck structure verified via PyYAML locally; remote CI validates |
+| E2E: `python -m music_recommender.cli maintenance-daemon --interval 2 --heartbeat-path %TEMP%/e2e_hb/hb.json` (real run, killed after ~25s) | ✅ daemon logged artifact load (v4.0), wrote valid heartbeat: running=true, 18 cycles, sweeps/folded counts, interval=2.0 |
+| Remote CI run 39840836691 (phase/144 PR) | ✅ success |
+| Remote CI run 39841604460 (phase/144 PR) | ✅ success |
+| Remote CI run 39847823632 (phase/144 PR, final parity HEAD) | ✅ success — both jobs |
 
 ---
 
@@ -66,11 +70,11 @@
 | Criterion | Status | Evidence |
 |---|---|---|
 | AC-1 heartbeat tests green | ✅ | `pytest -k heartbeat` 4→5 passed (`a9731cd`, `85b81fc`) |
-| AC-2 compose config valid + remote compose check green | ✅/pending remote | PyYAML parse + probe harness local ✅; remote `Validate Compose configuration` pending final run |
+| AC-2 compose config valid + remote compose check green | ✅ | PyYAML parse + probe harness local ✅; remote CI `Build and smoke test container` job (incl. `docker compose config` step) success in run 39847823632 |
 | AC-3 dashboard render tests green | ✅ | `pytest tests/test_dashboard.py -k maintenance_daemon` passed (`aa9fdb3`) |
 | AC-4 full suite + lint + types + coverage green | ✅ | 1176 passed / 93.87% cov, ruff clean, mypy clean |
 | AC-5 version 0.32.0, `uv build` clean | ✅ | `v0.32.0` wheel+tar.gz built |
-| AC-6 remote CI 100% green | In Progress | PR #20 created; final CI run pending |
+| AC-6 remote CI 100% green | ✅ | Run 39847823632 on final HEAD: `Test, lint, and build` ✅ + `Build and smoke test container` ✅ (earlier runs 39840836691, 39841604460 also success) |
 
 ---
 
