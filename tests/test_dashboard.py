@@ -1379,6 +1379,14 @@ def test_dashboard_bandit_tab_maintenance_daemon_and_sweep() -> None:
 
     assert not app.exception
     assert any("Asynchronous Maintenance Daemon" in m.value for m in app.markdown)
+    assert any(
+        caption.value.startswith("Maintenance daemon: **running**")
+        for caption in app.caption
+    )
+    assert any(
+        "4 cycle(s), 2 sweep(s) folding 15 record(s), 0 error(s)." in caption.value
+        for caption in app.caption
+    )
     assert any(metric.label == "Daemon Status" for metric in app.metric)
     assert any(metric.label == "Sweep Interval" for metric in app.metric)
     assert any(metric.label == "Cycles Executed" for metric in app.metric)
