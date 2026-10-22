@@ -1,3 +1,87 @@
+# Milestone 0.32.0 Roadmap — Phase 144
+
+## Phase 144: Maintenance Daemon Operational Hardening (0.32.0)
+
+### 1. Objective
+Make the 0.31.0 `maintenance-daemon` deployable and self-monitoring end to end:
+the daemon writes a fresh JSON heartbeat the Docker healthcheck can validate
+(the previous compose healthcheck polled an HTTP endpoint the daemon never
+serves, so the `maintenance` container was permanently unhealthy), the
+dashboard renders live maintenance worker status, and milestone 0.32.0 is
+released with 100% green CI.
+
+### 2. Scope
+1. **Daemon heartbeat (`src/music_recommender/cli.py`)**:
+   - New `--heartbeat-path` option on `maintenance-daemon` (default: disabled).
+   - On start and after every daemon cycle, write a JSON heartbeat file:
+     `{"timestamp": <epoch>, "interval_seconds": ..., "running": true, ...
+     worker metric snapshot}` honoring the configured parent directories.
+   - Hardened `while True: time.sleep(interval)` loop replaced by the same
+     beat-then-sleep cycle so the heartbeat reflects loop liveness.
+2. **Dashboard visibility (`src/music_recommender/dashboard.py`)**:
+   - "Cold-Start Bandit" tab renders a maintenance worker summary block
+     (running, cycles, sweeps, records folded, errors) from
+     `service.maintenance_status()` when a worker is active; silent when none.
+3. **Compose hardening (`compose.yaml`)**:
+   - `maintenance` service healthcheck reads `/tmp/maintenance_heartbeat.json`
+     and fails when the heartbeat is older than 2x interval (a util-only
+     python snippet); daemon command passes `--heartbeat-path /tmp/...`.
+4. **Tests & docs**:
+   - Heartbeat unit tests in `tests/test_cli.py`; dashboard tests in
+     `tests/test_dashboard.py` (worker present / absent); YAML parse check.
+   - README maintenance section updated (heartbeat flag + healthcheck notes);
+     CHANGELOG 0.32.0; `docs/PROGRESS.md` decision log.
+5. **Release 0.32.0**:
+   - Version bump in `pyproject.toml`, `uv lock`, `uv build`, full CI-parity
+     suite, push, draft PR, green remote CI.
+
+### 3. Acceptance Criteria
+- **AC-1**: `maintenance-daemon --heartbeat-path <p>` creates and refreshes a
+  parseable JSON heartbeat with `timestamp`, `interval_seconds`, and worker
+  metrics; verified by unit tests.
+- **AC-2**: The compose `maintenance` healthcheck validates heartbeat
+  freshness (no HTTP endpoint dependency) and `docker compose config` remains
+  valid; verified via YAML parse and remote CI `Validate Compose configuration`.
+- **AC-3**: Dashboard "Cold-Start Bandit" tab shows the maintenance worker
+  summary when `maintenance_status()` returns metrics and stays quiet without;
+  verified by `tests/test_dashboard.py`.
+- **AC-4**: Full suite green: `uv run pytest -q` (≥1172 tests), `ruff check .`,
+  `ruff format --check .`, `mypy`, coverage ≥75%.
+- **AC-5**: Version is `0.32.0`, distributions build via `uv build`.
+- **AC-6 (mandatory)**: All local CI-parity checks and remote CI workflow runs
+  pass 100%.
+
+### 4. Validation & CI Plan
+- Local parity (matching `.github/workflows/ci.yml`):
+  `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy`,
+  `uv run --extra dashboard --extra tracking --extra spotify pytest --cov`,
+  `uv build`; compose YAML parse via `python -c "import yaml..."` (docker
+  unavailable locally; remote CI covers `docker compose config`).
+- End-to-end: run `maintenance-daemon --heartbeat-path` briefly and inspect
+  the heartbeat file; render the dashboard tab against the artifact.
+
+### 5. Exclusions
+- Cron-style scheduler expressions (fixed `--interval` retained; reversible
+  follow-up) — no codebase evidence of a scheduler abstraction to extend.
+- Alertmanager routing (logged in `PLAN.md` next-steps; 0.30.0 webhook
+  dispatch already covers notification delivery).
+
+### 6. Micro-Task Breakdown
+1. `docs(roadmap)` — this file + PROGRESS reset (this commit).
+2. `feat(cli)` — heartbeat helper `write_maintenance_heartbeat`.
+3. `test(cli)` — heartbeat unit tests.
+4. `feat(cli)` — wire `--heartbeat-path` into `maintenance_daemon` loop.
+5. `test(cli)` — daemon end-to-end heartbeat test (short interval, interrupt).
+6. `fix(compose)` — heartbeat-based healthcheck + `--heartbeat-path` command.
+7. `docs(readme)` — heartbeat & healthcheck documentation.
+8. `feat(dashboard)` — maintenance worker summary block in bandit tab.
+9. `test(dashboard)` — render tests (worker present / absent).
+10. `test(compose-yard)` — YAML parse validation test if not already covered.
+11. `docs(readme)/docs(changelog)/chore(release)` — 0.32.0 release packaging.
+12. `docs(progress)` — finalize decision log; push; verify remote CI green.
+
+---
+
 # Milestone 0.30.0 Roadmap — Phase 138
 
 ## Phase 138: Observability Dashboard Templates, Telemetry Integration Suite, and CI Green Parity (0.30.0)
