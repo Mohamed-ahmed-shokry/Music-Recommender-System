@@ -3,7 +3,31 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.31.0) — shipped
+## Current milestone (0.32.0) — in progress
+
+Maintenance daemon operational hardening. The 0.31.0 release exposed the
+`BanditMaintenanceWorker` through CLI, API, and Docker Compose, but the compose
+`maintenance` service healthcheck polls an HTTP endpoint that the
+`maintenance-daemon` CLI never serves, so every container instance reports
+unhealthy. This milestone makes the daemon self-monitoring and deployable:
+a heartbeat file written by the daemon and validated by the compose health
+check, maintenance worker visibility in the dashboard, and release packaging.
+
+- Phase 144 — Daemon heartbeat: `maintenance-daemon --heartbeat-path` writes a
+  JSON heartbeat (timestamp, interval, worker metrics snapshot) on start and
+  after every daemon cycle; compose healthcheck validates heartbeat freshness.
+- Phase 145 — Dashboard visibility: the Cold-Start Bandit tab renders the
+  maintenance worker status (running, cycles, sweeps, folded records, errors)
+  when the service reports an active worker.
+- Phase 146 — Compose hardening: `maintenance` service healthcheck switches to
+  the heartbeat freshness probe (bash + /tmp heartbeat tmpfs) so the container
+  reports healthy only while the daemon loop is alive.
+- Phase 147 — Tests and docs: heartbeat unit tests, dashboard render tests,
+  compose YAML validation, README/CHANGELOG updates.
+- Phase 148 — Release 0.32.0: version bump, lockfile refresh, full CI-parity
+  suite, push, draft PR, and green remote CI.
+
+## Previous milestone (0.31.0) — shipped
 
 Scheduled Online Bandit Fold. The 0.24.0 idempotent sweep, 0.30.0
 observability stack, and existing `BanditMaintenanceWorker` in `bandit.py`
