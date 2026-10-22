@@ -810,18 +810,22 @@ is preserved when no policy file exists.
 - Phase 69 — Docs and release: PLAN, README (evaluation + CLI), CHANGELOG,
   version bump to 0.19.0.
 
-## Next steps (after 0.25.0)
+## Next steps (after 0.31.0)
 
 1. Two-tower neural candidate retrieval (PyTorch / ONNX runtime) — deferred
    until a real-scale catalog is available: the current sample dataset (18
    artists, 36 tracks) cannot meaningfully train or validate a neural
    retrieval model, and the phase would add heavy new dependencies.
-2. Scheduled online fold: run the idempotent sweep automatically (cron /
-   internal scheduler) so live served feedback folds back into the bandit
-   prior without manual `bandit-update` (the 0.24.0 watermark makes this safe).
+2. Scheduled online fold: ✅ shipped in 0.31.0 as the
+   `BanditMaintenanceWorker` driven `maintenance-daemon` CLI, maintenance
+   status/trigger API endpoints, and the `compose.yaml` `maintenance` profile;
+   0.32.0 hardens its deployment health reporting.
 3. New context feature extractors (beyond the registry's shipped three) —
    requires a catalog with the corresponding signals; the 0.25.0 registry
    makes this a config-only change.
+4. Alertmanager routing config (multi-tier severity routing beyond the
+   Prometheus rule definitions shipped in 0.30.0) — deferred; the shipped
+   `alert-rules.yml` covers firing notification via webhook dispatch.
 
 ## Quality gates (every change)
 
