@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.33.0) — in progress (branch `phase/149-alertmanager-routing`)
+## Current milestone (0.33.0) — shipped (branch `phase/149-alertmanager-routing`, draft PR #21)
 
 Alertmanager Multi-Tier Routing, Operator Alert CLI, and Dashboard Alert Monitoring.
 The 0.30.0 release declared Prometheus alerting rules and basic webhook dispatch,
@@ -14,15 +14,20 @@ real-time alert health in the Streamlit dashboard, and releases 0.33.0 with 100%
 
 - Phase 149 — Alertmanager configuration generator & inhibition rules:
   `render_alertmanager_config` generates multi-tier routing (critical vs warning) and
-  storm-prevention inhibition rules; shipped in `configs/alertmanager.yml`.
+  storm-prevention inhibition rules; shipped in `configs/alertmanager.yml`. ✅
+  (`072e51b`, `cc5c0ca`, `d84e1af`, `a3424a6`, `eb6d604`)
 - Phase 150 — Prometheus Alertmanager wiring & Docker Compose:
-  Configure Alertmanager in `configs/prometheus.yml` and add `alertmanager` service in `compose.yaml`.
+  Configure Alertmanager in `configs/prometheus.yml` and add `alertmanager` service in `compose.yaml`. ✅
+  (`64684a8`, `b643cb3`)
 - Phase 151 — Operator Alert CLI:
-  Add `check-alerts` and `test-alert` commands to `src/music_recommender/cli.py`.
+  Add `check-alerts` and `test-alert` commands to `src/music_recommender/cli.py`. ✅
+  (`7d53c68`, `0efe238`)
 - Phase 152 — Dashboard alert health monitoring:
-  Sidebar alert badge and dedicated alert status section in `src/music_recommender/dashboard.py`.
+  Sidebar alert badge and dedicated alert status section in `src/music_recommender/dashboard.py`. ✅
+  (`216c421`, `4e74a3b`, `318ab9e`)
 - Phase 153 — Comprehensive integration tests, docs, and 0.33.0 release:
-  Alertmanager and CLI tests, README/CHANGELOG updates, version bump to 0.33.0, clean CI.
+  Alertmanager and CLI tests, README/CHANGELOG updates, version bump to 0.33.0, clean CI. ✅
+  (`88da984`, `890843f`, `4068e0a`, `d3eaf58`, `c889581`)
 
 ## Previous milestone (0.32.0) — shipped (branch `phase/144-maintenance-hardening`, draft PR #20)
 
