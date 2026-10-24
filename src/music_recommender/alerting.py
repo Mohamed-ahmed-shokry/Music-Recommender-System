@@ -587,15 +587,27 @@ def render_alertmanager_config(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Write the generated rule file to PATH (or stdout when omitted)."""
+    """Write generated Prometheus rules or Alertmanager config to PATH or stdout."""
     import sys
     from pathlib import Path
 
     args = list(sys.argv[1:] if argv is None else argv)
+    is_alertmanager = False
+    if "--alertmanager" in args:
+        is_alertmanager = True
+        args.remove("--alertmanager")
+
     if len(args) > 1:
-        sys.stderr.write("usage: python -m music_recommender.alerting [PATH]\n")
+        sys.stderr.write(
+            "usage: python -m music_recommender.alerting [--alertmanager] [PATH]\n"
+        )
         return 2
-    text = render_prometheus_rules()
+
+    text = (
+        render_alertmanager_config()
+        if is_alertmanager
+        else render_prometheus_rules()
+    )
     if args:
         Path(args[0]).write_text(text, encoding="utf-8", newline="\n")
     else:
