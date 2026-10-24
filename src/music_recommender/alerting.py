@@ -409,6 +409,63 @@ def parse_alert_payload(
     return events
 
 
+class AlertHistoryBuffer:
+    """Thread-safe, bounded in-memory ring buffer of received alert events."""
+
+    def __init__(self, capacity: int = 100) -> None:
+        if capacity < 1:
+            raise ValueError("capacity must be >= 1")
+        self.capacity = capacity
+        self._events: list[ReceivedAlertEvent] = []
+        self._lock = threading.Lock()
+
+    def record(self, event: ReceivedAlertEvent) -> None:
+        """Record a single alert event, evicting the oldest if at capacity."""
+        with self._lock:
+            if len(self._events) >= self.capacity:
+                self._events.pop(0)
+            self._events.append(event)
+
+    def record_many(self, events: Sequence[ReceivedAlertEvent]) -> int:
+        """Record multiple alert events, returning the number recorded."""
+        count = 0
+        for event in events:
+            self.record(event)
+            count += 1
+        return count
+
+    def get_events(
+        self,
+        *,
+        limit: int = 50,
+        channel: str | None = None,
+        status: str | None = None,
+        severity: str | None = None,
+    ) -> list[ReceivedAlertEvent]:
+        """Return recorded events matching criteria, newest first."""
+        with self._lock:
+            matching = list(self._events)
+
+        if channel:
+            matching = [e for e in matching if e.channel == channel]
+        if status:
+            matching = [e for e in matching if e.status == status.lower()]
+        if severity:
+            matching = [e for e in matching if e.severity == severity.lower()]
+
+        matching.reverse()
+        return matching[: max(1, limit)]
+
+    def clear(self) -> None:
+        """Clear all recorded events."""
+        with self._lock:
+            self._events.clear()
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._events)
+
+
 def lookup_metric_value(
     families: Sequence[MetricFamily],
     metric: str,
