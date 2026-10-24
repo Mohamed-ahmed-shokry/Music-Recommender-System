@@ -13,13 +13,16 @@ import yaml
 from music_recommender.alerting import (
     DEFAULT_ALERT_RULES,
     AlertEvaluator,
+    AlertHistoryBuffer,
     AlertmanagerConfig,
     AlertMode,
     AlertRule,
     AlertSeverity,
     AlertTransition,
+    ReceivedAlertEvent,
     WebhookDispatcher,
     lookup_metric_value,
+    parse_alert_payload,
     render_alertmanager_config,
     render_prometheus_rules,
 )
@@ -501,3 +504,144 @@ def test_main_alertmanager_flag(
 
     assert alerting_main(["--alertmanager", "extra1", "extra2"]) == 2
     assert "usage" in capsys.readouterr().err
+
+
+def test_parse_alert_payload_alertmanager_v4() -> None:
+    payload = {
+        "version": "4",
+        "status": "firing",
+        "commonLabels": {"environment": "production"},
+        "commonAnnotations": {"source": "prometheus"},
+        "alerts": [
+            {
+                "status": "firing",
+                "labels": {
+                    "alertname": "ServiceDown",
+                    "severity": "critical",
+                    "metric": "music_recommender_up",
+                },
+                "annotations": {
+                    "summary": "Service is unavailable.",
+                },
+                "startsAt": "2026-10-24T12:00:00Z",
+                "endsAt": None,
+                "value": 0.0,
+            },
+            {
+                "status": "resolved",
+                "labels": {
+                    "alertname": "StreamingHealthDegraded",
+                    "severity": "warning",
+                },
+                "annotations": {
+                    "summary": "Streaming pipeline recovered.",
+                },
+                "startsAt": "2026-10-24T12:00:00Z",
+                "endsAt": "2026-10-24T12:05:00Z",
+            },
+        ],
+    }
+
+    events = parse_alert_payload(payload, channel="critical")
+    assert len(events) == 2
+
+    e1 = events[0]
+    assert e1.alertname == "ServiceDown"
+    assert e1.status == "firing"
+    assert e1.severity == "critical"
+    assert e1.summary == "Service is unavailable."
+    assert e1.channel == "critical"
+    assert e1.metric == "music_recommender_up"
+    assert e1.labels["environment"] == "production"
+    assert e1.labels["severity"] == "critical"
+    assert e1.value == 0.0
+    assert e1.starts_at == "2026-10-24T12:00:00Z"
+    assert e1.ends_at is None
+    d1 = e1.to_dict()
+    assert d1["alertname"] == "ServiceDown"
+
+    e2 = events[1]
+    assert e2.alertname == "StreamingHealthDegraded"
+    assert e2.status == "resolved"
+    assert e2.severity == "warning"
+    assert e2.channel == "critical"
+
+
+def test_parse_alert_payload_single_transition() -> None:
+    payload = {
+        "alert": "MaintenanceWorkerStopped",
+        "event": "firing",
+        "severity": "warning",
+        "summary": "Maintenance worker stopped.",
+        "metric": "music_recommender_maintenance_running",
+        "labels": {"component": "worker"},
+        "value": 0.0,
+        "timestamp": "2026-10-24T12:10:00Z",
+    }
+    events = parse_alert_payload(payload, channel="warning")
+    assert len(events) == 1
+    e = events[0]
+    assert e.alertname == "MaintenanceWorkerStopped"
+    assert e.status == "firing"
+    assert e.severity == "warning"
+    assert e.summary == "Maintenance worker stopped."
+    assert e.channel == "warning"
+    assert e.labels["component"] == "worker"
+    assert e.value == 0.0
+    assert e.starts_at == "2026-10-24T12:10:00Z"
+
+
+def test_alert_history_buffer() -> None:
+    with pytest.raises(ValueError, match="capacity must be >= 1"):
+        AlertHistoryBuffer(capacity=0)
+
+    buf = AlertHistoryBuffer(capacity=3)
+    assert len(buf) == 0
+    assert buf.get_events() == []
+
+    e1 = ReceivedAlertEvent(
+        "Alert1", "firing", "warning", "Summary 1", channel="warning"
+    )
+    e2 = ReceivedAlertEvent(
+        "Alert2", "firing", "critical", "Summary 2", channel="critical"
+    )
+    e3 = ReceivedAlertEvent(
+        "Alert3", "resolved", "warning", "Summary 3", channel="warning"
+    )
+    e4 = ReceivedAlertEvent(
+        "Alert4", "firing", "critical", "Summary 4", channel="critical"
+    )
+
+    assert buf.record_many([e1, e2]) == 2
+    assert len(buf) == 2
+
+    buf.record(e3)
+    assert len(buf) == 3
+
+    # Adding 4th exceeds capacity 3, evicts e1
+    buf.record(e4)
+    assert len(buf) == 3
+
+    all_events = buf.get_events()
+    # Newest first
+    assert [e.alertname for e in all_events] == ["Alert4", "Alert3", "Alert2"]
+
+    # Filter by channel
+    crit_events = buf.get_events(channel="critical")
+    assert [e.alertname for e in crit_events] == ["Alert4", "Alert2"]
+
+    # Filter by status
+    resolved_events = buf.get_events(status="resolved")
+    assert [e.alertname for e in resolved_events] == ["Alert3"]
+
+    # Filter by severity
+    warn_events = buf.get_events(severity="warning")
+    assert [e.alertname for e in warn_events] == ["Alert3"]
+
+    # Limit
+    limited = buf.get_events(limit=1)
+    assert len(limited) == 1
+    assert limited[0].alertname == "Alert4"
+
+    buf.clear()
+    assert len(buf) == 0
