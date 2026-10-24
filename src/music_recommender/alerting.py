@@ -604,9 +604,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     text = (
-        render_alertmanager_config()
-        if is_alertmanager
-        else render_prometheus_rules()
+        render_alertmanager_config() if is_alertmanager else render_prometheus_rules()
     )
     if args:
         Path(args[0]).write_text(text, encoding="utf-8", newline="\n")
