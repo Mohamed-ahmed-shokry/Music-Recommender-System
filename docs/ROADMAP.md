@@ -53,19 +53,19 @@ Complete the production alerting lifecycle by implementing the webhook receiver 
 - External database persistence for alert history (in-memory ring buffer satisfies single-instance container requirements without adding external database dependencies).
 
 ### 6. Micro-Task Breakdown
-- [ ] Task 1: Initialize Phase 154 roadmap, plan, and progress record.
-- [ ] Task 2: Implement `ReceivedAlertEvent`, `parse_alert_payload`, and `AlertHistoryBuffer` in `src/music_recommender/alerting.py`.
-- [ ] Task 3: Unit tests for alert payload parser and history buffer in `tests/test_alerting.py`.
-- [ ] Task 4: Integrate `alert_history` into `RecommenderService` in `src/music_recommender/service.py`.
-- [ ] Task 5: Implement `POST /alerts/webhook` and `GET /alerts/history` endpoints in `api/main.py`.
-- [ ] Task 6: Add API tests for alert webhook and history endpoints in `tests/test_api.py`.
-- [ ] Task 7: Implement `alert-history` command in `src/music_recommender/cli.py`.
-- [ ] Task 8: Add unit tests for `alert-history` CLI command in `tests/test_cli.py`.
-- [ ] Task 9: Add recent alert event rendering to dashboard sidebar in `src/music_recommender/dashboard.py`.
-- [ ] Task 10: Add dashboard alert history tests in `tests/test_dashboard.py`.
-- [ ] Task 11: Update `README.md` and `CHANGELOG.md` with 0.34.0 webhook and history docs.
-- [ ] Task 12: Bump version to `0.34.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
-- [ ] Task 13: Full CI-parity verification, push, open draft PR, monitor remote CI to green.
+- [x] Task 1: Initialize Phase 154 roadmap, plan, and progress record.
+- [x] Task 2: Implement `ReceivedAlertEvent`, `parse_alert_payload`, and `AlertHistoryBuffer` in `src/music_recommender/alerting.py`.
+- [x] Task 3: Unit tests for alert payload parser and history buffer in `tests/test_alerting.py`.
+- [x] Task 4: Integrate `alert_history` into `RecommenderService` in `src/music_recommender/service.py`.
+- [x] Task 5: Implement `POST /alerts/webhook` and `GET /alerts/history` endpoints in `api/main.py`.
+- [x] Task 6: Add API tests for alert webhook and history endpoints in `tests/test_api.py`.
+- [x] Task 7: Implement `alert-history` command in `src/music_recommender/cli.py`.
+- [x] Task 8: Add unit tests for `alert-history` CLI command in `tests/test_cli.py`.
+- [x] Task 9: Add recent alert event rendering to dashboard sidebar in `src/music_recommender/dashboard.py`.
+- [x] Task 10: Add dashboard alert history tests in `tests/test_dashboard.py`.
+- [x] Task 11: Update `README.md` and `CHANGELOG.md` with 0.34.0 webhook and history docs.
+- [x] Task 12: Bump version to `0.34.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [x] Task 13: Full CI-parity verification, push, open draft PR, monitor remote CI to green.
 
 ---
 
