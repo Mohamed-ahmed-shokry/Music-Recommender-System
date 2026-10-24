@@ -1448,9 +1448,7 @@ def render_dashboard(service: RecommenderService) -> None:
         st.divider()
         st.subheader("Alerting & Health")
         alert_states = (
-            service.alert_states()
-            if hasattr(service, "alert_states")
-            else []
+            service.alert_states() if hasattr(service, "alert_states") else []
         )
         firing_alerts = [a for a in alert_states if a.get("status") == "firing"]
         if not firing_alerts:
