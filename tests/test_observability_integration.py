@@ -14,6 +14,7 @@ import api.main as api_main
 from music_recommender.alerting import (
     DEFAULT_ALERT_RULES,
     AlertEvaluator,
+    render_alertmanager_config,
     render_prometheus_rules,
 )
 from music_recommender.telemetry import (
@@ -176,3 +177,46 @@ def test_alert_evaluator_against_live_telemetry() -> None:
     assert len(states) == len(DEFAULT_ALERT_RULES)
     for s in states:
         assert s["status"] in ("inactive", "pending", "firing", "resolved")
+
+
+def test_alertmanager_configuration_and_prometheus_wiring(repo_root: Path) -> None:
+    """Verify that configs/alertmanager.yml is valid and wired into Prometheus."""
+    alertmanager_file = repo_root / "configs" / "alertmanager.yml"
+    assert alertmanager_file.is_file(), f"Missing {alertmanager_file}"
+
+    with open(alertmanager_file, encoding="utf-8") as f:
+        am_data = yaml.safe_load(f)
+    assert "global" in am_data
+    assert "route" in am_data
+    assert "inhibit_rules" in am_data
+    assert "receivers" in am_data
+    assert len(am_data["route"]["routes"]) >= 2
+    assert len(am_data["inhibit_rules"]) >= 1
+
+    expected_yaml = render_alertmanager_config()
+    assert alertmanager_file.read_text(encoding="utf-8") == expected_yaml
+
+    prom_file = repo_root / "configs" / "prometheus.yml"
+    assert prom_file.is_file(), f"Missing {prom_file}"
+    with open(prom_file, encoding="utf-8") as f:
+        prom_data = yaml.safe_load(f)
+    assert "alerting" in prom_data
+    am_targets = prom_data["alerting"]["alertmanagers"][0]["static_configs"][0][
+        "targets"
+    ]
+    assert "alertmanager:9093" in am_targets
+
+
+def test_compose_observability_alertmanager_service(repo_root: Path) -> None:
+    """Verify compose.yaml observability stack defines alertmanager correctly."""
+    compose_file = repo_root / "compose.yaml"
+    assert compose_file.is_file()
+    with open(compose_file, encoding="utf-8") as f:
+        compose_data = yaml.safe_load(f)
+
+    services = compose_data["services"]
+    assert "alertmanager" in services
+    am_service = services["alertmanager"]
+    assert "observability" in am_service.get("profiles", [])
+    assert "9093:9093" in am_service["ports"]
+    assert "alertmanager" in services["prometheus"]["depends_on"]

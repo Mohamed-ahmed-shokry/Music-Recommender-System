@@ -1066,6 +1066,23 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
 
     Evaluation runs when `GET /alerts` is called (for example from a cron job or uptime probe); there is no built-in background scheduler. When artifacts are not loaded, `/alerts` still returns HTTP 200 and reports `ServiceDown` as firing.
 
+3. **Alertmanager & multi-tier routing** — [`configs/alertmanager.yml`](configs/alertmanager.yml) routes alerts by severity (`critical` with 1h repeat interval vs `warning` with 4h repeat interval) and applies inhibition rules (e.g. `ServiceDown` inhibits component warning alerts during total service outages). Regenerate with:
+
+    ```bash
+    uv run python -m music_recommender.alerting --alertmanager configs/alertmanager.yml
+    ```
+
+4. **Operator alert tooling CLI** — Check live alert states or dispatch synthetic notifications directly from the terminal:
+
+    ```bash
+    uv run music-recommender check-alerts               # formatted status table
+    uv run music-recommender check-alerts --format json # structured JSON payload
+    uv run music-recommender check-alerts --firing-only # filter to firing rules
+    uv run music-recommender check-alerts --fail-on-critical # exit code 1 if critical alerts fire
+    uv run music-recommender test-alert --dry-run      # preview synthetic notification payload
+    uv run music-recommender test-alert --webhook-url https://hooks.example.com/alerts # test delivery
+    ```
+
 ## API Reference
 
 Train before starting the API:
@@ -1611,7 +1628,8 @@ The system includes a production-grade Prometheus telemetry, alerting, and Grafa
   ```bash
   uv run music-recommender validate-dashboard
   ```
-- **Full Docker Observability Stack**: Spin up API, dashboard, Prometheus, and Grafana in one command:
+- **Alertmanager Multi-Tier Routing & Storm Inhibition**: Prometheus routes alerts to Alertmanager on port 9093 with tiered severity notification intervals (critical vs warning) and storm-prevention inhibition rules configured in configs/alertmanager.yml.
+- **Full Docker Observability Stack**: Spin up API, dashboard, Prometheus, Alertmanager, and Grafana in one command:
   ```bash
   docker compose --profile observability up -d
   ```

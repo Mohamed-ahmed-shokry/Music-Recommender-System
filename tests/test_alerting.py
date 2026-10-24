@@ -13,12 +13,14 @@ import yaml
 from music_recommender.alerting import (
     DEFAULT_ALERT_RULES,
     AlertEvaluator,
+    AlertmanagerConfig,
     AlertMode,
     AlertRule,
     AlertSeverity,
     AlertTransition,
     WebhookDispatcher,
     lookup_metric_value,
+    render_alertmanager_config,
     render_prometheus_rules,
 )
 from music_recommender.alerting import (
@@ -435,4 +437,67 @@ def test_main_writes_rule_file_and_validates_args(
     assert capsys.readouterr().out == render_prometheus_rules()
 
     assert alerting_main(["a", "b"]) == 2
+    assert "usage" in capsys.readouterr().err
+
+
+def test_render_alertmanager_config() -> None:
+    text = render_alertmanager_config()
+    parsed = yaml.safe_load(text)
+    assert parsed["global"]["resolve_timeout"] == "5m"
+    assert parsed["route"]["receiver"] == "default-webhook"
+    routes = parsed["route"]["routes"]
+    assert len(routes) == 2
+    assert routes[0]["match"]["severity"] == "critical"
+    assert routes[0]["receiver"] == "critical-webhook"
+    assert routes[1]["match"]["severity"] == "warning"
+    assert routes[1]["receiver"] == "warning-webhook"
+
+    inhibit = parsed["inhibit_rules"]
+    assert len(inhibit) == 1
+    assert inhibit[0]["source_match"]["alertname"] == "ServiceDown"
+    assert inhibit[0]["target_match"]["severity"] == "warning"
+
+    receivers = {r["name"]: r["webhook_configs"][0]["url"] for r in parsed["receivers"]}
+    assert receivers["default-webhook"] == "http://api:8000/alerts/webhook"
+    assert (
+        receivers["critical-webhook"]
+        == "http://api:8000/alerts/webhook?channel=critical"
+    )
+    assert (
+        receivers["warning-webhook"] == "http://api:8000/alerts/webhook?channel=warning"
+    )
+
+
+def test_render_alertmanager_config_custom() -> None:
+    cfg = AlertmanagerConfig(
+        default_webhook_url="https://alerts.example.com/hook",
+        critical_webhook_url="https://pager.example.com/critical",
+        warning_webhook_url="https://chat.example.com/warning",
+        resolve_timeout="10m",
+        critical_repeat_interval="30m",
+        inhibit_warning_on_service_down=False,
+    )
+    text = render_alertmanager_config(cfg)
+    parsed = yaml.safe_load(text)
+    assert parsed["global"]["resolve_timeout"] == "10m"
+    assert parsed["route"]["routes"][0]["repeat_interval"] == "30m"
+    assert parsed["inhibit_rules"] == []
+
+    receivers = {r["name"]: r["webhook_configs"][0]["url"] for r in parsed["receivers"]}
+    assert receivers["default-webhook"] == "https://alerts.example.com/hook"
+    assert receivers["critical-webhook"] == "https://pager.example.com/critical"
+    assert receivers["warning-webhook"] == "https://chat.example.com/warning"
+
+
+def test_main_alertmanager_flag(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = tmp_path / "alertmanager.yml"
+    assert alerting_main(["--alertmanager", str(target)]) == 0
+    assert target.read_text(encoding="utf-8") == render_alertmanager_config()
+
+    assert alerting_main(["--alertmanager"]) == 0
+    assert capsys.readouterr().out == render_alertmanager_config()
+
+    assert alerting_main(["--alertmanager", "extra1", "extra2"]) == 2
     assert "usage" in capsys.readouterr().err

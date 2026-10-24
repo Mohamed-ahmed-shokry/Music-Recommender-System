@@ -1,3 +1,78 @@
+# Milestone 0.33.0 Roadmap — Phase 149
+
+## Phase 149: Alertmanager Multi-Tier Routing, Operator Alert CLI, and Dashboard Alert Monitoring (0.33.0)
+
+### 1. Objective
+Complete the production alerting pipeline by delivering multi-tier Alertmanager routing configuration and generator, wiring Alertmanager into the Prometheus and Docker Compose observability stack with storm-prevention inhibition rules, providing operator CLI commands (`check-alerts` and `test-alert`) for alert inspection and synthetic webhook testing, surfacing live alert health in the Streamlit dashboard, and releasing Milestone 0.33.0 with 100% green CI.
+
+### 2. Scope
+1. **Alertmanager Configuration & Routing Generator (`src/music_recommender/alerting.py`)**:
+   - Multi-tier alert routing data structures and generator `render_alertmanager_config`.
+   - Tiered receivers: `critical` (immediate notification, short repeat interval), `warning` (batched notification, standard repeat interval), and default fallback.
+   - Storm inhibition rules: inhibit warning alerts when `ServiceDown` is firing.
+   - Shipped configuration in `configs/alertmanager.yml` matching the generator output.
+   - CLI generator mode: `python -m music_recommender.alerting --alertmanager [PATH]`.
+2. **Prometheus Alertmanager Wiring & Compose Integration (`configs/prometheus.yml`, `compose.yaml`)**:
+   - `configs/prometheus.yml`: add `alerting: alertmanagers:` targeting `alertmanager:9093`.
+   - `compose.yaml`: add `alertmanager` service under `observability` profile with healthcheck and volume mount for `configs/alertmanager.yml`.
+3. **Operator Alert CLI (`src/music_recommender/cli.py`)**:
+   - `music-recommender check-alerts`: evaluates alert rules against current service metrics or offline artifact, outputs formatted table or JSON, supports `--firing-only`, `--severity`, `--fail-on-critical`.
+   - `music-recommender test-alert`: dispatches a synthetic alert notification to verify webhook endpoint connectivity.
+4. **Dashboard Alert Visibility (`src/music_recommender/dashboard.py`)**:
+   - Sidebar alert health badge and status indicators (e.g. "Alerts: Normal" or firing alert count).
+   - Dedicated "Alerts & Health" expander or tab displaying active rules, thresholds, severity, and current evaluation status.
+5. **Comprehensive Integration & Unit Tests**:
+   - Tests in `tests/test_alerting.py` for Alertmanager config generation, inhibition rules, and generator CLI.
+   - Tests in `tests/test_cli.py` for `check-alerts` and `test-alert`.
+   - Tests in `tests/test_dashboard.py` for alert health rendering.
+   - Observability integration tests in `tests/test_observability_integration.py` for Alertmanager YAML validity and Prometheus configuration.
+6. **Documentation & Release 0.33.0**:
+   - README alert operations section.
+   - CHANGELOG 0.33.0 release notes.
+   - Version bump to 0.33.0 in `pyproject.toml`, `uv lock`, and `uv build`.
+
+### 3. Acceptance Criteria
+- **AC-1**: `render_alertmanager_config()` outputs valid Alertmanager YAML with multi-tier routing (critical vs warning), receivers, and inhibition rules; byte-identical to `configs/alertmanager.yml`.
+- **AC-2**: `python -m music_recommender.alerting --alertmanager` writes valid Alertmanager config to path or stdout; tested with exit code 0.
+- **AC-3**: `configs/prometheus.yml` defines Alertmanager target `alertmanager:9093` and `compose.yaml` defines `alertmanager` service with valid healthcheck and schema passing YAML verification.
+- **AC-4**: `music-recommender check-alerts` evaluates live/offline metrics, reports rule statuses in table or JSON format, respects `--severity` and `--firing-only`, and exits with code 1 under `--fail-on-critical` when critical alerts fire.
+- **AC-5**: `music-recommender test-alert` dispatches synthetic notification to the specified or configured webhook URL with error isolation and status reporting.
+- **AC-6**: Dashboard renders alert health indicators and status view reflecting rule states cleanly.
+- **AC-7**: All unit and integration tests pass (≥1176 tests), `ruff check .` clean, `ruff format --check .` clean, `mypy` clean, coverage ≥75%.
+- **AC-8**: Milestone version is `0.33.0`, distribution builds via `uv build`.
+- **AC-9 (Mandatory)**: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Validation & CI Plan
+- `uv run ruff format --check .`
+- `uv run ruff check .`
+- `uv run mypy`
+- `uv run --extra dashboard --extra tracking --extra spotify pytest -q`
+- `uv build`
+- YAML validation of `configs/alertmanager.yml`, `configs/prometheus.yml`, and `compose.yaml`.
+- CLI manual execution: `music-recommender check-alerts --format json`, `music-recommender test-alert --dry-run`.
+- Remote GitHub Actions CI run on `phase/149-alertmanager-routing` passing 100%.
+
+### 5. Exclusions
+- Third-party PagerDuty / Opsgenie API credentials or live paid notification services (handled via standard Alertmanager webhook receivers).
+- Custom Alertmanager clustering mesh across multi-node networks (out of single-node compose scope).
+
+### 6. Micro-Task Breakdown
+- [x] Task 1: Initialize Phase 149 roadmap, plan, and progress record.
+- [x] Task 2: Implement Alertmanager configuration generator and inhibition models in `src/music_recommender/alerting.py`.
+- [x] Task 3: Add unit tests for Alertmanager config generator and CLI in `tests/test_alerting.py`.
+- [x] Task 4: Ship `configs/alertmanager.yml` and wire Alertmanager into `configs/prometheus.yml` and `compose.yaml`.
+- [x] Task 5: Implement `check-alerts` command in `src/music_recommender/cli.py`.
+- [x] Task 6: Implement `test-alert` command in `src/music_recommender/cli.py`.
+- [x] Task 7: Add unit tests for `check-alerts` and `test-alert` in `tests/test_cli.py`.
+- [x] Task 8: Add alert health status and overview in `src/music_recommender/dashboard.py`.
+- [x] Task 9: Add dashboard alert tests in `tests/test_dashboard.py`.
+- [x] Task 10: Add Alertmanager integration tests in `tests/test_observability_integration.py`.
+- [x] Task 11: Update documentation in `README.md` and `CHANGELOG.md`.
+- [x] Task 12: Bump package version to `0.33.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [x] Task 13: Final CI-parity check, push, open draft PR, monitor remote CI to 100% green.
+
+---
+
 # Milestone 0.32.0 Roadmap — Phase 144
 
 ## Phase 144: Maintenance Daemon Operational Hardening (0.32.0)
