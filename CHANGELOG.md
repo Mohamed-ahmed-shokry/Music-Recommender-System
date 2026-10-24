@@ -5,6 +5,24 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.0] - 2026-10-24
+
+### Added
+
+- **Alertmanager Webhook Receiver & History Buffer (Phase 154):**
+  - Thread-safe in-memory ring buffer `AlertHistoryBuffer` in `src/music_recommender/alerting.py` for recording received alert notifications with bounded memory footprint (default 500 events).
+  - Robust multi-format alert payload parser `parse_alert_payload()` supporting Prometheus/Alertmanager v4 webhook schema (`alerts[]` array with labels, annotations, and timestamps) and internal transition webhook dictionaries.
+  - FastAPI endpoints `POST /alerts/webhook` and `GET /alerts/history` in `api/main.py` allowing Prometheus/Alertmanager and testing tools to ingest alert notifications and query historical records with channel, status, and severity filters.
+  - Service integration via `RecommenderService.record_alert_event()` and `RecommenderService.get_alert_history()`.
+- **Operator Audit Tooling & Dashboard Integration:**
+  - Added CLI command `music-recommender alert-history` in `src/music_recommender/cli.py` with tabular formatting, structured JSON output (`--format json`), and filtering by channel, status, and severity.
+  - Streamlit dashboard sidebar integration displaying recent alert notifications inside the `Alert Rules & States` expander.
+- **Test Suite:**
+  - Unit tests for `parse_alert_payload` and `AlertHistoryBuffer` ring buffer eviction and query filters in `tests/test_alerting.py`.
+  - Comprehensive API integration tests for `POST /alerts/webhook` (both standard and fallback modes) and `GET /alerts/history` in `tests/test_api.py`.
+  - CLI tests for `alert-history` table, JSON, filter options, and offline service fallback in `tests/test_cli.py`.
+  - Dashboard test verifying recent notifications rendering in `tests/test_dashboard.py`.
+
 ## [0.33.0] - 2026-10-24
 
 ### Added
