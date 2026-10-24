@@ -1481,6 +1481,24 @@ def render_dashboard(service: RecommenderService) -> None:
             else:
                 st.caption("No alert rules configured.")
 
+            alert_history: list[dict[str, Any]] = (
+                service.get_alert_history(limit=5)
+                if hasattr(service, "get_alert_history")
+                else []
+            )
+            if alert_history:
+                st.divider()
+                st.markdown("**Recent Notifications**")
+                for ev in alert_history:
+                    ev_name = ev.get("alertname", "Alert")
+                    ev_stat = ev.get("status", "firing")
+                    ev_sev = ev.get("severity", "warning")
+                    ev_chan = ev.get("channel", "unknown")
+                    ev_badge = "🔴" if ev_stat == "firing" else "🟢"
+                    st.write(f"{ev_badge} **{ev_name}** (`{ev_sev}` via `{ev_chan}`)")
+                    if ev.get("summary"):
+                        st.caption(str(ev["summary"]))
+
     tabs = st.tabs(
         [
             "For You",
