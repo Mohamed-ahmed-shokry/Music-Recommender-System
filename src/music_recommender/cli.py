@@ -3506,6 +3506,27 @@ def bandit_sweep(
         raise typer.Exit(code=1) from error
 
 
+def _write_maintenance_heartbeat(heartbeat_path: str | Path, worker: Any) -> None:
+    """Write the maintenance daemon heartbeat file for freshness-based health checks.
+
+    The heartbeat records an epoch timestamp plus the worker's metrics snapshot
+    so container health checks (and operators) can verify the daemon loop is
+    alive without the process exposing an HTTP endpoint.
+    """
+    import time
+
+    path = Path(heartbeat_path)
+    metrics: dict[str, Any] = {}
+    if worker is not None:
+        try:
+            metrics = worker.get_metrics().to_dict()
+        except Exception:  # pragma: no cover - metrics are best-effort
+            metrics = {}
+    payload: dict[str, Any] = {"timestamp": time.time(), "running": True, **metrics}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
 @app.command()
 def maintenance_daemon(
     artifact_path: str = typer.Option(
@@ -3517,6 +3538,14 @@ def maintenance_daemon(
         3600.0,
         "--interval",
         help="Maintenance sweep interval in seconds.",
+    ),
+    heartbeat_path: str | None = typer.Option(
+        None,
+        "--heartbeat-path",
+        help=(
+            "Optional path for a JSON heartbeat file written every cycle so "
+            "container health checks can verify loop liveness without HTTP."
+        ),
     ),
     threshold: int = typer.Option(
         1,
@@ -3620,8 +3649,11 @@ def maintenance_daemon(
     )
     import time
 
+    heartbeat = Path(heartbeat_path) if heartbeat_path else None
     try:
         while True:
+            if heartbeat is not None:
+                _write_maintenance_heartbeat(heartbeat, service.maintenance_worker)
             time.sleep(interval)
     except KeyboardInterrupt:
         typer.echo("\nMaintenance daemon stopped.")

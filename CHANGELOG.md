@@ -5,6 +5,36 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] - 2026-10-22
+
+### Fixed
+
+- **Maintenance daemon operational hardening (Phase 144):** the Docker Compose
+  `maintenance` service healthcheck previously polled
+  `http://127.0.0.1:8000/maintenance/status`, an endpoint the
+  `maintenance-daemon` CLI process does not serve, so the container could never
+  report healthy.
+  - Added `maintenance-daemon --heartbeat-path`, which writes a JSON heartbeat
+    file every daemon cycle (immediate first beat) containing an epoch
+    timestamp, `"running": true`, and the worker metrics snapshot.
+  - The Compose healthcheck now verifies heartbeat freshness (timestamp within
+    2x the sweep interval) and the `running` flag, replacing the impossible
+    HTTP probe. A wedged or exited daemon loop now renders the container
+    unhealthy for orchestrator restarts.
+  - `_write_maintenance_heartbeat` survives worker metric failures
+    (best-effort metrics) and creates parent directories as needed.
+
+### Added
+
+- Dashboard "Cold-Start Bandit" tab shows a compact maintenance daemon
+  liveness line (running/stopped state, cycles, sweeps, records folded,
+  errors) whenever `bandit_status()["maintenance_worker"]` is present.
+- README documentation for the heartbeat flag, heartbeat freshness
+  healthcheck probe, and the rationale for the file-based liveness signal.
+- Five heartbeat tests in `tests/test_cli.py` (content and freshness, worker
+  metric propagation, broken-worker resilience, daemon loop end-to-end beat)
+  plus expanded dashboard render assertions for the liveness caption.
+
 ## [0.31.0] - 2026-10-21
 
 ### Added

@@ -3,7 +3,34 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.31.0) — shipped
+## Current milestone (0.32.0) — shipped (branch `phase/144-maintenance-hardening`, draft PR #20)
+
+Maintenance daemon operational hardening. The 0.31.0 release exposed the
+`BanditMaintenanceWorker` through CLI, API, and Docker Compose, but the compose
+`maintenance` service healthcheck polls an HTTP endpoint that the
+`maintenance-daemon` CLI never serves, so every container instance reports
+unhealthy. This milestone makes the daemon self-monitoring and deployable:
+a heartbeat file written by the daemon and validated by the compose health
+check, maintenance worker visibility in the dashboard, and release packaging.
+
+- Phase 144 — Daemon heartbeat: `maintenance-daemon --heartbeat-path` writes a
+  JSON heartbeat (timestamp, running flag, worker metrics snapshot) every
+  daemon cycle; compose healthcheck validates heartbeat freshness. ✅
+  (`85b3622`, `3ed70e4`, tests `a9731cd`/`85b81fc`)
+- Phase 145 — Dashboard visibility: the Cold-Start Bandit tab renders the
+  maintenance worker status (running, cycles, sweeps, folded records, errors)
+  when the service reports an active worker. ✅ (`1d11674`, `aa9fdb3`)
+- Phase 146 — Compose hardening: `maintenance` service healthcheck switches to
+  the heartbeat freshness probe (/tmp heartbeat tmpfs) so the container reports
+  healthy only while the daemon loop is alive. ✅ (`3477085`)
+- Phase 147 — Tests and docs: heartbeat unit tests, dashboard render tests,
+  compose YAML validation, README/CHANGELOG updates. ✅ (`a9731cd`,
+  `85b81fc`, `aa9fdb3`, `c2b6f6d`, `676a30e`)
+- Phase 148 — Release 0.32.0: version bump, lockfile refresh, full CI-parity
+  suite, remote CI green (run 39847823632: Test/lint/build + container both
+  success). ✅ (`5d4c8c7`, `08f4a95`)
+
+## Previous milestone (0.31.0) — shipped
 
 Scheduled Online Bandit Fold. The 0.24.0 idempotent sweep, 0.30.0
 observability stack, and existing `BanditMaintenanceWorker` in `bandit.py`
@@ -786,18 +813,22 @@ is preserved when no policy file exists.
 - Phase 69 — Docs and release: PLAN, README (evaluation + CLI), CHANGELOG,
   version bump to 0.19.0.
 
-## Next steps (after 0.25.0)
+## Next steps (after 0.31.0)
 
 1. Two-tower neural candidate retrieval (PyTorch / ONNX runtime) — deferred
    until a real-scale catalog is available: the current sample dataset (18
    artists, 36 tracks) cannot meaningfully train or validate a neural
    retrieval model, and the phase would add heavy new dependencies.
-2. Scheduled online fold: run the idempotent sweep automatically (cron /
-   internal scheduler) so live served feedback folds back into the bandit
-   prior without manual `bandit-update` (the 0.24.0 watermark makes this safe).
+2. Scheduled online fold: ✅ shipped in 0.31.0 as the
+   `BanditMaintenanceWorker` driven `maintenance-daemon` CLI, maintenance
+   status/trigger API endpoints, and the `compose.yaml` `maintenance` profile;
+   0.32.0 hardens its deployment health reporting.
 3. New context feature extractors (beyond the registry's shipped three) —
    requires a catalog with the corresponding signals; the 0.25.0 registry
    makes this a config-only change.
+4. Alertmanager routing config (multi-tier severity routing beyond the
+   Prometheus rule definitions shipped in 0.30.0) — deferred; the shipped
+   `alert-rules.yml` covers firing notification via webhook dispatch.
 
 ## Quality gates (every change)
 

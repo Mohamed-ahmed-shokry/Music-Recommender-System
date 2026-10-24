@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -3327,3 +3328,87 @@ def test_trigger_fold_cli_with_artifact(tmp_path: Path) -> None:
         assert "Folded" in res.output
     else:
         assert "Error" in res.output or "not found" in res.output.lower()
+
+
+def test_write_maintenance_heartbeat_creates_fresh_file(tmp_path: Path) -> None:
+    from music_recommender.cli import _write_maintenance_heartbeat
+
+    heartbeat = tmp_path / "nested" / "maintenance_heartbeat.json"
+    before = time.time()
+    _write_maintenance_heartbeat(heartbeat, worker=None)
+    after = time.time()
+
+    data = json.loads(heartbeat.read_text(encoding="utf-8"))
+    assert data["running"] is True
+    assert before <= data["timestamp"] <= after
+
+
+class _HeartbeatMetrics:
+    @staticmethod
+    def to_dict() -> dict[str, int]:
+        return {"sweeps_count": 3, "errors_count": 0}
+
+
+class _HeartbeatWorker:
+    @staticmethod
+    def get_metrics() -> _HeartbeatMetrics:
+        return _HeartbeatMetrics()
+
+
+def test_write_maintenance_heartbeat_includes_worker_metrics(tmp_path: Path) -> None:
+    from music_recommender.cli import _write_maintenance_heartbeat
+
+    heartbeat = tmp_path / "heartbeat.json"
+    _write_maintenance_heartbeat(heartbeat, worker=_HeartbeatWorker())
+
+    data = json.loads(heartbeat.read_text(encoding="utf-8"))
+    assert data["sweeps_count"] == 3
+    assert data["errors_count"] == 0
+    assert data["running"] is True
+
+
+def test_write_maintenance_heartbeat_survives_broken_worker(tmp_path: Path) -> None:
+    from music_recommender.cli import _write_maintenance_heartbeat
+
+    heartbeat = tmp_path / "heartbeat.json"
+
+    class BrokenWorker:
+        def get_metrics(self) -> object:
+            raise RuntimeError("boom")
+
+    _write_maintenance_heartbeat(heartbeat, worker=BrokenWorker())
+
+    data = json.loads(heartbeat.read_text(encoding="utf-8"))
+    assert data["running"] is True
+    assert "sweeps_count" not in data
+
+
+def test_maintenance_daemon_writes_heartbeat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The daemon loop beats once immediately, then sleeps until interrupted."""
+    import time as time_module
+
+    heartbeat = tmp_path / "maintenance_heartbeat.json"
+
+    def interrupt(_seconds: float) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(time_module, "sleep", interrupt)
+
+    res = runner.invoke(
+        cli.app,
+        [
+            "maintenance-daemon",
+            "--heartbeat-path",
+            str(heartbeat),
+            "--interval",
+            "60",
+        ],
+    )
+
+    assert res.exit_code == 0
+    assert "Maintenance daemon stopped." in res.output
+    data = json.loads(heartbeat.read_text(encoding="utf-8"))
+    assert data["running"] is True
+    assert data["is_running"] is True
