@@ -1,3 +1,74 @@
+# Milestone 0.34.0 Roadmap — Phase 154
+
+## Phase 154: Alertmanager Webhook Ingestion, Alert History, and Operator Audit Tooling (0.34.0)
+
+### 1. Objective
+Complete the production alerting lifecycle by implementing the webhook receiver endpoint `POST /alerts/webhook` and history inspection endpoint `GET /alerts/history` in FastAPI (`api/main.py`), supporting both standard Prometheus Alertmanager webhook payloads and direct transition payloads, maintaining a thread-safe in-memory ring-buffer audit history of received alert transitions, providing operator CLI tooling (`alert-history`) and Streamlit dashboard alert history visibility, and releasing Milestone 0.34.0 with 100% green CI.
+
+### 2. Scope
+1. **Webhook Ingestion & History Data Structures (`src/music_recommender/alerting.py`)**:
+   - `ReceivedAlertEvent`: dataclass representing a parsed alert notification with timestamp, alertname, status, severity, channel, summary, and labels.
+   - `parse_alert_payload`: robust parser supporting both Alertmanager v4 JSON format and direct single-transition payloads.
+   - `AlertHistoryBuffer`: thread-safe ring buffer storing the latest $N$ alert events with query filtering (`limit`, `channel`, `status`).
+2. **FastAPI Webhook & History Endpoints (`api/main.py`)**:
+   - `POST /alerts/webhook`: handles incoming Alertmanager notifications and direct test alerts, logs events, records them in the history buffer, and returns status.
+   - `GET /alerts/history`: returns recorded alert events with optional filtering (`limit`, `channel`, `status`).
+3. **Service Integration (`src/music_recommender/service.py`)**:
+   - Attach `alert_history` to `RecommenderService` and expose `get_alert_history()`.
+4. **Operator CLI Tooling (`src/music_recommender/cli.py`)**:
+   - `music-recommender alert-history`: view recorded alert events from CLI in table or JSON format.
+5. **Dashboard Visibility (`src/music_recommender/dashboard.py`)**:
+   - Render recent alert history in the dashboard sidebar expander.
+6. **Comprehensive Tests**:
+   - Unit tests in `tests/test_alerting.py` for payload parsing and history buffer.
+   - API tests in `tests/test_api.py` for `POST /alerts/webhook` and `GET /alerts/history`.
+   - CLI tests in `tests/test_cli.py` for `alert-history`.
+   - Dashboard tests in `tests/test_dashboard.py`.
+7. **Documentation & Release 0.34.0**:
+   - Update `README.md`, `CHANGELOG.md`, `PLAN.md`, `docs/PROGRESS.md`.
+   - Bump version to `0.34.0` in `pyproject.toml`, refresh `uv.lock`, verify `uv build`.
+
+### 3. Acceptance Criteria
+- **AC-1**: `parse_alert_payload` correctly parses standard Prometheus Alertmanager v4 payloads and direct transition payloads into structured `ReceivedAlertEvent` objects.
+- **AC-2**: `AlertHistoryBuffer` is thread-safe, enforces capacity bounds, and supports filtering by channel, status, and limit.
+- **AC-3**: `POST /alerts/webhook` accepts alert payloads with optional `?channel=` query param, returns HTTP 200, logs received alerts, and records to history.
+- **AC-4**: `GET /alerts/history` returns recent alert events as JSON, honoring `limit`, `channel`, and `status` query parameters.
+- **AC-5**: `music-recommender alert-history` CLI command outputs recorded alert events in table or JSON format with filtering options.
+- **AC-6**: Streamlit dashboard sidebar renders recent alert events when history is available.
+- **AC-7**: All unit and integration tests pass (≥1189 tests), `ruff check .` clean, `ruff format --check .` clean, `mypy` clean, coverage ≥75%.
+- **AC-8**: Milestone version bumped to `0.34.0`, distributions build via `uv build`.
+- **AC-9 (Mandatory)**: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Validation & CI Plan
+- `uv run ruff format --check .`
+- `uv run ruff check .`
+- `uv run mypy`
+- `uv run --extra dashboard --extra tracking --extra spotify pytest -q`
+- `uv build`
+- End-to-end API test: `POST /alerts/webhook` followed by `GET /alerts/history` using TestClient.
+- End-to-end CLI test: `music-recommender test-alert` against local API, then `music-recommender alert-history`.
+- Remote GitHub Actions CI run on `phase/154-alertmanager-webhook-receiver` passing 100%.
+
+### 5. Exclusions
+- External database persistence for alert history (in-memory ring buffer satisfies single-instance container requirements without adding external database dependencies).
+
+### 6. Micro-Task Breakdown
+- [ ] Task 1: Initialize Phase 154 roadmap, plan, and progress record.
+- [ ] Task 2: Implement `ReceivedAlertEvent`, `parse_alert_payload`, and `AlertHistoryBuffer` in `src/music_recommender/alerting.py`.
+- [ ] Task 3: Unit tests for alert payload parser and history buffer in `tests/test_alerting.py`.
+- [ ] Task 4: Integrate `alert_history` into `RecommenderService` in `src/music_recommender/service.py`.
+- [ ] Task 5: Implement `POST /alerts/webhook` and `GET /alerts/history` endpoints in `api/main.py`.
+- [ ] Task 6: Add API tests for alert webhook and history endpoints in `tests/test_api.py`.
+- [ ] Task 7: Implement `alert-history` command in `src/music_recommender/cli.py`.
+- [ ] Task 8: Add unit tests for `alert-history` CLI command in `tests/test_cli.py`.
+- [ ] Task 9: Add recent alert event rendering to dashboard sidebar in `src/music_recommender/dashboard.py`.
+- [ ] Task 10: Add dashboard alert history tests in `tests/test_dashboard.py`.
+- [ ] Task 11: Update `README.md` and `CHANGELOG.md` with 0.34.0 webhook and history docs.
+- [ ] Task 12: Bump version to `0.34.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [ ] Task 13: Full CI-parity verification, push, open draft PR, monitor remote CI to green.
+
+---
+
 # Milestone 0.33.0 Roadmap — Phase 149
 
 ## Phase 149: Alertmanager Multi-Tier Routing, Operator Alert CLI, and Dashboard Alert Monitoring (0.33.0)
