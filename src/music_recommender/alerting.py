@@ -462,6 +462,26 @@ def _promql_expression(rule: AlertRule) -> str:
     return f"{selector} {rule.comparator} {_format_number(rule.threshold)}"
 
 
+DEFAULT_ALERTMANAGER_WEBHOOK_URL = "http://api:8000/alerts/webhook"
+
+
+@dataclass(frozen=True)
+class AlertmanagerConfig:
+    """Configuration for Prometheus Alertmanager routing and receivers."""
+
+    default_webhook_url: str = DEFAULT_ALERTMANAGER_WEBHOOK_URL
+    critical_webhook_url: str | None = None
+    warning_webhook_url: str | None = None
+    resolve_timeout: str = "5m"
+    group_wait: str = "10s"
+    group_interval: str = "30s"
+    critical_group_wait: str = "5s"
+    critical_repeat_interval: str = "1h"
+    warning_group_wait: str = "30s"
+    warning_repeat_interval: str = "4h"
+    inhibit_warning_on_service_down: bool = True
+
+
 def render_prometheus_rules(
     rules: Sequence[AlertRule] = DEFAULT_ALERT_RULES,
     *,
