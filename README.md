@@ -1072,7 +1072,7 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
     uv run python -m music_recommender.alerting --alertmanager configs/alertmanager.yml
     ```
 
-4. **Operator alert tooling CLI** — Check live alert states or dispatch synthetic notifications directly from the terminal:
+4. **Operator alert tooling CLI** — Check live alert states, dispatch test notifications, or inspect received alert history directly from the terminal:
 
     ```bash
     uv run music-recommender check-alerts               # formatted status table
@@ -1080,8 +1080,13 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
     uv run music-recommender check-alerts --firing-only # filter to firing rules
     uv run music-recommender check-alerts --fail-on-critical # exit code 1 if critical alerts fire
     uv run music-recommender test-alert --dry-run      # preview synthetic notification payload
-    uv run music-recommender test-alert --webhook-url https://hooks.example.com/alerts # test delivery
+    uv run music-recommender test-alert --webhook-url http://localhost:8000/alerts/webhook # test delivery
+    uv run music-recommender alert-history              # inspect recent alert notification history
+    uv run music-recommender alert-history --format json # structured JSON audit trail
+    uv run music-recommender alert-history --channel alertmanager --status firing # filter notifications
     ```
+
+5. **Alertmanager webhook ingestion & history buffer** — The API provides a webhook receiver at `POST /alerts/webhook` that parses standard Prometheus/Alertmanager v4 webhook payloads as well as internal transitions, recording them in a thread-safe in-memory ring buffer (default capacity 500 events). Query recent events at `GET /alerts/history` or inspect them in the Streamlit dashboard sidebar.
 
 ## API Reference
 
@@ -1104,6 +1109,8 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/health/streaming` | Real-time streaming queue and maintenance health (200 OK or 503 Service Unavailable) |
 | `GET` | `/metrics` | Prometheus 0.0.4 text exposition metrics for Prometheus and OpenTelemetry collectors |
 | `GET` | `/alerts?dispatch=true` | Evaluate alert rules on live metrics, notify the webhook on state changes, and return rule states |
+| `POST` | `/alerts/webhook?channel=alertmanager` | Ingest external Prometheus/Alertmanager or internal webhook notifications into the ring buffer |
+| `GET` | `/alerts/history?limit=50&channel=alertmanager` | Query received alert notification history and audit log |
 | `GET` | `/metadata` | Training config, dataset fingerprint, artifact metadata |
 | `GET` | `/evaluation/ablation-summary` | Persisted aggregated knob-importance summary |
 | `GET` | `/catalog/artists?query=pop&limit=25` | Search and page through artists and metadata |
