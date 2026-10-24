@@ -14,6 +14,13 @@ import numpy as np
 import typer
 
 from music_recommender import __version__
+from music_recommender.alerting import (
+    AlertEvaluator,
+    AlertRule,
+    AlertSeverity,
+    AlertTransition,
+    WebhookDispatcher,
+)
 from music_recommender.bandit import (
     DEFAULT_COLD_START_ARMS,
     BaseContextualBandit,
@@ -56,6 +63,7 @@ from music_recommender.bandit import (
     write_ope_report,
 )
 from music_recommender.config import (
+    ALERT_WEBHOOK_URL_ENV_VAR,
     ARTIFACT_BUNDLE_PATH,
     BANDIT_CONTEXT_FEATURES_PATH,
     BANDIT_FEEDBACK_PATH,
@@ -110,6 +118,7 @@ from music_recommender.surfaces import (
     write_surface_comparison_report,
 )
 from music_recommender.telemetry import (
+    collect_service_metric_families,
     export_metrics_json,
     export_prometheus_metrics,
     validate_dashboard_metrics,
@@ -3900,6 +3909,277 @@ def validate_dashboard_cmd(
                 typer.secho(f" - {err}", fg=typer.colors.RED, err=True)
 
     if not result.is_valid:
+        raise typer.Exit(code=1)
+
+
+@app.command("check-alerts")
+def check_alerts_cmd(
+    format: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: 'table' or 'json'.",
+        ),
+    ] = "table",
+    firing_only: Annotated[
+        bool,
+        typer.Option(
+            "--firing-only",
+            help="Show only currently firing alerts.",
+        ),
+    ] = False,
+    severity: Annotated[
+        str | None,
+        typer.Option(
+            "--severity",
+            "-s",
+            help="Filter alerts by severity ('critical' or 'warning').",
+        ),
+    ] = None,
+    fail_on_critical: Annotated[
+        bool,
+        typer.Option(
+            "--fail-on-critical",
+            help="Exit with code 1 if any critical alerts are firing.",
+        ),
+    ] = False,
+    dispatch: Annotated[
+        bool,
+        typer.Option(
+            "--dispatch/--no-dispatch",
+            help="Dispatch state change notifications to configured webhook.",
+        ),
+    ] = False,
+) -> None:
+    """Evaluate alert rules against live or offline metrics and display status."""
+    normalized_format = format.lower().strip()
+    if normalized_format not in ("table", "json"):
+        typer.secho("Format must be 'table' or 'json'.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    normalized_severity: str | None = None
+    if severity is not None:
+        normalized_severity = severity.lower().strip()
+        if normalized_severity not in ("critical", "warning"):
+            typer.secho(
+                "Severity must be 'critical' or 'warning'.",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=2)
+
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable for alert evaluation: %s", exc)
+        service = None
+
+    if service is not None:
+        eval_result = service.evaluate_alerts(dispatch=dispatch)
+        raw_alerts = cast(list[dict[str, Any]], eval_result.get("alerts", []))
+        webhook_configured = bool(eval_result.get("webhook_configured", False))
+        service_up = True
+    else:
+        evaluator = AlertEvaluator()
+        evaluator.evaluate(collect_service_metric_families(None))
+        raw_alerts = evaluator.states()
+        webhook_configured = False
+        service_up = False
+
+    displayed_alerts = raw_alerts
+    if firing_only:
+        displayed_alerts = [a for a in displayed_alerts if a.get("status") == "firing"]
+    if normalized_severity is not None:
+        displayed_alerts = [
+            a for a in displayed_alerts if a.get("severity") == normalized_severity
+        ]
+
+    critical_firing = [
+        a
+        for a in raw_alerts
+        if a.get("severity") == "critical" and a.get("status") == "firing"
+    ]
+
+    if normalized_format == "json":
+        payload = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "service_available": service_up,
+            "webhook_configured": webhook_configured,
+            "total_rules": len(raw_alerts),
+            "displayed_alerts": len(displayed_alerts),
+            "firing_count": sum(1 for a in raw_alerts if a.get("status") == "firing"),
+            "critical_firing_count": len(critical_firing),
+            "alerts": displayed_alerts,
+        }
+        typer.echo(json.dumps(payload, indent=2))
+    else:
+        typer.secho("Music Recommender Alert Status", bold=True)
+        service_label = "UP" if service_up else "DOWN (offline/unloaded)"
+        webhook_label = "Configured" if webhook_configured else "Not configured"
+        typer.echo(f"Service: {service_label} | Webhook: {webhook_label}")
+        typer.echo("-" * 88)
+        typer.echo(
+            f"{'ALERT':<30} {'SEVERITY':<10} {'STATUS':<10} {'VALUE':<10} {'SUMMARY'}"
+        )
+        typer.echo("-" * 88)
+        for a in displayed_alerts:
+            name = str(a.get("alert", ""))
+            sev = str(a.get("severity", ""))
+            stat = str(a.get("status", ""))
+            obs = a.get("observed_value")
+            val_str = f"{obs:.2f}" if isinstance(obs, (int, float)) else "-"
+            summary_text = str(a.get("summary", ""))
+            color = (
+                typer.colors.RED
+                if stat == "firing"
+                else (typer.colors.YELLOW if stat == "pending" else typer.colors.GREEN)
+            )
+            typer.echo(f"{name:<30} {sev:<10} ", nl=False)
+            typer.secho(f"{stat:<10}", fg=color, bold=True, nl=False)
+            typer.echo(f" {val_str:<10} {summary_text}")
+        typer.echo("-" * 88)
+        total_firing = sum(1 for a in raw_alerts if a.get("status") == "firing")
+        summary_msg = (
+            f"Total: {len(raw_alerts)} | "
+            f"Firing: {total_firing} | "
+            f"Critical Firing: {len(critical_firing)}"
+        )
+        summary_color = typer.colors.RED if critical_firing else typer.colors.GREEN
+        typer.secho(summary_msg, fg=summary_color, bold=True)
+
+    if fail_on_critical and critical_firing:
+        count = len(critical_firing)
+        typer.secho(
+            f"Failing with exit code 1 due to {count} firing critical alert(s).",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+
+@app.command("test-alert")
+def test_alert_cmd(
+    webhook_url: Annotated[
+        str | None,
+        typer.Option(
+            "--webhook-url",
+            "-u",
+            help="Target webhook URL for test alert delivery.",
+        ),
+    ] = None,
+    alert_name: Annotated[
+        str,
+        typer.Option(
+            "--alert-name",
+            help="Synthetic alert rule name.",
+        ),
+    ] = "TestAlert",
+    severity: Annotated[
+        str,
+        typer.Option(
+            "--severity",
+            "-s",
+            help="Alert severity: 'critical' or 'warning'.",
+        ),
+    ] = "warning",
+    status: Annotated[
+        str,
+        typer.Option(
+            "--status",
+            help="Alert status: 'firing' or 'resolved'.",
+        ),
+    ] = "firing",
+    summary: Annotated[
+        str,
+        typer.Option(
+            "--summary",
+            help="Alert summary description.",
+        ),
+    ] = "Synthetic test alert dispatched from music-recommender CLI.",
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Format and display synthetic alert payload without sending.",
+        ),
+    ] = False,
+) -> None:
+    """Send a synthetic alert notification to verify webhook connectivity."""
+    normalized_severity = severity.lower().strip()
+    if normalized_severity not in ("critical", "warning"):
+        typer.secho(
+            "Severity must be 'critical' or 'warning'.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    normalized_status = status.lower().strip()
+    if normalized_status not in ("firing", "resolved"):
+        typer.secho(
+            "Status must be 'firing' or 'resolved'.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    target_url = webhook_url or os.getenv(ALERT_WEBHOOK_URL_ENV_VAR)
+    if not target_url and not dry_run:
+        err_msg = (
+            "No webhook URL provided. Use --webhook-url or set "
+            f"{ALERT_WEBHOOK_URL_ENV_VAR}."
+        )
+        typer.secho(err_msg, fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    rule = AlertRule(
+        name=alert_name,
+        metric="music_recommender_test_metric",
+        comparator=">",
+        threshold=0.0,
+        severity=AlertSeverity(normalized_severity),
+        summary=summary,
+    )
+    transition = AlertTransition(
+        rule=rule,
+        event=normalized_status,
+        value=1.0,
+        timestamp=datetime.now(UTC).isoformat(),
+    )
+
+    payload = transition.to_dict()
+
+    if dry_run:
+        typer.secho(
+            "Dry-run mode: test alert payload formatted but not dispatched.",
+            bold=True,
+        )
+        if target_url:
+            typer.echo(f"Configured target: {target_url}")
+        typer.echo(json.dumps(payload, indent=2))
+        return
+
+    dispatcher = WebhookDispatcher(
+        url=str(target_url),
+        timeout_seconds=5.0,
+        max_attempts=1,
+    )
+    delivered = dispatcher.dispatch([transition])
+    if delivered > 0:
+        typer.secho(
+            f"Test alert '{alert_name}' ({normalized_status}) successfully "
+            f"dispatched to {target_url}.",
+            fg=typer.colors.GREEN,
+            bold=True,
+        )
+    else:
+        typer.secho(
+            f"Failed to dispatch test alert '{alert_name}' to {target_url}.",
+            fg=typer.colors.RED,
+            err=True,
+        )
         raise typer.Exit(code=1)
 
 
