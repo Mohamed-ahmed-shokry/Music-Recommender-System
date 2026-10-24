@@ -3,7 +3,27 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.33.0) — shipped (branch `phase/149-alertmanager-routing`, draft PR #21)
+## Current milestone (0.34.0) — in progress (branch `phase/154-alertmanager-webhook-receiver`)
+
+Alertmanager Webhook Ingestion, Alert History, and Operator Audit Tooling.
+The 0.33.0 release connected Prometheus alerting rules to Alertmanager with multi-tier routing
+and storm inhibition. This milestone closes the loop by providing the receiver endpoint
+`POST /alerts/webhook` and history endpoint `GET /alerts/history` in FastAPI, an in-memory
+ring-buffer history with audit logging, operator CLI tooling (`alert-history`), and dashboard
+alert notification history visibility.
+
+- Phase 154 — Webhook ingestion data structures:
+  `ReceivedAlertEvent`, `parse_alert_payload`, and thread-safe `AlertHistoryBuffer` in `alerting.py`.
+- Phase 155 — FastAPI webhook & history endpoints:
+  `POST /alerts/webhook` and `GET /alerts/history` in `api/main.py`.
+- Phase 156 — Service integration:
+  Attach `alert_history` buffer to `RecommenderService`.
+- Phase 157 — Operator CLI & dashboard visibility:
+  `alert-history` command in `cli.py` and recent alerts expander in `dashboard.py`.
+- Phase 158 — Integration tests, docs, and 0.34.0 release:
+  API and CLI tests, documentation, version bump to 0.34.0, clean CI.
+
+## Previous milestone (0.33.0) — shipped (branch `phase/149-alertmanager-routing`, draft PR #21)
 
 Alertmanager Multi-Tier Routing, Operator Alert CLI, and Dashboard Alert Monitoring.
 The 0.30.0 release declared Prometheus alerting rules and basic webhook dispatch,
