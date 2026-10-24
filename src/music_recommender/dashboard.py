@@ -1445,6 +1445,44 @@ def render_dashboard(service: RecommenderService) -> None:
         st.write(f"Training device `{service.artifact.metadata['training_device']}`")
         st.caption("Controls are applied locally against the cached artifact.")
 
+        st.divider()
+        st.subheader("Alerting & Health")
+        alert_states = (
+            service.alert_states()
+            if hasattr(service, "alert_states")
+            else []
+        )
+        firing_alerts = [a for a in alert_states if a.get("status") == "firing"]
+        if not firing_alerts:
+            st.success("All alert rules normal (0 firing)")
+        else:
+            crit_count = sum(
+                1 for a in firing_alerts if a.get("severity") == "critical"
+            )
+            if crit_count > 0:
+                st.error(
+                    f"{len(firing_alerts)} alert(s) firing ({crit_count} critical)"
+                )
+            else:
+                st.warning(f"{len(firing_alerts)} alert(s) firing")
+
+        with st.expander("Alert Rules & States", expanded=bool(firing_alerts)):
+            if alert_states:
+                for a in alert_states:
+                    name = a.get("alert", "Rule")
+                    stat = a.get("status", "inactive")
+                    sev = a.get("severity", "warning")
+                    summary = a.get("summary", "")
+                    badge = (
+                        "🔴"
+                        if stat == "firing"
+                        else ("🟡" if stat == "pending" else "🟢")
+                    )
+                    st.write(f"{badge} **{name}** (`{sev}`): {stat}")
+                    st.caption(summary)
+            else:
+                st.caption("No alert rules configured.")
+
     tabs = st.tabs(
         [
             "For You",
