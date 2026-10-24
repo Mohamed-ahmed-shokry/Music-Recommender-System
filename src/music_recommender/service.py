@@ -13,7 +13,11 @@ from typing import Any, Literal, cast
 
 import numpy as np
 
-from music_recommender.alerting import AlertEvaluator, WebhookDispatcher
+from music_recommender.alerting import (
+    AlertEvaluator,
+    AlertHistoryBuffer,
+    WebhookDispatcher,
+)
 from music_recommender.artifacts import RecommenderArtifact, load_artifact
 from music_recommender.bandit import (
     SUPPORTED_BANDIT_POLICIES,
@@ -152,6 +156,7 @@ class RecommenderService:
         drift_thresholds: DriftSafetyThresholds | None = None,
         alert_webhook_url: str | None = None,
         alert_evaluator: AlertEvaluator | None = None,
+        alert_history: AlertHistoryBuffer | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -419,6 +424,7 @@ class RecommenderService:
             self.maintenance_worker = None
 
         self.alert_evaluator = alert_evaluator or AlertEvaluator()
+        self.alert_history = alert_history or AlertHistoryBuffer()
         webhook_url = alert_webhook_url
         if webhook_url is None:
             webhook_url = os.getenv(ALERT_WEBHOOK_URL_ENV_VAR) or None
@@ -804,6 +810,23 @@ class RecommenderService:
     def alert_states(self) -> list[dict[str, Any]]:
         """Return the current evaluation state for each configured alert rule."""
         return self.alert_evaluator.states()
+
+    def get_alert_history(
+        self,
+        *,
+        limit: int = 50,
+        channel: str | None = None,
+        status: str | None = None,
+        severity: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return recently received alert notifications matching criteria."""
+        events = self.alert_history.get_events(
+            limit=limit,
+            channel=channel,
+            status=status,
+            severity=severity,
+        )
+        return [e.to_dict() for e in events]
 
     def export_prometheus_metrics(
         self,
