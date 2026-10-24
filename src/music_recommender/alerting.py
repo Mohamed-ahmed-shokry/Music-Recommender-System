@@ -280,6 +280,135 @@ class AlertState:
         }
 
 
+@dataclass(frozen=True)
+class ReceivedAlertEvent:
+    """An alert notification received by the webhook receiver."""
+
+    alertname: str
+    status: str
+    severity: str
+    summary: str
+    channel: str | None = None
+    metric: str | None = None
+    labels: dict[str, str] = field(default_factory=dict)
+    value: float | None = None
+    starts_at: str | None = None
+    ends_at: str | None = None
+    received_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dictionary."""
+        return {
+            "alertname": self.alertname,
+            "status": self.status,
+            "severity": self.severity,
+            "summary": self.summary,
+            "channel": self.channel,
+            "metric": self.metric,
+            "labels": dict(self.labels),
+            "value": self.value,
+            "starts_at": self.starts_at,
+            "ends_at": self.ends_at,
+            "received_at": self.received_at,
+        }
+
+
+def parse_alert_payload(
+    payload: Mapping[str, Any],
+    channel: str | None = None,
+) -> list[ReceivedAlertEvent]:
+    """Parse Alertmanager v4 JSON or single AlertTransition payloads."""
+    events: list[ReceivedAlertEvent] = []
+    raw_alerts = payload.get("alerts")
+    if isinstance(raw_alerts, list) and raw_alerts:
+        common_labels = payload.get("commonLabels")
+        common_annotations = payload.get("commonAnnotations")
+        c_labels = common_labels if isinstance(common_labels, dict) else {}
+        c_annos = common_annotations if isinstance(common_annotations, dict) else {}
+        for item in raw_alerts:
+            if not isinstance(item, dict):
+                continue
+            labels = item.get("labels")
+            annos = item.get("annotations")
+            i_labels = labels if isinstance(labels, dict) else {}
+            i_annos = annos if isinstance(annos, dict) else {}
+            merged_labels: dict[str, str] = {
+                str(k): str(v) for k, v in {**c_labels, **i_labels}.items()
+            }
+            alertname = (
+                i_labels.get("alertname")
+                or item.get("alert")
+                or c_labels.get("alertname")
+                or "UnknownAlert"
+            )
+            status = str(item.get("status") or payload.get("status") or "firing")
+            severity = str(
+                merged_labels.get("severity")
+                or (channel if channel in ("critical", "warning") else "warning")
+            )
+            summary = str(
+                i_annos.get("summary")
+                or c_annos.get("summary")
+                or item.get("summary")
+                or ""
+            )
+            metric = merged_labels.get("metric") or item.get("metric")
+            raw_val = item.get("value")
+            val: float | None = None
+            if isinstance(raw_val, (int, float)):
+                val = float(raw_val)
+            starts_at = item.get("startsAt")
+            ends_at = item.get("endsAt")
+            events.append(
+                ReceivedAlertEvent(
+                    alertname=str(alertname),
+                    status=status,
+                    severity=severity,
+                    summary=summary,
+                    channel=channel,
+                    metric=str(metric) if metric else None,
+                    labels=merged_labels,
+                    value=val,
+                    starts_at=str(starts_at) if starts_at else None,
+                    ends_at=str(ends_at) if ends_at else None,
+                )
+            )
+    else:
+        alertname = str(
+            payload.get("alert") or payload.get("alertname") or "UnknownAlert"
+        )
+        status = str(payload.get("event") or payload.get("status") or "firing")
+        raw_sev = payload.get("severity")
+        severity = str(
+            raw_sev or (channel if channel in ("critical", "warning") else "warning")
+        )
+        summary = str(payload.get("summary") or "")
+        metric = payload.get("metric")
+        raw_labels = payload.get("labels")
+        single_labels: dict[str, str] = (
+            {str(k): str(v) for k, v in raw_labels.items()}
+            if isinstance(raw_labels, dict)
+            else {}
+        )
+        raw_val = payload.get("value")
+        val = float(raw_val) if isinstance(raw_val, (int, float)) else None
+        starts_at = payload.get("timestamp")
+        events.append(
+            ReceivedAlertEvent(
+                alertname=alertname,
+                status=status,
+                severity=severity,
+                summary=summary,
+                channel=channel,
+                metric=str(metric) if metric else None,
+                labels=single_labels,
+                value=val,
+                starts_at=str(starts_at) if starts_at else None,
+            )
+        )
+    return events
+
+
 def lookup_metric_value(
     families: Sequence[MetricFamily],
     metric: str,
