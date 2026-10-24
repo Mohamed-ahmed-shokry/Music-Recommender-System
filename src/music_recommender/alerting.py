@@ -512,6 +512,80 @@ def render_prometheus_rules(
     return "\n".join(lines) + "\n"
 
 
+def render_alertmanager_config(
+    config: AlertmanagerConfig | None = None,
+) -> str:
+    """Render Prometheus Alertmanager configuration YAML."""
+    cfg = config or AlertmanagerConfig()
+    crit_url = cfg.critical_webhook_url or f"{cfg.default_webhook_url}?channel=critical"
+    warn_url = cfg.warning_webhook_url or f"{cfg.default_webhook_url}?channel=warning"
+
+    lines = [
+        "# Prometheus Alertmanager configuration for the Music Recommender System.",
+        "# GENERATED from music_recommender.alerting.render_alertmanager_config.",
+        "# Regenerate with:",
+        "#   uv run python -m music_recommender.alerting \\",
+        "#     --alertmanager configs/alertmanager.yml",
+        "global:",
+        f"  resolve_timeout: {cfg.resolve_timeout}",
+        "",
+        "route:",
+        "  group_by:",
+        "    - alertname",
+        "    - severity",
+        f"  group_wait: {cfg.group_wait}",
+        f"  group_interval: {cfg.group_interval}",
+        f"  repeat_interval: {cfg.warning_repeat_interval}",
+        "  receiver: default-webhook",
+        "  routes:",
+        "    - match:",
+        "        severity: critical",
+        "      receiver: critical-webhook",
+        f"      group_wait: {cfg.critical_group_wait}",
+        f"      repeat_interval: {cfg.critical_repeat_interval}",
+        "    - match:",
+        "        severity: warning",
+        "      receiver: warning-webhook",
+        f"      group_wait: {cfg.warning_group_wait}",
+        f"      repeat_interval: {cfg.warning_repeat_interval}",
+        "",
+        "inhibit_rules:",
+    ]
+
+    if cfg.inhibit_warning_on_service_down:
+        lines.extend(
+            [
+                "  - source_match:",
+                "      alertname: ServiceDown",
+                "    target_match:",
+                "      severity: warning",
+                "    equal: []",
+            ]
+        )
+    else:
+        lines.append("  []")
+
+    lines.extend(
+        [
+            "",
+            "receivers:",
+            "  - name: default-webhook",
+            "    webhook_configs:",
+            f"      - url: {cfg.default_webhook_url}",
+            "        send_resolved: true",
+            "  - name: critical-webhook",
+            "    webhook_configs:",
+            f"      - url: {crit_url}",
+            "        send_resolved: true",
+            "  - name: warning-webhook",
+            "    webhook_configs:",
+            f"      - url: {warn_url}",
+            "        send_resolved: true",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Write the generated rule file to PATH (or stdout when omitted)."""
     import sys
