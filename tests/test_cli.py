@@ -3412,3 +3412,123 @@ def test_maintenance_daemon_writes_heartbeat(
     data = json.loads(heartbeat.read_text(encoding="utf-8"))
     assert data["running"] is True
     assert data["is_running"] is True
+
+
+def test_check_alerts_table_format() -> None:
+    res = runner.invoke(cli.app, ["check-alerts"])
+    assert res.exit_code == 0
+    assert "Music Recommender Alert Status" in res.output
+    assert "ServiceDown" in res.output
+    assert "StreamingHealthUnhealthy" in res.output
+
+
+def test_check_alerts_json_format() -> None:
+    res = runner.invoke(cli.app, ["check-alerts", "--format", "json"])
+    assert res.exit_code == 0
+    data = json.loads(res.output)
+    assert data["total_rules"] == 10
+    assert data["service_available"] is True
+    assert len(data["alerts"]) == 10
+
+
+def test_check_alerts_filters_and_validation() -> None:
+    res_crit = runner.invoke(
+        cli.app, ["check-alerts", "--severity", "critical", "--format", "json"]
+    )
+    assert res_crit.exit_code == 0
+    data_crit = json.loads(res_crit.output)
+    assert all(a["severity"] == "critical" for a in data_crit["alerts"])
+
+    res_firing = runner.invoke(cli.app, ["check-alerts", "--firing-only"])
+    assert res_firing.exit_code == 0
+
+    res_inv_fmt = runner.invoke(cli.app, ["check-alerts", "--format", "yaml"])
+    assert res_inv_fmt.exit_code == 2
+
+    res_inv_sev = runner.invoke(cli.app, ["check-alerts", "--severity", "emergency"])
+    assert res_inv_sev.exit_code == 2
+
+
+def test_check_alerts_fail_on_critical_when_offline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_offline() -> None:
+        raise FileNotFoundError("Artifact bundle not found")
+
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(raise_offline),
+    )
+
+    res = runner.invoke(cli.app, ["check-alerts", "--fail-on-critical"])
+    assert res.exit_code == 1
+    assert "ServiceDown" in res.output
+    assert "Failing with exit code 1" in res.output
+
+
+def test_test_alert_dry_run() -> None:
+    res = runner.invoke(
+        cli.app,
+        [
+            "test-alert",
+            "--dry-run",
+            "--alert-name",
+            "CustomTestAlert",
+            "--severity",
+            "critical",
+        ],
+    )
+    assert res.exit_code == 0
+    assert "Dry-run mode" in res.output
+    assert '"alert": "CustomTestAlert"' in res.output
+    assert '"severity": "critical"' in res.output
+
+
+def test_test_alert_missing_webhook_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MUSIC_RECOMMENDER_ALERT_WEBHOOK_URL", raising=False)
+    res = runner.invoke(cli.app, ["test-alert"])
+    assert res.exit_code == 1
+    assert "No webhook URL provided" in res.output
+
+
+def test_test_alert_invalid_options() -> None:
+    res_sev = runner.invoke(cli.app, ["test-alert", "--severity", "fatal"])
+    assert res_sev.exit_code == 2
+
+    res_stat = runner.invoke(cli.app, ["test-alert", "--status", "unknown"])
+    assert res_stat.exit_code == 2
+
+
+def test_test_alert_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    def mock_dispatch_success(self: Any, transitions: Any) -> int:
+        return 1
+
+    monkeypatch.setattr(
+        cli.WebhookDispatcher,
+        "dispatch",
+        mock_dispatch_success,
+    )
+
+    res_ok = runner.invoke(
+        cli.app,
+        ["test-alert", "--webhook-url", "http://localhost:8000/hook"],
+    )
+    assert res_ok.exit_code == 0
+    assert "successfully dispatched" in res_ok.output
+
+    def mock_dispatch_failure(self: Any, transitions: Any) -> int:
+        return 0
+
+    monkeypatch.setattr(
+        cli.WebhookDispatcher,
+        "dispatch",
+        mock_dispatch_failure,
+    )
+
+    res_fail = runner.invoke(
+        cli.app,
+        ["test-alert", "--webhook-url", "http://localhost:8000/hook"],
+    )
+    assert res_fail.exit_code == 1
+    assert "Failed to dispatch" in res_fail.output
