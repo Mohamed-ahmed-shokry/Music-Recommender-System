@@ -3,7 +3,28 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.32.0) — shipped (branch `phase/144-maintenance-hardening`, draft PR #20)
+## Current milestone (0.33.0) — in progress (branch `phase/149-alertmanager-routing`)
+
+Alertmanager Multi-Tier Routing, Operator Alert CLI, and Dashboard Alert Monitoring.
+The 0.30.0 release declared Prometheus alerting rules and basic webhook dispatch,
+and 0.32.0 hardened daemon operational health. This milestone connects the alerting
+architecture to Prometheus Alertmanager, adds inhibition rules to prevent alert storms,
+supplies operator CLI tooling for alert inspection and synthetic verification, surfaces
+real-time alert health in the Streamlit dashboard, and releases 0.33.0 with 100% green CI.
+
+- Phase 149 — Alertmanager configuration generator & inhibition rules:
+  `render_alertmanager_config` generates multi-tier routing (critical vs warning) and
+  storm-prevention inhibition rules; shipped in `configs/alertmanager.yml`.
+- Phase 150 — Prometheus Alertmanager wiring & Docker Compose:
+  Configure Alertmanager in `configs/prometheus.yml` and add `alertmanager` service in `compose.yaml`.
+- Phase 151 — Operator Alert CLI:
+  Add `check-alerts` and `test-alert` commands to `src/music_recommender/cli.py`.
+- Phase 152 — Dashboard alert health monitoring:
+  Sidebar alert badge and dedicated alert status section in `src/music_recommender/dashboard.py`.
+- Phase 153 — Comprehensive integration tests, docs, and 0.33.0 release:
+  Alertmanager and CLI tests, README/CHANGELOG updates, version bump to 0.33.0, clean CI.
+
+## Previous milestone (0.32.0) — shipped (branch `phase/144-maintenance-hardening`, draft PR #20)
 
 Maintenance daemon operational hardening. The 0.31.0 release exposed the
 `BanditMaintenanceWorker` through CLI, API, and Docker Compose, but the compose
