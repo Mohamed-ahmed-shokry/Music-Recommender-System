@@ -525,6 +525,26 @@ class FakeDashboardService:
             ],
         }
 
+    def alert_states(self) -> list[dict[str, Any]]:
+        return getattr(
+            self,
+            "_fake_alert_states",
+            [
+                {
+                    "alert": "ServiceDown",
+                    "status": "inactive",
+                    "severity": "critical",
+                    "summary": "Recommender service is unavailable.",
+                },
+                {
+                    "alert": "StreamingHealthDegraded",
+                    "status": "inactive",
+                    "severity": "warning",
+                    "summary": "Streaming feedback pipeline health is degraded.",
+                },
+            ],
+        )
+
 
 def dashboard_script(service) -> None:
     from music_recommender.dashboard import render_dashboard
@@ -1643,3 +1663,43 @@ def test_dashboard_bandit_tab_ope_confidence_intervals() -> None:
     assert dr_row["95% CI"] == "[0.6500, 0.8100]"
     snips_row = ope_df[ope_df["Estimator"] == "Self-Normalized (SnIPS)"].iloc[0]
     assert snips_row["95% CI"] == "-"
+
+
+def test_dashboard_sidebar_alert_health_normal() -> None:
+    service = FakeDashboardService()
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("All alert rules normal (0 firing)" in s.value for s in app.success)
+    assert any("ServiceDown" in m.value for m in app.markdown)
+
+
+def test_dashboard_sidebar_alert_health_firing() -> None:
+    service = FakeDashboardService()
+    service._fake_alert_states = [
+        {
+            "alert": "ServiceDown",
+            "status": "firing",
+            "severity": "critical",
+            "summary": "Service is unavailable.",
+        },
+        {
+            "alert": "MaintenanceWorkerStopped",
+            "status": "firing",
+            "severity": "warning",
+            "summary": "Maintenance worker stopped.",
+        },
+    ]
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("2 alert(s) firing (1 critical)" in e.value for e in app.error)
+    assert any("ServiceDown" in m.value for m in app.markdown)
