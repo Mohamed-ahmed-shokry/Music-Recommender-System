@@ -57,19 +57,19 @@ Complete the production alerting pipeline by delivering multi-tier Alertmanager 
 - Custom Alertmanager clustering mesh across multi-node networks (out of single-node compose scope).
 
 ### 6. Micro-Task Breakdown
-- [ ] Task 1: Initialize Phase 149 roadmap, plan, and progress record.
-- [ ] Task 2: Implement Alertmanager configuration generator and inhibition models in `src/music_recommender/alerting.py`.
-- [ ] Task 3: Add unit tests for Alertmanager config generator and CLI in `tests/test_alerting.py`.
-- [ ] Task 4: Ship `configs/alertmanager.yml` and wire Alertmanager into `configs/prometheus.yml` and `compose.yaml`.
-- [ ] Task 5: Implement `check-alerts` command in `src/music_recommender/cli.py`.
-- [ ] Task 6: Implement `test-alert` command in `src/music_recommender/cli.py`.
-- [ ] Task 7: Add unit tests for `check-alerts` and `test-alert` in `tests/test_cli.py`.
-- [ ] Task 8: Add alert health status and overview in `src/music_recommender/dashboard.py`.
-- [ ] Task 9: Add dashboard alert tests in `tests/test_dashboard.py`.
-- [ ] Task 10: Add Alertmanager integration tests in `tests/test_observability_integration.py`.
-- [ ] Task 11: Update documentation in `README.md` and `CHANGELOG.md`.
-- [ ] Task 12: Bump package version to `0.33.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
-- [ ] Task 13: Final CI-parity check, push, open draft PR, monitor remote CI to 100% green.
+- [x] Task 1: Initialize Phase 149 roadmap, plan, and progress record.
+- [x] Task 2: Implement Alertmanager configuration generator and inhibition models in `src/music_recommender/alerting.py`.
+- [x] Task 3: Add unit tests for Alertmanager config generator and CLI in `tests/test_alerting.py`.
+- [x] Task 4: Ship `configs/alertmanager.yml` and wire Alertmanager into `configs/prometheus.yml` and `compose.yaml`.
+- [x] Task 5: Implement `check-alerts` command in `src/music_recommender/cli.py`.
+- [x] Task 6: Implement `test-alert` command in `src/music_recommender/cli.py`.
+- [x] Task 7: Add unit tests for `check-alerts` and `test-alert` in `tests/test_cli.py`.
+- [x] Task 8: Add alert health status and overview in `src/music_recommender/dashboard.py`.
+- [x] Task 9: Add dashboard alert tests in `tests/test_dashboard.py`.
+- [x] Task 10: Add Alertmanager integration tests in `tests/test_observability_integration.py`.
+- [x] Task 11: Update documentation in `README.md` and `CHANGELOG.md`.
+- [x] Task 12: Bump package version to `0.33.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [x] Task 13: Final CI-parity check, push, open draft PR, monitor remote CI to 100% green.
 
 ---
 
