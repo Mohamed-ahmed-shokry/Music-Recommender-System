@@ -5,6 +5,28 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] - 2026-10-24
+
+### Added
+
+- **Alertmanager Multi-Tier Routing & Storm Inhibition (Phase 149):**
+  - Multi-tier alert routing generator `render_alertmanager_config` and `AlertmanagerConfig` in `src/music_recommender/alerting.py` routing alerts by severity (`critical` with 1h repeat interval vs `warning` with 4h repeat interval).
+  - Storm-prevention inhibition rules preventing warning alert spam when root-cause `ServiceDown` alert is actively firing.
+  - Pre-generated configuration shipped at `configs/alertmanager.yml`, with CLI generator mode via `python -m music_recommender.alerting --alertmanager [PATH]`.
+  - Configured Alertmanager target `alertmanager:9093` in `configs/prometheus.yml`.
+  - Added `alertmanager` service to `compose.yaml` under the `observability` profile.
+- **Operator Alert CLI Tooling:**
+  - `music-recommender check-alerts`: evaluates alert rules against live or offline metrics, formatted as interactive status tables or structured JSON (`--format json`), with filters (`--firing-only`, `--severity`), and automated health gate exit codes (`--fail-on-critical`).
+  - `music-recommender test-alert`: dispatches synthetic test alert notifications to verify webhook receiver connectivity, with `--dry-run` inspection mode.
+- **Dashboard Alert Monitoring:**
+  - Real-time alert status banner in the Streamlit sidebar (green when 0 firing, warning/error banner when firing).
+  - Collapsible expander detailing active alert rules, severity badges, and current evaluation status.
+- **Comprehensive Verification Suite:**
+  - Unit tests for Alertmanager configuration generation, inhibition rules, and CLI generator flag in `tests/test_alerting.py`.
+  - CLI tests for `check-alerts` and `test-alert` options, output formats, and error exits in `tests/test_cli.py`.
+  - Dashboard alert rendering tests for healthy and firing states in `tests/test_dashboard.py`.
+  - Observability integration tests validating YAML schemas and compose dependencies in `tests/test_observability_integration.py`.
+
 ## [0.32.0] - 2026-10-22
 
 ### Fixed

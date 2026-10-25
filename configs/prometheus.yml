@@ -9,6 +9,11 @@ global:
 rule_files:
   - "alert-rules.yml"
 
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   - job_name: "music_recommender"
     scrape_interval: 10s

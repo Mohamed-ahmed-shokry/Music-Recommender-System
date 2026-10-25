@@ -801,6 +801,10 @@ class RecommenderService:
             "notifications_delivered": delivered,
         }
 
+    def alert_states(self) -> list[dict[str, Any]]:
+        """Return the current evaluation state for each configured alert rule."""
+        return self.alert_evaluator.states()
+
     def export_prometheus_metrics(
         self,
         *,

@@ -462,6 +462,26 @@ def _promql_expression(rule: AlertRule) -> str:
     return f"{selector} {rule.comparator} {_format_number(rule.threshold)}"
 
 
+DEFAULT_ALERTMANAGER_WEBHOOK_URL = "http://api:8000/alerts/webhook"
+
+
+@dataclass(frozen=True)
+class AlertmanagerConfig:
+    """Configuration for Prometheus Alertmanager routing and receivers."""
+
+    default_webhook_url: str = DEFAULT_ALERTMANAGER_WEBHOOK_URL
+    critical_webhook_url: str | None = None
+    warning_webhook_url: str | None = None
+    resolve_timeout: str = "5m"
+    group_wait: str = "10s"
+    group_interval: str = "30s"
+    critical_group_wait: str = "5s"
+    critical_repeat_interval: str = "1h"
+    warning_group_wait: str = "30s"
+    warning_repeat_interval: str = "4h"
+    inhibit_warning_on_service_down: bool = True
+
+
 def render_prometheus_rules(
     rules: Sequence[AlertRule] = DEFAULT_ALERT_RULES,
     *,
@@ -492,16 +512,100 @@ def render_prometheus_rules(
     return "\n".join(lines) + "\n"
 
 
+def render_alertmanager_config(
+    config: AlertmanagerConfig | None = None,
+) -> str:
+    """Render Prometheus Alertmanager configuration YAML."""
+    cfg = config or AlertmanagerConfig()
+    crit_url = cfg.critical_webhook_url or f"{cfg.default_webhook_url}?channel=critical"
+    warn_url = cfg.warning_webhook_url or f"{cfg.default_webhook_url}?channel=warning"
+
+    lines = [
+        "# Prometheus Alertmanager configuration for the Music Recommender System.",
+        "# GENERATED from music_recommender.alerting.render_alertmanager_config.",
+        "# Regenerate with:",
+        "#   uv run python -m music_recommender.alerting \\",
+        "#     --alertmanager configs/alertmanager.yml",
+        "global:",
+        f"  resolve_timeout: {cfg.resolve_timeout}",
+        "",
+        "route:",
+        "  group_by:",
+        "    - alertname",
+        "    - severity",
+        f"  group_wait: {cfg.group_wait}",
+        f"  group_interval: {cfg.group_interval}",
+        f"  repeat_interval: {cfg.warning_repeat_interval}",
+        "  receiver: default-webhook",
+        "  routes:",
+        "    - match:",
+        "        severity: critical",
+        "      receiver: critical-webhook",
+        f"      group_wait: {cfg.critical_group_wait}",
+        f"      repeat_interval: {cfg.critical_repeat_interval}",
+        "    - match:",
+        "        severity: warning",
+        "      receiver: warning-webhook",
+        f"      group_wait: {cfg.warning_group_wait}",
+        f"      repeat_interval: {cfg.warning_repeat_interval}",
+        "",
+        "inhibit_rules:",
+    ]
+
+    if cfg.inhibit_warning_on_service_down:
+        lines.extend(
+            [
+                "  - source_match:",
+                "      alertname: ServiceDown",
+                "    target_match:",
+                "      severity: warning",
+                "    equal: []",
+            ]
+        )
+    else:
+        lines.append("  []")
+
+    lines.extend(
+        [
+            "",
+            "receivers:",
+            "  - name: default-webhook",
+            "    webhook_configs:",
+            f"      - url: {cfg.default_webhook_url}",
+            "        send_resolved: true",
+            "  - name: critical-webhook",
+            "    webhook_configs:",
+            f"      - url: {crit_url}",
+            "        send_resolved: true",
+            "  - name: warning-webhook",
+            "    webhook_configs:",
+            f"      - url: {warn_url}",
+            "        send_resolved: true",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    """Write the generated rule file to PATH (or stdout when omitted)."""
+    """Write generated Prometheus rules or Alertmanager config to PATH or stdout."""
     import sys
     from pathlib import Path
 
     args = list(sys.argv[1:] if argv is None else argv)
+    is_alertmanager = False
+    if "--alertmanager" in args:
+        is_alertmanager = True
+        args.remove("--alertmanager")
+
     if len(args) > 1:
-        sys.stderr.write("usage: python -m music_recommender.alerting [PATH]\n")
+        sys.stderr.write(
+            "usage: python -m music_recommender.alerting [--alertmanager] [PATH]\n"
+        )
         return 2
-    text = render_prometheus_rules()
+
+    text = (
+        render_alertmanager_config() if is_alertmanager else render_prometheus_rules()
+    )
     if args:
         Path(args[0]).write_text(text, encoding="utf-8", newline="\n")
     else:

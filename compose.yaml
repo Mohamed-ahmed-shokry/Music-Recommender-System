@@ -83,6 +83,21 @@ services:
     profiles:
       - maintenance
 
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./configs/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    depends_on:
+      - api
+    profiles:
+      - observability
+
   prometheus:
     image: prom/prometheus:v2.51.0
     restart: unless-stopped
@@ -97,6 +112,7 @@ services:
       - "--web.enable-lifecycle"
     depends_on:
       - api
+      - alertmanager
     profiles:
       - observability
 

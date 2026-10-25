@@ -1,0 +1,48 @@
+# Prometheus Alertmanager configuration for the Music Recommender System.
+# GENERATED from music_recommender.alerting.render_alertmanager_config.
+# Regenerate with:
+#   uv run python -m music_recommender.alerting \
+#     --alertmanager configs/alertmanager.yml
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by:
+    - alertname
+    - severity
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 4h
+  receiver: default-webhook
+  routes:
+    - match:
+        severity: critical
+      receiver: critical-webhook
+      group_wait: 5s
+      repeat_interval: 1h
+    - match:
+        severity: warning
+      receiver: warning-webhook
+      group_wait: 30s
+      repeat_interval: 4h
+
+inhibit_rules:
+  - source_match:
+      alertname: ServiceDown
+    target_match:
+      severity: warning
+    equal: []
+
+receivers:
+  - name: default-webhook
+    webhook_configs:
+      - url: http://api:8000/alerts/webhook
+        send_resolved: true
+  - name: critical-webhook
+    webhook_configs:
+      - url: http://api:8000/alerts/webhook?channel=critical
+        send_resolved: true
+  - name: warning-webhook
+    webhook_configs:
+      - url: http://api:8000/alerts/webhook?channel=warning
+        send_resolved: true
