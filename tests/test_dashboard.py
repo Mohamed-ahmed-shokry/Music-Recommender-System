@@ -545,6 +545,16 @@ class FakeDashboardService:
             ],
         )
 
+    def get_alert_history(
+        self,
+        *,
+        limit: int = 50,
+        channel: str | None = None,
+        status: str | None = None,
+        severity: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return getattr(self, "_fake_alert_history", [])
+
 
 def dashboard_script(service) -> None:
     from music_recommender.dashboard import render_dashboard
@@ -1703,3 +1713,25 @@ def test_dashboard_sidebar_alert_health_firing() -> None:
     assert not app.exception
     assert any("2 alert(s) firing (1 critical)" in e.value for e in app.error)
     assert any("ServiceDown" in m.value for m in app.markdown)
+
+
+def test_dashboard_sidebar_alert_history_rendering() -> None:
+    service = FakeDashboardService()
+    service._fake_alert_history = [
+        {
+            "alertname": "LatencyP99High",
+            "status": "firing",
+            "severity": "critical",
+            "channel": "alertmanager",
+            "summary": "P99 latency exceeded 500ms.",
+        }
+    ]
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("Recent Notifications" in m.value for m in app.markdown)
+    assert any("LatencyP99High" in m.value for m in app.markdown)

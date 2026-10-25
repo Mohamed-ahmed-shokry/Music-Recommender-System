@@ -4183,5 +4183,120 @@ def test_alert_cmd(
         raise typer.Exit(code=1)
 
 
+@app.command("alert-history")
+def alert_history_cmd(
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            "-n",
+            help="Maximum number of historical alert events to display.",
+            min=1,
+            max=100,
+        ),
+    ] = 20,
+    channel: Annotated[
+        str | None,
+        typer.Option(
+            "--channel",
+            "-c",
+            help="Filter alert events by channel ('critical', 'warning', etc.).",
+        ),
+    ] = None,
+    status: Annotated[
+        str | None,
+        typer.Option(
+            "--status",
+            "-s",
+            help="Filter alert events by status ('firing' or 'resolved').",
+        ),
+    ] = None,
+    severity: Annotated[
+        str | None,
+        typer.Option(
+            "--severity",
+            help="Filter alert events by severity ('critical' or 'warning').",
+        ),
+    ] = None,
+    format: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: 'table' or 'json'.",
+        ),
+    ] = "table",
+) -> None:
+    """View recent alert notifications received by the service."""
+    normalized_format = format.lower().strip()
+    if normalized_format not in ("table", "json"):
+        typer.secho("Format must be 'table' or 'json'.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable for alert history: %s", exc)
+        service = None
+
+    if service is not None:
+        events = service.get_alert_history(
+            limit=limit,
+            channel=channel,
+            status=status,
+            severity=severity,
+        )
+    else:
+        events = []
+
+    if normalized_format == "json":
+        payload = {
+            "total": len(events),
+            "limit": limit,
+            "channel_filter": channel,
+            "status_filter": status,
+            "severity_filter": severity,
+            "events": events,
+        }
+        typer.echo(json.dumps(payload, indent=2))
+        return
+
+    typer.secho("Recent Alert Notification History", bold=True)
+    filter_desc = []
+    if channel:
+        filter_desc.append(f"channel={channel}")
+    if status:
+        filter_desc.append(f"status={status}")
+    if severity:
+        filter_desc.append(f"severity={severity}")
+    filters_label = f" (filters: {', '.join(filter_desc)})" if filter_desc else ""
+    typer.echo(f"Showing up to {limit} event(s){filters_label}:")
+    typer.echo("-" * 96)
+    if not events:
+        typer.echo("No matching alert events found in history.")
+        typer.echo("-" * 96)
+        return
+
+    typer.echo(
+        f"{'TIMESTAMP':<24} {'ALERT':<26} {'STATUS':<10} {'SEVERITY':<10} "
+        f"{'CHANNEL':<10} {'SUMMARY'}"
+    )
+    typer.echo("-" * 96)
+    for e in events:
+        ts = str(e.get("received_at", ""))[:19]
+        name = str(e.get("alertname", ""))
+        st = str(e.get("status", ""))
+        sev = str(e.get("severity", ""))
+        ch = str(e.get("channel") or "default")
+        sum_text = str(e.get("summary", ""))
+        color = typer.colors.RED if st == "firing" else typer.colors.GREEN
+        typer.echo(f"{ts:<24} {name:<26} ", nl=False)
+        typer.secho(f"{st:<10}", fg=color, bold=True, nl=False)
+        typer.echo(f" {sev:<10} {ch:<10} {sum_text}")
+    typer.echo("-" * 96)
+    typer.secho(f"Total: {len(events)} event(s)", bold=True)
+
+
 if __name__ == "__main__":
     app()  # pragma: no cover - CLI entry point invoked by `python -m`

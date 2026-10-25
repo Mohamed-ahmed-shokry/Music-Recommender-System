@@ -3532,3 +3532,117 @@ def test_test_alert_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert res_fail.exit_code == 1
     assert "Failed to dispatch" in res_fail.output
+
+
+def test_alert_history_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_service = SimpleNamespace(
+        get_alert_history=lambda **_: [],
+    )
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(lambda: fake_service),
+    )
+
+    res = runner.invoke(cli.app, ["alert-history"])
+    assert res.exit_code == 0
+    assert "No matching alert events found in history." in res.output
+
+
+def test_alert_history_table_and_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_events = [
+        {
+            "alertname": "HighDriftAlert",
+            "status": "firing",
+            "severity": "critical",
+            "summary": "High drift in popularity feature",
+            "channel": "alertmanager",
+            "received_at": "2026-10-24T12:00:00Z",
+            "metric": "drift_score",
+            "value": 0.45,
+            "labels": {"service": "recommender"},
+        }
+    ]
+    fake_service = SimpleNamespace(
+        get_alert_history=lambda **_: fake_events,
+    )
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(lambda: fake_service),
+    )
+
+    # Test table output
+    res_table = runner.invoke(cli.app, ["alert-history"])
+    assert res_table.exit_code == 0
+    assert "HighDriftAlert" in res_table.output
+    assert "critical" in res_table.output
+    assert "alertmanager" in res_table.output
+
+    # Test json output
+    res_json = runner.invoke(cli.app, ["alert-history", "--format", "json"])
+    assert res_json.exit_code == 0
+    import json
+
+    parsed = json.loads(res_json.output)
+    assert parsed["total"] == 1
+    assert parsed["events"][0]["alertname"] == "HighDriftAlert"
+    assert parsed["events"][0]["channel"] == "alertmanager"
+
+
+def test_alert_history_filters_and_invalid_format(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called_kwargs: dict[str, Any] = {}
+
+    def fake_get_alert_history(**kwargs: Any) -> list[dict[str, Any]]:
+        called_kwargs.update(kwargs)
+        return []
+
+    fake_service = SimpleNamespace(
+        get_alert_history=fake_get_alert_history,
+    )
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(lambda: fake_service),
+    )
+
+    res_filt = runner.invoke(
+        cli.app,
+        [
+            "alert-history",
+            "--channel",
+            "alertmanager",
+            "--status",
+            "firing",
+            "--severity",
+            "critical",
+            "--limit",
+            "10",
+        ],
+    )
+    assert res_filt.exit_code == 0
+    assert called_kwargs == {
+        "limit": 10,
+        "channel": "alertmanager",
+        "status": "firing",
+        "severity": "critical",
+    }
+
+    res_invalid = runner.invoke(cli.app, ["alert-history", "--format", "xml"])
+    assert res_invalid.exit_code == 2
+
+
+def test_alert_history_service_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_service():
+        raise RuntimeError("Artifacts unavailable")
+
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(fail_service),
+    )
+    res = runner.invoke(cli.app, ["alert-history"])
+    assert res.exit_code == 0
+    assert "No matching alert events found in history." in res.output

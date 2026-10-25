@@ -8,7 +8,7 @@ from starlette.types import Message, Receive, Scope, Send
 
 import api.main as api_main
 from api.middleware import RequestSafetyMiddleware
-from music_recommender.alerting import AlertEvaluator
+from music_recommender.alerting import AlertEvaluator, AlertHistoryBuffer
 
 
 class FakeService:
@@ -19,6 +19,7 @@ class FakeService:
             "mean_popularity_rank",
         ]
         self.cold_start_policy: dict[str, float] = {"popular": 1.0}
+        self.alert_history = AlertHistoryBuffer()
         self.closed: bool = False
 
     def close(self, timeout: float | None = 5.0) -> None:
@@ -2469,3 +2470,118 @@ def test_alerts_route_delegates_to_service_and_honors_dispatch_flag() -> None:
         assert client.get("/alerts").json()["webhook_configured"] is True
         assert client.get("/alerts?dispatch=false").status_code == 200
         assert calls == [True, False]
+
+
+def test_alerts_webhook_and_history_alertmanager_payload() -> None:
+    api_main._fallback_alert_history.clear()
+    payload = {
+        "version": "4",
+        "status": "firing",
+        "commonLabels": {"cluster": "prod-1"},
+        "alerts": [
+            {
+                "status": "firing",
+                "labels": {
+                    "alertname": "ServiceDown",
+                    "severity": "critical",
+                },
+                "annotations": {"summary": "API service unreachable."},
+                "startsAt": "2026-10-24T10:00:00Z",
+            },
+            {
+                "status": "firing",
+                "labels": {
+                    "alertname": "StreamingHealthUnhealthy",
+                    "severity": "critical",
+                },
+                "annotations": {"summary": "Streaming pipeline unhealthy."},
+                "startsAt": "2026-10-24T10:01:00Z",
+            },
+        ],
+    }
+
+    with TestClient(api_main.app) as client:
+        orig = api_main.service
+        try:
+            api_main.service = None
+            res = client.post("/alerts/webhook?channel=critical", json=payload)
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "received"
+            assert data["count"] == 2
+            assert data["channel"] == "critical"
+            assert "ServiceDown" in data["alerts"]
+
+            # Query history
+            hist_res = client.get("/alerts/history")
+            assert hist_res.status_code == 200
+            hist = hist_res.json()
+            assert hist["total"] == 2
+            assert hist["events"][0]["alertname"] == "StreamingHealthUnhealthy"
+            assert hist["events"][1]["alertname"] == "ServiceDown"
+
+            # Filter by limit
+            lim_res = client.get("/alerts/history?limit=1")
+            assert lim_res.status_code == 200
+            assert lim_res.json()["total"] == 1
+
+            # Filter by channel
+            ch_res = client.get("/alerts/history?channel=critical")
+            assert ch_res.status_code == 200
+            assert ch_res.json()["total"] == 2
+
+            # Filter by non-existent channel
+            none_res = client.get("/alerts/history?channel=warning")
+            assert none_res.status_code == 200
+            assert none_res.json()["total"] == 0
+        finally:
+            api_main.service = orig
+
+
+def test_alerts_webhook_single_transition() -> None:
+    api_main._fallback_alert_history.clear()
+    payload = {
+        "alert": "MaintenanceWorkerStopped",
+        "event": "firing",
+        "severity": "warning",
+        "summary": "Worker stopped.",
+        "metric": "music_recommender_maintenance_running",
+        "labels": {"role": "worker"},
+        "value": 0.0,
+        "timestamp": "2026-10-24T10:05:00Z",
+    }
+
+    with TestClient(api_main.app) as client:
+        orig = api_main.service
+        try:
+            api_main.service = None
+            res = client.post("/alerts/webhook", json=payload)
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "received"
+            assert data["count"] == 1
+            assert data["alerts"] == ["MaintenanceWorkerStopped"]
+
+            hist_res = client.get("/alerts/history?status=firing")
+            assert hist_res.status_code == 200
+            assert hist_res.json()["total"] == 1
+            assert (
+                hist_res.json()["events"][0]["alertname"] == "MaintenanceWorkerStopped"
+            )
+        finally:
+            api_main.service = orig
+
+
+def test_alerts_webhook_invalid_payload() -> None:
+    with TestClient(api_main.app) as client:
+        # Invalid JSON
+        bad_json = client.post(
+            "/alerts/webhook",
+            content=b"not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert bad_json.status_code == 400
+
+        # Non-dict JSON (e.g. list or string)
+        bad_type = client.post("/alerts/webhook", json=["not", "a", "dict"])
+        assert bad_type.status_code == 400

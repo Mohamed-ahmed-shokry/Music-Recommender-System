@@ -7,14 +7,18 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, Query, Response, status
+from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from api.middleware import RequestSafetyMiddleware
 from music_recommender import __version__
-from music_recommender.alerting import AlertEvaluator
+from music_recommender.alerting import (
+    AlertEvaluator,
+    AlertHistoryBuffer,
+    parse_alert_payload,
+)
 from music_recommender.bandit import (
     DriftSafetyThresholds,
     derive_cold_start_policy,
@@ -44,6 +48,7 @@ _CORS_ORIGINS_RAW = os.getenv(_CORS_ORIGINS_ENV, "*")
 service: RecommenderService | None = None
 service_load_error: str | None = None
 _fallback_alert_evaluator = AlertEvaluator()
+_fallback_alert_history = AlertHistoryBuffer()
 
 ABLATION_SUMMARY_PATH = REPORTS_DIR / "ablation_summary.json"
 
@@ -242,6 +247,72 @@ def alerts(dispatch: bool = True) -> dict[str, object]:
         "transitions": [t.to_dict() for t in transitions],
         "webhook_configured": False,
         "notifications_delivered": 0,
+    }
+
+
+@app.post("/alerts/webhook")
+async def alerts_webhook(
+    request: Request,
+    channel: str | None = None,
+) -> dict[str, object]:
+    """Ingest alert notifications from Alertmanager or direct webhooks."""
+    try:
+        body = await request.json()
+    except Exception as exc:
+        logger.warning("Failed to decode JSON payload in /alerts/webhook: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON payload: {exc}",
+        ) from exc
+
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Alert payload must be a JSON object.",
+        )
+
+    events = parse_alert_payload(body, channel=channel)
+    history = service.alert_history if service is not None else _fallback_alert_history
+    history.record_many(events)
+
+    for event in events:
+        log_level = logging.ERROR if event.severity == "critical" else logging.WARNING
+        logger.log(
+            log_level,
+            "Received alert [%s] %s (status=%s, channel=%s): %s",
+            event.severity.upper(),
+            event.alertname,
+            event.status,
+            event.channel or "default",
+            event.summary,
+        )
+
+    return {
+        "status": "received",
+        "count": len(events),
+        "channel": channel,
+        "alerts": [e.alertname for e in events],
+    }
+
+
+@app.get("/alerts/history")
+def alerts_history(
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    channel: str | None = None,
+    status_filter: Annotated[str | None, Query(alias="status")] = None,
+    severity: str | None = None,
+) -> dict[str, object]:
+    """Return recently received alert notifications matching criteria."""
+    history = service.alert_history if service is not None else _fallback_alert_history
+    events = history.get_events(
+        limit=limit,
+        channel=channel,
+        status=status_filter,
+        severity=severity,
+    )
+    return {
+        "total": len(events),
+        "events": [e.to_dict() for e in events],
     }
 
 
