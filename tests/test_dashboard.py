@@ -555,6 +555,13 @@ class FakeDashboardService:
     ) -> list[dict[str, Any]]:
         return getattr(self, "_fake_alert_history", [])
 
+    def get_alert_storage_stats(self) -> dict[str, Any]:
+        return getattr(
+            self,
+            "_fake_storage_stats",
+            {"dlq_count": 0, "spillover_count": 0, "storage_dir": None},
+        )
+
 
 def dashboard_script(service) -> None:
     from music_recommender.dashboard import render_dashboard
@@ -1735,3 +1742,21 @@ def test_dashboard_sidebar_alert_history_rendering() -> None:
     assert not app.exception
     assert any("Recent Notifications" in m.value for m in app.markdown)
     assert any("LatencyP99High" in m.value for m in app.markdown)
+
+
+def test_dashboard_sidebar_dlq_rendering() -> None:
+    service = FakeDashboardService()
+    service._fake_storage_stats = {
+        "dlq_count": 3,
+        "spillover_count": 12,
+        "storage_dir": "data/alerts",
+    }
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("Storage & Audit" in m.value for m in app.markdown)
+    assert any("Dead-Letter Queue" in w.value for w in app.warning)
