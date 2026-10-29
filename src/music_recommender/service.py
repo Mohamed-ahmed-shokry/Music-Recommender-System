@@ -16,6 +16,8 @@ import numpy as np
 from music_recommender.alerting import (
     AlertEvaluator,
     AlertHistoryBuffer,
+    AlertSpilloverStorage,
+    DeadLetterAlertRecord,
     WebhookDispatcher,
 )
 from music_recommender.artifacts import RecommenderArtifact, load_artifact
@@ -56,6 +58,7 @@ from music_recommender.bandit import (
 )
 from music_recommender.baselines import popular_artists
 from music_recommender.config import (
+    ALERT_STORAGE_DIR_ENV_VAR,
     ALERT_WEBHOOK_URL_ENV_VAR,
     ARTIFACT_BUNDLE_PATH,
     BANDIT_ALPHA_DECAY_ENV_VAR,
@@ -157,6 +160,9 @@ class RecommenderService:
         alert_webhook_url: str | None = None,
         alert_evaluator: AlertEvaluator | None = None,
         alert_history: AlertHistoryBuffer | None = None,
+        alert_storage_dir: Path | str | None = None,
+        alert_spillover_storage: AlertSpilloverStorage | None = None,
+        enable_alert_spillover: bool = True,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -424,7 +430,22 @@ class RecommenderService:
             self.maintenance_worker = None
 
         self.alert_evaluator = alert_evaluator or AlertEvaluator()
-        self.alert_history = alert_history or AlertHistoryBuffer()
+        if alert_spillover_storage is not None:
+            self.alert_spillover_storage: AlertSpilloverStorage | None = (
+                alert_spillover_storage
+            )
+        else:
+            storage_dir = (
+                alert_storage_dir or os.getenv(ALERT_STORAGE_DIR_ENV_VAR) or None
+            )
+            self.alert_spillover_storage = (
+                AlertSpilloverStorage(storage_dir) if storage_dir else None
+            )
+
+        self.alert_history = alert_history or AlertHistoryBuffer(
+            spillover_storage=self.alert_spillover_storage,
+            spill_on_evict=enable_alert_spillover,
+        )
         webhook_url = alert_webhook_url
         if webhook_url is None:
             webhook_url = os.getenv(ALERT_WEBHOOK_URL_ENV_VAR) or None
@@ -818,8 +839,16 @@ class RecommenderService:
         channel: str | None = None,
         status: str | None = None,
         severity: str | None = None,
+        include_spillover: bool = False,
     ) -> list[dict[str, Any]]:
         """Return recently received alert notifications matching criteria."""
+        if include_spillover:
+            return self.alert_history.get_combined_events(
+                limit=limit,
+                channel=channel,
+                status=status,
+                severity=severity,
+            )
         events = self.alert_history.get_events(
             limit=limit,
             channel=channel,
@@ -827,6 +856,43 @@ class RecommenderService:
             severity=severity,
         )
         return [e.to_dict() for e in events]
+
+    def record_dead_letter(
+        self,
+        record: DeadLetterAlertRecord | dict[str, Any],
+    ) -> bool:
+        """Record an unparseable or rejected alert notification to the DLQ."""
+        if self.alert_spillover_storage is None:
+            return False
+        if isinstance(record, dict):
+            rec = DeadLetterAlertRecord.from_dict(record)
+        else:
+            rec = record
+        return self.alert_spillover_storage.record_dead_letter(rec)
+
+    def get_dead_letter_history(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return captured dead-letter alert notifications from disk."""
+        if self.alert_spillover_storage is None:
+            return []
+        return self.alert_spillover_storage.read_dead_letters(limit=limit)
+
+    def purge_dead_letters(self) -> int:
+        """Clear all captured dead-letter queue records, returning count purged."""
+        if self.alert_spillover_storage is None:
+            return 0
+        return self.alert_spillover_storage.purge_dead_letters()
+
+    def get_alert_storage_stats(self) -> dict[str, Any]:
+        """Return current storage statistics for alert spillover and DLQ."""
+        if self.alert_spillover_storage is None:
+            return {
+                "spillover_count": 0,
+                "spillover_bytes": 0,
+                "dlq_count": 0,
+                "dlq_bytes": 0,
+                "storage_dir": None,
+            }
+        return self.alert_spillover_storage.get_stats()
 
     def export_prometheus_metrics(
         self,
