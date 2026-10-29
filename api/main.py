@@ -56,6 +56,13 @@ _fallback_storage: AlertSpilloverStorage | None = AlertSpilloverStorage(
 )
 _fallback_alert_history = AlertHistoryBuffer(spillover_storage=_fallback_storage)
 
+
+def _get_alert_storage() -> AlertSpilloverStorage | None:
+    if service is not None and service.alert_spillover_storage is not None:
+        return service.alert_spillover_storage
+    return _fallback_storage
+
+
 ABLATION_SUMMARY_PATH = REPORTS_DIR / "ablation_summary.json"
 
 MAX_API_RESULTS = 100
@@ -279,10 +286,9 @@ async def alerts_webhook(
             headers=dict(request.headers),
             source=request.client.host if request.client else None,
         )
-        if service is not None:
-            service.record_dead_letter(dlq_rec)
-        elif _fallback_storage is not None:
-            _fallback_storage.record_dead_letter(dlq_rec)
+        storage = _get_alert_storage()
+        if storage is not None:
+            storage.record_dead_letter(dlq_rec)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid JSON payload: {exc}",
@@ -297,10 +303,9 @@ async def alerts_webhook(
             headers=dict(request.headers),
             source=request.client.host if request.client else None,
         )
-        if service is not None:
-            service.record_dead_letter(dlq_rec)
-        elif _fallback_storage is not None:
-            _fallback_storage.record_dead_letter(dlq_rec)
+        storage = _get_alert_storage()
+        if storage is not None:
+            storage.record_dead_letter(dlq_rec)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Alert payload must be a JSON object.",
@@ -370,9 +375,7 @@ def alerts_dlq(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> dict[str, object]:
     """Return captured dead-letter alert notifications from persistent storage."""
-    storage = (
-        service.alert_spillover_storage if service is not None else _fallback_storage
-    )
+    storage = _get_alert_storage()
     records = storage.read_dead_letters(limit=limit) if storage is not None else []
     return {
         "total": len(records),
@@ -383,9 +386,7 @@ def alerts_dlq(
 @app.delete("/alerts/dlq")
 def purge_alerts_dlq() -> dict[str, object]:
     """Clear all records in the dead-letter queue."""
-    storage = (
-        service.alert_spillover_storage if service is not None else _fallback_storage
-    )
+    storage = _get_alert_storage()
     purged_count = storage.purge_dead_letters() if storage is not None else 0
     return {
         "status": "purged",
