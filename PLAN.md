@@ -3,31 +3,49 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.34.0) — shipped (branch `phase/154-alertmanager-webhook-receiver`, draft PR #22)
+## Current milestone (0.35.0) — in progress (branch `phase/159-alert-dlq-and-replay`)
+
+Alert Dead-Letter Queue (DLQ), Persistent Spillover Storage, Incident Sequence Replay, and Operator Audit Tooling.
+The 0.34.0 release provided the in-memory receiver endpoint `POST /alerts/webhook` and audit history `GET /alerts/history`.
+This milestone hardens alerting against buffer overflow and forensic data loss by providing persistent JSONL disk spillover,
+a dedicated dead-letter queue (DLQ) for unparseable or rejected alert notifications with audit metadata, a sequential alert
+replay engine for postmortems and staging drills (`music-recommender replay-alerts`), and operator CLI DLQ inspection tooling
+(`music-recommender alert-dlq`).
+
+- Phase 159 — Dead-Letter Queue & Spillover Storage:
+  `DeadLetterAlertRecord`, `AlertSpilloverStorage`, and eviction spillover in `AlertHistoryBuffer`.
+- Phase 160 — Alert Replay Engine & CLI:
+  `AlertReplayEngine`, `replay-alerts` and `alert-dlq` commands in `cli.py`.
+- Phase 161 — API & Dashboard integration:
+  DLQ endpoints (`GET /alerts/dlq`, `DELETE /alerts/dlq`, `POST /alerts/replay`) and dashboard DLQ warning badge.
+- Phase 162 — Integration tests, docs, and 0.35.0 release:
+  Unit, API, and CLI tests, documentation, version bump to 0.35.0, clean CI.
+
+## Next milestone (0.36.0) — planned
+
+InfluxDB Metric & Alert Exporter, Prometheus Remote-Write Adapter, and Alert Correlation Graph.
+- Phase 163 — Push-based Prometheus remote-write exposition adapter.
+- Phase 164 — Alert root-cause correlation graph.
+
+## Previous milestone (0.34.0) — shipped (branch `phase/154-alertmanager-webhook-receiver`, PR #22)
 
 Alertmanager Webhook Ingestion, Alert History, and Operator Audit Tooling.
 The 0.33.0 release connected Prometheus alerting rules to Alertmanager with multi-tier routing
-and storm inhibition. This milestone closes the loop by providing the receiver endpoint
+and storm inhibition. This milestone closed the loop by providing the receiver endpoint
 `POST /alerts/webhook` and history endpoint `GET /alerts/history` in FastAPI, an in-memory
 ring-buffer history with audit logging, operator CLI tooling (`alert-history`), and dashboard
 alert notification history visibility.
 
 - Phase 154 — Webhook ingestion data structures:
-  `ReceivedAlertEvent`, `parse_alert_payload`, and thread-safe `AlertHistoryBuffer` in `alerting.py` (shipped).
+  `ReceivedAlertEvent`, `parse_alert_payload`, and thread-safe `AlertHistoryBuffer` in `alerting.py` (shipped). ✅
 - Phase 155 — FastAPI webhook & history endpoints:
-  `POST /alerts/webhook` and `GET /alerts/history` in `api/main.py` (shipped).
+  `POST /alerts/webhook` and `GET /alerts/history` in `api/main.py` (shipped). ✅
 - Phase 156 — Service integration:
-  Attach `alert_history` buffer to `RecommenderService` (shipped).
+  Attach `alert_history` buffer to `RecommenderService` (shipped). ✅
 - Phase 157 — Operator CLI & dashboard visibility:
-  `alert-history` command in `cli.py` and recent alerts expander in `dashboard.py` (shipped).
+  `alert-history` command in `cli.py` and recent alerts expander in `dashboard.py` (shipped). ✅
 - Phase 158 — Integration tests, docs, and 0.34.0 release:
-  API, CLI, and dashboard tests, documentation, version bump to 0.34.0, clean CI (shipped).
-
-## Next milestone (0.35.0) — planned
-
-Alertmanager Webhook Dead-Letter Storage, Persistent Replay, and InfluxDB Exporter.
-- Phase 159 — Alert notification disk spillover / persistent dead-letter queue when in-memory buffer overflows.
-- Phase 160 — Alert replay CLI tool `music-recommender replay-alerts` for simulating past incident sequences.
+  API, CLI, and dashboard tests, documentation, version bump to 0.34.0, clean CI (shipped). ✅
 
 ## Previous milestone (0.33.0) — shipped (branch `phase/149-alertmanager-routing`, draft PR #21)
 
