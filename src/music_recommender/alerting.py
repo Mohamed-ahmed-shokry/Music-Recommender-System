@@ -12,6 +12,7 @@ import operator
 import re
 import threading
 import time
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -618,6 +619,182 @@ class AlertSpilloverStorage:
             "dlq_bytes": dlq_size,
             "storage_dir": str(self.storage_dir),
         }
+
+
+@dataclass
+class ReplayItemResult:
+    """Result of replaying an individual alert notification."""
+
+    index: int
+    alertname: str
+    status: str
+    success: bool
+    status_code: int | None = None
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "index": self.index,
+            "alertname": self.alertname,
+            "status": self.status,
+            "success": self.success,
+            "status_code": self.status_code,
+            "error": self.error,
+        }
+
+
+@dataclass
+class ReplayReport:
+    """Aggregated outcome of an alert replay sequence."""
+
+    total_events: int
+    dispatched: int
+    failed: int
+    dry_run: bool
+    target_url: str | None
+    results: list[ReplayItemResult] = field(default_factory=list)
+    duration_seconds: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "total_events": self.total_events,
+            "dispatched": self.dispatched,
+            "failed": self.failed,
+            "dry_run": self.dry_run,
+            "target_url": self.target_url,
+            "results": [r.to_dict() for r in self.results],
+            "duration_seconds": round(self.duration_seconds, 4),
+        }
+
+
+class AlertReplayEngine:
+    """Loads past alert events or DLQ records and dispatches them sequentially."""
+
+    def __init__(
+        self,
+        default_target_url: str = "http://localhost:8000/alerts/webhook",
+        timeout_seconds: float = 5.0,
+    ) -> None:
+        self.default_target_url = default_target_url
+        self.timeout_seconds = timeout_seconds
+
+    @staticmethod
+    def load_events_from_file(file_path: Path | str) -> list[dict[str, Any]]:
+        """Load alert records from a JSON or JSONL file."""
+        p = Path(file_path)
+        if not p.exists():
+            raise FileNotFoundError(f"Alert replay file not found: {p}")
+
+        content = p.read_text(encoding="utf-8").strip()
+        if not content:
+            return []
+
+        if content.startswith("["):
+            try:
+                data = json.loads(content)
+                if isinstance(data, list):
+                    return [d for d in data if isinstance(d, dict)]
+            except Exception:
+                pass
+
+        events: list[dict[str, Any]] = []
+        for line in content.splitlines():
+            s = line.strip()
+            if not s:
+                continue
+            try:
+                doc = json.loads(s)
+                if isinstance(doc, dict):
+                    events.append(doc)
+            except Exception:
+                continue
+        return events
+
+    def replay(
+        self,
+        events: Sequence[dict[str, Any]],
+        *,
+        target_url: str | None = None,
+        dry_run: bool = False,
+        interval_seconds: float = 0.0,
+    ) -> ReplayReport:
+        """Replay a sequence of alert dictionaries with optional delays."""
+        url = target_url or self.default_target_url
+        results: list[ReplayItemResult] = []
+        dispatched = 0
+        failed = 0
+        start_time = time.monotonic()
+
+        for idx, item in enumerate(events):
+            alertname = str(
+                item.get("alertname") or item.get("alert") or f"Alert_{idx}"
+            )
+            status = str(item.get("status") or item.get("event") or "firing")
+
+            if dry_run:
+                results.append(
+                    ReplayItemResult(
+                        index=idx,
+                        alertname=alertname,
+                        status=status,
+                        success=True,
+                        status_code=200,
+                        error=None,
+                    )
+                )
+                dispatched += 1
+            else:
+                success, code, err = self._dispatch_one(url, item)
+                if success:
+                    dispatched += 1
+                else:
+                    failed += 1
+                results.append(
+                    ReplayItemResult(
+                        index=idx,
+                        alertname=alertname,
+                        status=status,
+                        success=success,
+                        status_code=code,
+                        error=err,
+                    )
+                )
+
+            if interval_seconds > 0 and idx < len(events) - 1:
+                time.sleep(interval_seconds)
+
+        elapsed = time.monotonic() - start_time
+        return ReplayReport(
+            total_events=len(events),
+            dispatched=dispatched,
+            failed=failed,
+            dry_run=dry_run,
+            target_url=url,
+            results=results,
+            duration_seconds=elapsed,
+        )
+
+    def _dispatch_one(
+        self, url: str, item: dict[str, Any]
+    ) -> tuple[bool, int | None, str | None]:
+        payload_bytes = json.dumps(item).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=payload_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "MusicRecommender-AlertReplayEngine/1.0",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
+                code = int(resp.status)
+                return (200 <= code < 300, code, None)
+        except urllib.error.HTTPError as exc:
+            return (False, exc.code, str(exc.reason))
+        except Exception as exc:
+            return (False, None, str(exc))
 
 
 class AlertHistoryBuffer:
