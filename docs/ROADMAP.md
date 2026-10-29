@@ -1,3 +1,77 @@
+# Milestone 0.35.0 Roadmap — Phase 159 & 160
+
+## Phase 159 & 160: Alert Dead-Letter Queue (DLQ), Persistent Spillover Storage, Incident Sequence Replay, and Operator Audit Tooling (0.35.0)
+
+### 1. Objective
+Harden the production alerting and webhook architecture by implementing persistent disk spillover for alert events evicted from the in-memory ring buffer, a dedicated Dead-Letter Queue (DLQ) for malformed, unparseable, or rejected alert notifications with audit metadata, a sequential alert replay engine for incident postmortems and staging drills, operator CLI inspection commands (`alert-dlq` and `replay-alerts`), and Streamlit dashboard visibility, releasing Milestone 0.35.0 with 100% green CI.
+
+### 2. Scope
+1. **Dead-Letter & Spillover Data Structures (`src/music_recommender/alerting.py`)**:
+   - `DeadLetterAlertRecord`: dataclass with timestamp, reason, raw_payload, channel, and error details.
+   - `AlertSpilloverStorage`: thread-safe append-only file storage with JSON Lines format, reading with limits and filters, and DLQ purge support.
+   - `AlertHistoryBuffer` eviction integration: automatic spillover to disk storage when configured.
+   - `AlertReplayEngine`: reads past alert events or DLQ records from JSON/JSONL, dry-run validation, and timed sequential dispatch against webhook endpoints.
+2. **Service Integration (`src/music_recommender/service.py`)**:
+   - Support `alert_storage_dir`, `spill_on_evict`, DLQ recording, combined history queries (`include_spillover=True`), and alert replay methods.
+3. **FastAPI Webhook & DLQ Endpoints (`api/main.py`)**:
+   - Capture unparseable / invalid webhook payloads directly into the DLQ file (`POST /alerts/webhook`).
+   - `GET /alerts/dlq`: inspect captured dead-letter items.
+   - `DELETE /alerts/dlq`: clear dead-letter records.
+   - `POST /alerts/replay`: trigger alert replay payloads for staging integration tests.
+   - Support `?include_spillover=true` query parameter on `GET /alerts/history`.
+4. **Operator CLI Tooling (`src/music_recommender/cli.py`)**:
+   - `music-recommender alert-dlq`: inspect and purge dead-letter items in table or JSON format.
+   - `music-recommender replay-alerts`: replay serialized alert notifications against a webhook URL with configurable interval and dry-run flag.
+   - Support `--include-spillover` flag in `music-recommender alert-history`.
+5. **Dashboard Visibility (`src/music_recommender/dashboard.py`)**:
+   - Surface DLQ status badge and spillover count in the sidebar alerting expander.
+6. **Comprehensive Tests**:
+   - Unit tests in `tests/test_alerting.py` for storage, DLQ capture, eviction spillover, and replay engine.
+   - Integration tests in `tests/test_api.py` for DLQ capture, purge, replay endpoint, and combined history.
+   - CLI tests in `tests/test_cli.py` for `alert-dlq` and `replay-alerts`.
+   - Dashboard tests in `tests/test_dashboard.py` for DLQ badge rendering.
+7. **Documentation & Release 0.35.0**:
+   - Update `README.md`, `CHANGELOG.md`, `PLAN.md`, `docs/PROGRESS.md`.
+   - Bump version to `0.35.0` in `pyproject.toml`, refresh `uv.lock`, verify `uv build`.
+
+### 3. Acceptance Criteria
+- [ ] AC-1: `DeadLetterAlertRecord` and `AlertSpilloverStorage` persist spilled alert events and unparseable dead-letter payloads in append-only JSONL files.
+- [ ] AC-2: `AlertHistoryBuffer` evicts to disk spillover when `spill_on_evict` is enabled without data loss.
+- [ ] AC-3: FastAPI endpoints `GET /alerts/dlq`, `DELETE /alerts/dlq`, `POST /alerts/replay`, and `GET /alerts/history?include_spillover=true` function correctly.
+- [ ] AC-4: CLI commands `music-recommender alert-dlq` (list/purge) and `music-recommender replay-alerts` (live/dry-run) operate cleanly.
+- [ ] AC-5: Streamlit dashboard sidebar surfaces DLQ warning indicators when dead-letter records exist.
+- [ ] AC-6: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Validation & CI Plan
+- `uv run ruff format --check .`
+- `uv run ruff check .`
+- `uv run mypy`
+- `uv run --extra dashboard --extra tracking --extra spotify pytest -q`
+- `uv build`
+- Remote GitHub Actions CI on PR branch 100% green.
+
+### 5. Exclusions
+- S3 / remote cloud object store alert backup (local disk JSONL fits container and persistent volume needs without adding external cloud SDK dependencies).
+
+### 6. Micro-Task Breakdown
+- [ ] Task 1: Define Phase 159 roadmap, plan, and initialize progress record.
+- [ ] Task 2: Implement `DeadLetterAlertRecord` and `AlertSpilloverStorage` in `src/music_recommender/alerting.py`.
+- [ ] Task 3: Implement `AlertReplayEngine` and replay report models in `src/music_recommender/alerting.py`.
+- [ ] Task 4: Integrate eviction spillover in `AlertHistoryBuffer` in `src/music_recommender/alerting.py`.
+- [ ] Task 5: Add unit tests for storage, DLQ, and replay in `tests/test_alerting.py`.
+- [ ] Task 6: Integrate spillover storage, DLQ, and replay in `RecommenderService` in `src/music_recommender/service.py`.
+- [ ] Task 7: Implement DLQ ingestion, `GET /alerts/dlq`, `DELETE /alerts/dlq`, and `POST /alerts/replay` in `api/main.py`.
+- [ ] Task 8: Add API integration tests in `tests/test_api.py`.
+- [ ] Task 9: Implement `alert-dlq` and `replay-alerts` CLI commands in `src/music_recommender/cli.py`.
+- [ ] Task 10: Add unit tests for `alert-dlq` and `replay-alerts` in `tests/test_cli.py`.
+- [ ] Task 11: Add DLQ badge and spillover visibility in `src/music_recommender/dashboard.py`.
+- [ ] Task 12: Add dashboard DLQ tests in `tests/test_dashboard.py`.
+- [ ] Task 13: Update `README.md` and `CHANGELOG.md` with 0.35.0 documentation.
+- [ ] Task 14: Bump package version to `0.35.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [ ] Task 15: Final CI parity verification, push, open draft PR, monitor remote CI to green.
+
+---
+
 # Milestone 0.34.0 Roadmap — Phase 154
 
 ## Phase 154: Alertmanager Webhook Ingestion, Alert History, and Operator Audit Tooling (0.34.0)
