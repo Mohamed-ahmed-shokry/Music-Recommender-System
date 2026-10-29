@@ -1082,11 +1082,18 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
     uv run music-recommender test-alert --dry-run      # preview synthetic notification payload
     uv run music-recommender test-alert --webhook-url http://localhost:8000/alerts/webhook # test delivery
     uv run music-recommender alert-history              # inspect recent alert notification history
+    uv run music-recommender alert-history --include-spillover # include disk spillover records
     uv run music-recommender alert-history --format json # structured JSON audit trail
     uv run music-recommender alert-history --channel alertmanager --status firing # filter notifications
+    uv run music-recommender alert-dlq                  # inspect dead-letter queue records
+    uv run music-recommender alert-dlq --purge          # clear dead-letter queue
+    uv run music-recommender replay-alerts events.jsonl --dry-run # preview alert sequence replay
+    uv run music-recommender replay-alerts events.jsonl --target-url http://localhost:8000/alerts/webhook
     ```
 
 5. **Alertmanager webhook ingestion & history buffer** — The API provides a webhook receiver at `POST /alerts/webhook` that parses standard Prometheus/Alertmanager v4 webhook payloads as well as internal transitions, recording them in a thread-safe in-memory ring buffer (default capacity 500 events). Query recent events at `GET /alerts/history` or inspect them in the Streamlit dashboard sidebar.
+
+6. **Dead-Letter Queue (DLQ) & alert replay engine** — Malformed or unparseable alert webhook payloads are captured automatically into persistent dead-letter queue files (`alerts_dlq.jsonl`) with error context and headers, queryable via `GET /alerts/dlq` and `music-recommender alert-dlq`. Evicted alerts spill to `alerts_spillover.jsonl` without dropping incident history. Historical alert sequences can be replayed against local or staging endpoints via `POST /alerts/replay` or the `music-recommender replay-alerts` CLI command.
 
 ## API Reference
 
@@ -1110,7 +1117,10 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/metrics` | Prometheus 0.0.4 text exposition metrics for Prometheus and OpenTelemetry collectors |
 | `GET` | `/alerts?dispatch=true` | Evaluate alert rules on live metrics, notify the webhook on state changes, and return rule states |
 | `POST` | `/alerts/webhook?channel=alertmanager` | Ingest external Prometheus/Alertmanager or internal webhook notifications into the ring buffer |
-| `GET` | `/alerts/history?limit=50&channel=alertmanager` | Query received alert notification history and audit log |
+| `GET` | `/alerts/history?limit=50&channel=alertmanager&include_spillover=true` | Query received alert notification history and audit log |
+| `GET` | `/alerts/dlq?limit=50` | Query captured dead-letter queue records for unparseable or rejected alerts |
+| `DELETE` | `/alerts/dlq` | Purge captured dead-letter queue records |
+| `POST` | `/alerts/replay?dry_run=false` | Replay serialized alert notification sequence into the service |
 | `GET` | `/metadata` | Training config, dataset fingerprint, artifact metadata |
 | `GET` | `/evaluation/ablation-summary` | Persisted aggregated knob-importance summary |
 | `GET` | `/catalog/artists?query=pop&limit=25` | Search and page through artists and metadata |
