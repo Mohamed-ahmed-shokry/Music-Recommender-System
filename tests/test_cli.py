@@ -3628,6 +3628,7 @@ def test_alert_history_filters_and_invalid_format(
         "channel": "alertmanager",
         "status": "firing",
         "severity": "critical",
+        "include_spillover": False,
     }
 
     res_invalid = runner.invoke(cli.app, ["alert-history", "--format", "xml"])
@@ -3646,3 +3647,141 @@ def test_alert_history_service_fallback(monkeypatch: pytest.MonkeyPatch) -> None
     res = runner.invoke(cli.app, ["alert-history"])
     assert res.exit_code == 0
     assert "No matching alert events found in history." in res.output
+
+
+def test_alert_dlq_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_service = SimpleNamespace(
+        get_dead_letter_history=lambda **_: [],
+    )
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(lambda: fake_service),
+    )
+
+    res = runner.invoke(cli.app, ["alert-dlq"])
+    assert res.exit_code == 0
+    assert "No dead-letter alert records found in DLQ." in res.output
+
+
+def test_alert_dlq_table_and_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_records = [
+        {
+            "timestamp": "2026-10-29T12:00:00Z",
+            "reason": "malformed_json",
+            "channel": "critical",
+            "error_message": "Unexpected token",
+        }
+    ]
+    fake_service = SimpleNamespace(
+        get_dead_letter_history=lambda **_: fake_records,
+    )
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(lambda: fake_service),
+    )
+
+    res_table = runner.invoke(cli.app, ["alert-dlq"])
+    assert res_table.exit_code == 0
+    assert "malformed_json" in res_table.output
+    assert "critical" in res_table.output
+
+    res_json = runner.invoke(cli.app, ["alert-dlq", "--format", "json"])
+    assert res_json.exit_code == 0
+    import json
+
+    data = json.loads(res_json.output)
+    assert data["total"] == 1
+    assert data["records"][0]["reason"] == "malformed_json"
+
+
+def test_alert_dlq_purge(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_service = SimpleNamespace(
+        purge_dead_letters=lambda: 5,
+    )
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(lambda: fake_service),
+    )
+
+    res_text = runner.invoke(cli.app, ["alert-dlq", "--purge"])
+    assert res_text.exit_code == 0
+    assert "5 record(s) removed" in res_text.output
+
+    res_json = runner.invoke(cli.app, ["alert-dlq", "--purge", "--format", "json"])
+    assert res_json.exit_code == 0
+    import json
+
+    data = json.loads(res_json.output)
+    assert data["status"] == "purged"
+    assert data["purged_count"] == 5
+
+    res_bad = runner.invoke(cli.app, ["alert-dlq", "--format", "yaml"])
+    assert res_bad.exit_code == 2
+
+
+def test_replay_alerts_dry_run(tmp_path: Path) -> None:
+    replay_file = tmp_path / "replay.jsonl"
+    replay_file.write_text(
+        '{"alertname": "TestReplay1", "status": "firing"}\n'
+        '{"alertname": "TestReplay2", "status": "resolved"}\n',
+        encoding="utf-8",
+    )
+
+    res = runner.invoke(
+        cli.app,
+        ["replay-alerts", str(replay_file), "--dry-run"],
+    )
+    assert res.exit_code == 0
+    assert "Alert Replay Sequence (DRY-RUN)" in res.output
+    assert "TestReplay1" in res.output
+    assert "TestReplay2" in res.output
+
+    res_json = runner.invoke(
+        cli.app,
+        ["replay-alerts", str(replay_file), "--dry-run", "--format", "json"],
+    )
+    assert res_json.exit_code == 0
+    import json
+
+    data = json.loads(res_json.output)
+    assert data["dry_run"] is True
+    assert data["total_events"] == 2
+    assert data["dispatched"] == 2
+
+
+def test_replay_alerts_empty_and_invalid(tmp_path: Path) -> None:
+    empty_file = tmp_path / "empty.json"
+    empty_file.write_text("", encoding="utf-8")
+
+    res_empty = runner.invoke(cli.app, ["replay-alerts", str(empty_file)])
+    assert res_empty.exit_code == 0
+    assert "No alert events found" in res_empty.output
+
+    res_missing = runner.invoke(
+        cli.app, ["replay-alerts", str(tmp_path / "absent.json")]
+    )
+    assert res_missing.exit_code == 2
+
+
+def test_alert_history_include_spillover_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    called_kwargs: dict[str, object] = {}
+
+    def fake_get_alert_history(**kwargs: object) -> list[dict[str, object]]:
+        called_kwargs.update(kwargs)
+        return []
+
+    fake_service = SimpleNamespace(
+        get_alert_history=fake_get_alert_history,
+    )
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(lambda: fake_service),
+    )
+
+    res = runner.invoke(cli.app, ["alert-history", "--include-spillover"])
+    assert res.exit_code == 0
+    assert called_kwargs.get("include_spillover") is True
