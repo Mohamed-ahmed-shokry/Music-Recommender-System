@@ -17,6 +17,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -407,6 +408,216 @@ def parse_alert_payload(
             )
         )
     return events
+
+
+@dataclass
+class DeadLetterAlertRecord:
+    """Dropped or unparseable alert payload captured for auditing."""
+
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    reason: str = "unparseable_payload"
+    raw_payload: str = ""
+    channel: str = "default"
+    error_message: str | None = None
+    headers: dict[str, str] = field(default_factory=dict)
+    source: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "timestamp": self.timestamp,
+            "reason": self.reason,
+            "raw_payload": self.raw_payload,
+            "channel": self.channel,
+            "error_message": self.error_message,
+            "headers": self.headers,
+            "source": self.source,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> DeadLetterAlertRecord:
+        return cls(
+            timestamp=str(data.get("timestamp") or datetime.now(UTC).isoformat()),
+            reason=str(data.get("reason") or "unspecified"),
+            raw_payload=str(data.get("raw_payload") or ""),
+            channel=str(data.get("channel") or "default"),
+            error_message=str(data["error_message"])
+            if data.get("error_message")
+            else None,
+            headers=dict(data.get("headers") or {}),
+            source=str(data["source"]) if data.get("source") else None,
+        )
+
+
+class AlertSpilloverStorage:
+    """Thread-safe persistent JSONL storage for evicted alerts and DLQ records."""
+
+    def __init__(
+        self,
+        storage_dir: Path | str,
+        spillover_filename: str = "alerts_spillover.jsonl",
+        dlq_filename: str = "alerts_dlq.jsonl",
+        max_file_size_bytes: int = 10 * 1024 * 1024,
+    ) -> None:
+        self.storage_dir = Path(storage_dir)
+        self.spillover_path = self.storage_dir / spillover_filename
+        self.dlq_path = self.storage_dir / dlq_filename
+        self.max_file_size_bytes = max_file_size_bytes
+        self._lock = threading.Lock()
+        self._ensure_dir()
+
+    def _ensure_dir(self) -> None:
+        try:
+            self.storage_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.warning(
+                "Could not create alert storage directory %s: %s",
+                self.storage_dir,
+                exc,
+            )
+
+    def record_spillover(self, event: ReceivedAlertEvent) -> bool:
+        """Append an evicted alert event to the spillover JSONL file."""
+        return self._append_jsonl(self.spillover_path, event.to_dict())
+
+    def record_dead_letter(self, record: DeadLetterAlertRecord) -> bool:
+        """Append an unparseable or rejected alert to the DLQ JSONL file."""
+        return self._append_jsonl(self.dlq_path, record.to_dict())
+
+    def _append_jsonl(self, target_path: Path, item: dict[str, Any]) -> bool:
+        with self._lock:
+            try:
+                self.storage_dir.mkdir(parents=True, exist_ok=True)
+                line = json.dumps(item, ensure_ascii=False) + "\n"
+                with target_path.open("a", encoding="utf-8") as f:
+                    f.write(line)
+                return True
+            except OSError as exc:
+                logger.warning(
+                    "Failed writing to alert storage %s: %s", target_path, exc
+                )
+                return False
+
+    def read_spillover(
+        self,
+        *,
+        limit: int = 50,
+        channel: str | None = None,
+        status: str | None = None,
+        severity: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read recent spilled alert events from disk in reverse chronological order."""
+        return self._read_jsonl(
+            self.spillover_path,
+            limit=limit,
+            channel=channel,
+            status=status,
+            severity=severity,
+        )
+
+    def read_dead_letters(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Read recent dead-letter records from disk in reverse chronological order."""
+        return self._read_jsonl(self.dlq_path, limit=limit)
+
+    def _read_jsonl(
+        self,
+        target_path: Path,
+        limit: int = 50,
+        channel: str | None = None,
+        status: str | None = None,
+        severity: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if not target_path.exists():
+            return []
+        with self._lock:
+            try:
+                with target_path.open("r", encoding="utf-8") as f:
+                    lines = f.readlines()
+            except OSError as exc:
+                logger.warning(
+                    "Failed reading from alert storage %s: %s", target_path, exc
+                )
+                return []
+
+        results: list[dict[str, Any]] = []
+        for line in reversed(lines):
+            line_str = line.strip()
+            if not line_str:
+                continue
+            try:
+                doc = json.loads(line_str)
+            except Exception:
+                continue
+            if channel and doc.get("channel") != channel:
+                continue
+            if status and doc.get("status") != status:
+                continue
+            if severity and doc.get("severity") != severity:
+                continue
+            results.append(doc)
+            if len(results) >= limit:
+                break
+        return results
+
+    def purge_dead_letters(self) -> int:
+        """Purge all records in the dead-letter queue, returning count purged."""
+        with self._lock:
+            if not self.dlq_path.exists():
+                return 0
+            try:
+                with self.dlq_path.open("r", encoding="utf-8") as f:
+                    count = sum(1 for line in f if line.strip())
+                self.dlq_path.write_text("", encoding="utf-8")
+                return count
+            except OSError as exc:
+                logger.warning("Failed purging DLQ at %s: %s", self.dlq_path, exc)
+                return 0
+
+    def purge_spillover(self) -> int:
+        """Purge all records in the spillover file, returning count purged."""
+        with self._lock:
+            if not self.spillover_path.exists():
+                return 0
+            try:
+                with self.spillover_path.open("r", encoding="utf-8") as f:
+                    count = sum(1 for line in f if line.strip())
+                self.spillover_path.write_text("", encoding="utf-8")
+                return count
+            except OSError as exc:
+                logger.warning(
+                    "Failed purging spillover at %s: %s", self.spillover_path, exc
+                )
+                return 0
+
+    def get_stats(self) -> dict[str, Any]:
+        """Return counts and file sizes for spillover and DLQ."""
+        with self._lock:
+            spill_size = (
+                self.spillover_path.stat().st_size
+                if self.spillover_path.exists()
+                else 0
+            )
+            dlq_size = self.dlq_path.stat().st_size if self.dlq_path.exists() else 0
+            spill_count = 0
+            if self.spillover_path.exists():
+                try:
+                    with self.spillover_path.open("r", encoding="utf-8") as f:
+                        spill_count = sum(1 for line in f if line.strip())
+                except OSError:
+                    pass
+            dlq_count = 0
+            if self.dlq_path.exists():
+                try:
+                    with self.dlq_path.open("r", encoding="utf-8") as f:
+                        dlq_count = sum(1 for line in f if line.strip())
+                except OSError:
+                    pass
+        return {
+            "spillover_count": spill_count,
+            "spillover_bytes": spill_size,
+            "dlq_count": dlq_count,
+            "dlq_bytes": dlq_size,
+            "storage_dir": str(self.storage_dir),
+        }
 
 
 class AlertHistoryBuffer:
