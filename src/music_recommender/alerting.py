@@ -800,19 +800,35 @@ class AlertReplayEngine:
 class AlertHistoryBuffer:
     """Thread-safe, bounded in-memory ring buffer of received alert events."""
 
-    def __init__(self, capacity: int = 100) -> None:
+    def __init__(
+        self,
+        capacity: int = 100,
+        *,
+        spillover_storage: AlertSpilloverStorage | None = None,
+        spill_on_evict: bool = True,
+    ) -> None:
         if capacity < 1:
             raise ValueError("capacity must be >= 1")
         self.capacity = capacity
+        self.spillover_storage = spillover_storage
+        self.spill_on_evict = spill_on_evict
         self._events: list[ReceivedAlertEvent] = []
         self._lock = threading.Lock()
 
     def record(self, event: ReceivedAlertEvent) -> None:
         """Record a single alert event, evicting the oldest if at capacity."""
+        evicted_event: ReceivedAlertEvent | None = None
         with self._lock:
             if len(self._events) >= self.capacity:
-                self._events.pop(0)
+                evicted_event = self._events.pop(0)
             self._events.append(event)
+
+        if (
+            evicted_event is not None
+            and self.spill_on_evict
+            and self.spillover_storage is not None
+        ):
+            self.spillover_storage.record_spillover(evicted_event)
 
     def record_many(self, events: Sequence[ReceivedAlertEvent]) -> int:
         """Record multiple alert events, returning the number recorded."""
@@ -848,6 +864,36 @@ class AlertHistoryBuffer:
         """Clear all recorded events."""
         with self._lock:
             self._events.clear()
+
+    def get_combined_events(
+        self,
+        *,
+        limit: int = 50,
+        channel: str | None = None,
+        status: str | None = None,
+        severity: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return combined events from in-memory buffer and persistent spillover."""
+        memory_events = [
+            e.to_dict()
+            for e in self.get_events(
+                limit=limit,
+                channel=channel,
+                status=status,
+                severity=severity,
+            )
+        ]
+        if len(memory_events) >= limit or self.spillover_storage is None:
+            return memory_events[:limit]
+
+        remaining = limit - len(memory_events)
+        spillover_events = self.spillover_storage.read_spillover(
+            limit=remaining,
+            channel=channel,
+            status=status,
+            severity=severity,
+        )
+        return memory_events + spillover_events
 
     def __len__(self) -> int:
         with self._lock:
