@@ -2585,3 +2585,94 @@ def test_alerts_webhook_invalid_payload() -> None:
         # Non-dict JSON (e.g. list or string)
         bad_type = client.post("/alerts/webhook", json=["not", "a", "dict"])
         assert bad_type.status_code == 400
+
+
+def test_alerts_dlq_capture_and_purge(tmp_path: Path) -> None:
+    from music_recommender.alerting import AlertSpilloverStorage
+
+    storage = AlertSpilloverStorage(storage_dir=tmp_path / "alerts")
+    with TestClient(api_main.app) as client:
+        orig_storage = api_main._fallback_storage
+        try:
+            api_main._fallback_storage = storage
+
+            # 1. Post malformed JSON -> captured in DLQ
+            res1 = client.post(
+                "/alerts/webhook?channel=critical",
+                content=b"malformed {json",
+                headers={"Content-Type": "application/json"},
+            )
+            assert res1.status_code == 400
+
+            # 2. Post non-dict payload -> captured in DLQ
+            res2 = client.post("/alerts/webhook", json=["not", "a", "dict"])
+            assert res2.status_code == 400
+
+            # 3. GET /alerts/dlq
+            res_dlq = client.get("/alerts/dlq")
+            assert res_dlq.status_code == 200
+            dlq_data = res_dlq.json()
+            assert dlq_data["total"] == 2
+            reasons = [r["reason"] for r in dlq_data["records"]]
+            assert "malformed_json" in reasons
+            assert "invalid_payload_type" in reasons
+
+            # 4. DELETE /alerts/dlq
+            res_purge = client.delete("/alerts/dlq")
+            assert res_purge.status_code == 200
+            assert res_purge.json()["status"] == "purged"
+            assert res_purge.json()["purged_count"] == 2
+
+            # 5. Verify empty now
+            res_empty = client.get("/alerts/dlq")
+            assert res_empty.json()["total"] == 0
+        finally:
+            api_main._fallback_storage = orig_storage
+
+
+def test_alerts_history_include_spillover() -> None:
+    with TestClient(api_main.app) as client:
+        res = client.get("/alerts/history?include_spillover=true")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["spillover_included"] is True
+        assert "events" in data
+
+
+def test_alerts_replay_endpoint() -> None:
+    payload = {
+        "events": [
+            {
+                "alert": "SyntheticReplayAlert1",
+                "event": "firing",
+                "severity": "critical",
+            },
+            {
+                "alert": "SyntheticReplayAlert2",
+                "event": "resolved",
+                "severity": "warning",
+            },
+        ]
+    }
+    with TestClient(api_main.app) as client:
+        # Dry-run replay
+        res_dry = client.post("/alerts/replay?dry_run=true", json=payload)
+        assert res_dry.status_code == 200
+        dry_data = res_dry.json()
+        assert dry_data["status"] == "dry_run"
+        assert dry_data["replayed_count"] == 2
+        assert "SyntheticReplayAlert1" in dry_data["alerts"]
+
+        # Real replay
+        res_live = client.post("/alerts/replay", json=payload)
+        assert res_live.status_code == 200
+        live_data = res_live.json()
+        assert live_data["status"] == "replayed"
+        assert live_data["replayed_count"] == 2
+
+        # Invalid replay payloads
+        res_bad1 = client.post("/alerts/replay", json={"no_events": 123})
+        assert res_bad1.status_code == 400
+
+        res_bad2 = client.post("/alerts/replay", json={"events": "not-a-list"})
+        assert res_bad2.status_code == 400

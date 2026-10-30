@@ -1499,6 +1499,20 @@ def render_dashboard(service: RecommenderService) -> None:
                     if ev.get("summary"):
                         st.caption(str(ev["summary"]))
 
+            if hasattr(service, "get_alert_storage_stats"):
+                storage_stats = service.get_alert_storage_stats()
+                dlq_cnt = storage_stats.get("dlq_count", 0)
+                spill_cnt = storage_stats.get("spillover_count", 0)
+                if dlq_cnt > 0 or spill_cnt > 0:
+                    st.divider()
+                    st.markdown("**Storage & Audit**")
+                    if dlq_cnt > 0:
+                        st.warning(
+                            f"⚠️ **Dead-Letter Queue:** {dlq_cnt} dropped record(s)"
+                        )
+                    if spill_cnt > 0:
+                        st.caption(f"💾 {spill_cnt} event(s) in persistent spillover")
+
     tabs = st.tabs(
         [
             "For You",

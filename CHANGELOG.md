@@ -5,6 +5,25 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.0] - 2026-10-29
+
+### Added
+
+- **Alert Dead-Letter Queue (DLQ) & Persistent Spillover (Phase 159):**
+  - Persistent, append-only JSON Lines (`.jsonl`) file storage `AlertSpilloverStorage` in `src/music_recommender/alerting.py` for audit logging of evicted alerts (`alerts_spillover.jsonl`) and rejected/malformed notifications (`alerts_dlq.jsonl`).
+  - `DeadLetterAlertRecord` model capturing unparseable payloads, error messages, headers, source IP, and timestamps.
+  - Automatic eviction spillover in `AlertHistoryBuffer` preserving older alerts to disk when memory capacity is reached.
+  - FastAPI endpoints `GET /alerts/dlq` (inspect DLQ items), `DELETE /alerts/dlq` (purge DLQ items), and `POST /alerts/replay` (replay alert events into the service).
+  - Added `include_spillover` query parameter to `GET /alerts/history` to merge in-memory ring buffer with persisted spillover records.
+- **Incident Sequence Replay & Operator CLI Tooling (Phase 160):**
+  - Sequential alert replay engine `AlertReplayEngine` capable of loading `.json` arrays and `.jsonl` streams, validating schemas, and timed dispatch against webhook endpoints with dry-run support.
+  - `music-recommender alert-dlq`: inspect captured dead letters in tabular or JSON format, or purge the queue with `--purge`.
+  - `music-recommender replay-alerts`: replay serialized alert notifications against a webhook URL with configurable interval and dry-run flag.
+  - Supported `--include-spillover` flag in `music-recommender alert-history`.
+- **Dashboard Visibility & Comprehensive Verification:**
+  - Streamlit dashboard sidebar visibility for dead-letter queue count and persisted spillover metrics.
+  - Full test coverage across storage resilience, eviction spillover, DLQ capture/purge, replay engine, CLI commands, and Streamlit rendering.
+
 ## [0.34.0] - 2026-10-24
 
 ### Added

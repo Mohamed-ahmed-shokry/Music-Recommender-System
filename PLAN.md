@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.35.0) — in progress (branch `phase/159-alert-dlq-and-replay`)
+## Current milestone (0.35.0) — shipped (branch `phase/159-alert-dlq-and-replay`, draft PR #25)
 
 Alert Dead-Letter Queue (DLQ), Persistent Spillover Storage, Incident Sequence Replay, and Operator Audit Tooling.
 The 0.34.0 release provided the in-memory receiver endpoint `POST /alerts/webhook` and audit history `GET /alerts/history`.
@@ -13,13 +13,13 @@ replay engine for postmortems and staging drills (`music-recommender replay-aler
 (`music-recommender alert-dlq`).
 
 - Phase 159 — Dead-Letter Queue & Spillover Storage:
-  `DeadLetterAlertRecord`, `AlertSpilloverStorage`, and eviction spillover in `AlertHistoryBuffer`.
+  `DeadLetterAlertRecord`, `AlertSpilloverStorage`, and eviction spillover in `AlertHistoryBuffer` (shipped). ✅
 - Phase 160 — Alert Replay Engine & CLI:
-  `AlertReplayEngine`, `replay-alerts` and `alert-dlq` commands in `cli.py`.
+  `AlertReplayEngine`, `replay-alerts` and `alert-dlq` commands in `cli.py` (shipped). ✅
 - Phase 161 — API & Dashboard integration:
-  DLQ endpoints (`GET /alerts/dlq`, `DELETE /alerts/dlq`, `POST /alerts/replay`) and dashboard DLQ warning badge.
+  DLQ endpoints (`GET /alerts/dlq`, `DELETE /alerts/dlq`, `POST /alerts/replay`) and dashboard DLQ warning badge (shipped). ✅
 - Phase 162 — Integration tests, docs, and 0.35.0 release:
-  Unit, API, and CLI tests, documentation, version bump to 0.35.0, clean CI.
+  Unit, API, and CLI tests, documentation, version bump to 0.35.0, clean CI (shipped). ✅
 
 ## Next milestone (0.36.0) — planned
 

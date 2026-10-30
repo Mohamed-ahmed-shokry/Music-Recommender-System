@@ -645,3 +645,191 @@ def test_alert_history_buffer() -> None:
 
     buf.clear()
     assert len(buf) == 0
+
+
+def test_dead_letter_alert_record_roundtrip() -> None:
+    from music_recommender.alerting import DeadLetterAlertRecord
+
+    rec = DeadLetterAlertRecord(
+        reason="malformed_json",
+        raw_payload="invalid {json",
+        channel="critical",
+        error_message="Expecting property name",
+        headers={"content-type": "application/json"},
+        source="test_client",
+    )
+    d = rec.to_dict()
+    assert d["reason"] == "malformed_json"
+    assert d["raw_payload"] == "invalid {json"
+    assert d["channel"] == "critical"
+    assert d["headers"]["content-type"] == "application/json"
+
+    restored = DeadLetterAlertRecord.from_dict(d)
+    assert restored.reason == rec.reason
+    assert restored.raw_payload == rec.raw_payload
+    assert restored.channel == rec.channel
+    assert restored.headers == rec.headers
+
+
+def test_alert_spillover_storage(tmp_path: Path) -> None:
+    from music_recommender.alerting import (
+        AlertSpilloverStorage,
+        DeadLetterAlertRecord,
+        ReceivedAlertEvent,
+    )
+
+    storage = AlertSpilloverStorage(storage_dir=tmp_path / "alerts")
+    assert storage.get_stats()["spillover_count"] == 0
+    assert storage.get_stats()["dlq_count"] == 0
+
+    ev1 = ReceivedAlertEvent("Spill1", "firing", "warning", "Sum1", channel="warning")
+    ev2 = ReceivedAlertEvent("Spill2", "firing", "critical", "Sum2", channel="critical")
+    assert storage.record_spillover(ev1)
+    assert storage.record_spillover(ev2)
+
+    dlq1 = DeadLetterAlertRecord(reason="unparseable", raw_payload="bad-data")
+    assert storage.record_dead_letter(dlq1)
+
+    stats = storage.get_stats()
+    assert stats["spillover_count"] == 2
+    assert stats["dlq_count"] == 1
+
+    # Read spillover (newest first)
+    spills = storage.read_spillover(limit=10)
+    assert len(spills) == 2
+    assert spills[0]["alertname"] == "Spill2"
+    assert spills[1]["alertname"] == "Spill1"
+
+    # Filter spillover
+    crit_spills = storage.read_spillover(severity="critical")
+    assert len(crit_spills) == 1
+    assert crit_spills[0]["alertname"] == "Spill2"
+
+    # Read DLQ
+    dlq_items = storage.read_dead_letters(limit=10)
+    assert len(dlq_items) == 1
+    assert dlq_items[0]["reason"] == "unparseable"
+
+    # Purge DLQ and spillover
+    assert storage.purge_dead_letters() == 1
+    assert storage.get_stats()["dlq_count"] == 0
+    assert storage.read_dead_letters() == []
+
+    assert storage.purge_spillover() == 2
+    assert storage.get_stats()["spillover_count"] == 0
+
+
+def test_alert_spillover_storage_corrupted_lines(tmp_path: Path) -> None:
+    from music_recommender.alerting import AlertSpilloverStorage
+
+    storage_dir = tmp_path / "alerts"
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    # Write corrupted lines alongside valid line
+    spill_file = storage_dir / "alerts_spillover.jsonl"
+    spill_file.write_text(
+        "invalid line 1\n"
+        + '{"alertname": "ValidAlert", "status": "firing", '
+        + '"severity": "warning", "channel": "warning"}\n'
+        + "invalid line 2\n",
+        encoding="utf-8",
+    )
+
+    storage = AlertSpilloverStorage(storage_dir=storage_dir)
+    items = storage.read_spillover(limit=10)
+    assert len(items) == 1
+    assert items[0]["alertname"] == "ValidAlert"
+
+
+def test_alert_history_buffer_eviction_spillover(tmp_path: Path) -> None:
+    from music_recommender.alerting import (
+        AlertHistoryBuffer,
+        AlertSpilloverStorage,
+        ReceivedAlertEvent,
+    )
+
+    storage = AlertSpilloverStorage(storage_dir=tmp_path / "alerts")
+    buf = AlertHistoryBuffer(capacity=2, spillover_storage=storage, spill_on_evict=True)
+
+    e1 = ReceivedAlertEvent("E1", "firing", "warning", "Sum1", channel="warning")
+    e2 = ReceivedAlertEvent("E2", "firing", "critical", "Sum2", channel="critical")
+    e3 = ReceivedAlertEvent("E3", "resolved", "warning", "Sum3", channel="warning")
+
+    buf.record(e1)
+    buf.record(e2)
+    assert storage.get_stats()["spillover_count"] == 0
+
+    # Evicts e1
+    buf.record(e3)
+    assert len(buf) == 2
+    assert storage.get_stats()["spillover_count"] == 1
+    spills = storage.read_spillover()
+    assert len(spills) == 1
+    assert spills[0]["alertname"] == "E1"
+
+    # Combined events query: memory (E3, E2) + spillover (E1)
+    combined = buf.get_combined_events(limit=10)
+    assert len(combined) == 3
+    assert [x["alertname"] for x in combined] == ["E3", "E2", "E1"]
+
+
+def test_alert_replay_engine_file_loading(tmp_path: Path) -> None:
+    from music_recommender.alerting import AlertReplayEngine
+
+    engine = AlertReplayEngine()
+    with pytest.raises(FileNotFoundError):
+        engine.load_events_from_file(tmp_path / "nonexistent.json")
+
+    # JSON array
+    json_path = tmp_path / "events.json"
+    json_path.write_text('[{"alertname": "A1"}, {"alertname": "A2"}]', encoding="utf-8")
+    loaded_json = engine.load_events_from_file(json_path)
+    assert len(loaded_json) == 2
+    assert loaded_json[0]["alertname"] == "A1"
+
+    # JSON Lines
+    jsonl_path = tmp_path / "events.jsonl"
+    jsonl_path.write_text(
+        '{"alertname": "L1"}\n\n{"alertname": "L2"}\n', encoding="utf-8"
+    )
+    loaded_jsonl = engine.load_events_from_file(jsonl_path)
+    assert len(loaded_jsonl) == 2
+    assert loaded_jsonl[0]["alertname"] == "L1"
+
+
+def test_alert_replay_engine_dry_run_and_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from music_recommender.alerting import AlertReplayEngine
+
+    engine = AlertReplayEngine()
+    events = [
+        {"alertname": "AlertA", "status": "firing"},
+        {"alertname": "AlertB", "status": "resolved"},
+    ]
+
+    # Dry-run test
+    report_dry = engine.replay(events, dry_run=True)
+    assert report_dry.dry_run is True
+    assert report_dry.total_events == 2
+    assert report_dry.dispatched == 2
+    assert report_dry.failed == 0
+    assert len(report_dry.results) == 2
+    assert report_dry.results[0].alertname == "AlertA"
+    assert report_dry.results[0].success is True
+
+    # Live dispatch mocked
+    def mock_dispatch(
+        self: object, url: str, item: dict[str, object]
+    ) -> tuple[bool, int | None, str | None]:
+        if item.get("alertname") == "AlertA":
+            return (True, 200, None)
+        return (False, 500, "Internal Server Error")
+
+    monkeypatch.setattr(AlertReplayEngine, "_dispatch_one", mock_dispatch)
+    report_live = engine.replay(events, dry_run=False, interval_seconds=0.01)
+    assert report_live.dry_run is False
+    assert report_live.total_events == 2
+    assert report_live.dispatched == 1
+    assert report_live.failed == 1
+    assert report_live.results[0].success is True
+    assert report_live.results[1].success is False

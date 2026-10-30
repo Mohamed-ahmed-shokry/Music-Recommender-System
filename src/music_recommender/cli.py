@@ -16,6 +16,7 @@ import typer
 from music_recommender import __version__
 from music_recommender.alerting import (
     AlertEvaluator,
+    AlertReplayEngine,
     AlertRule,
     AlertSeverity,
     AlertTransition,
@@ -4226,6 +4227,13 @@ def alert_history_cmd(
             help="Output format: 'table' or 'json'.",
         ),
     ] = "table",
+    include_spillover: Annotated[
+        bool,
+        typer.Option(
+            "--include-spillover",
+            help="Include disk spillover history alongside in-memory events.",
+        ),
+    ] = False,
 ) -> None:
     """View recent alert notifications received by the service."""
     normalized_format = format.lower().strip()
@@ -4246,6 +4254,7 @@ def alert_history_cmd(
             channel=channel,
             status=status,
             severity=severity,
+            include_spillover=include_spillover,
         )
     else:
         events = []
@@ -4296,6 +4305,206 @@ def alert_history_cmd(
         typer.echo(f" {sev:<10} {ch:<10} {sum_text}")
     typer.echo("-" * 96)
     typer.secho(f"Total: {len(events)} event(s)", bold=True)
+
+
+@app.command("alert-dlq")
+def alert_dlq_cmd(
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            "-n",
+            help="Maximum number of dead-letter records to display.",
+            min=1,
+            max=100,
+        ),
+    ] = 20,
+    purge: Annotated[
+        bool,
+        typer.Option(
+            "--purge",
+            help="Purge all records in the dead-letter queue.",
+        ),
+    ] = False,
+    format: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: 'table' or 'json'.",
+        ),
+    ] = "table",
+) -> None:
+    """Inspect or purge captured dead-letter queue (DLQ) alert notifications."""
+    normalized_format = format.lower().strip()
+    if normalized_format not in ("table", "json"):
+        typer.secho("Format must be 'table' or 'json'.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable for alert DLQ: %s", exc)
+        service = None
+
+    if purge:
+        purged = service.purge_dead_letters() if service is not None else 0
+        if normalized_format == "json":
+            typer.echo(
+                json.dumps({"status": "purged", "purged_count": purged}, indent=2)
+            )
+        else:
+            typer.secho(
+                f"Dead-letter queue purged: {purged} record(s) removed.",
+                fg=typer.colors.GREEN,
+                bold=True,
+            )
+        return
+
+    records = (
+        service.get_dead_letter_history(limit=limit) if service is not None else []
+    )
+    if normalized_format == "json":
+        typer.echo(
+            json.dumps(
+                {"total": len(records), "limit": limit, "records": records},
+                indent=2,
+            )
+        )
+        return
+
+    typer.secho("Captured Dead-Letter Queue (DLQ) Records", bold=True)
+    typer.echo(f"Showing up to {limit} record(s):")
+    typer.echo("-" * 96)
+    if not records:
+        typer.echo("No dead-letter alert records found in DLQ.")
+        typer.echo("-" * 96)
+        return
+
+    typer.echo(f"{'TIMESTAMP':<24} {'REASON':<22} {'CHANNEL':<10} {'ERROR / DETAILS'}")
+    typer.echo("-" * 96)
+    for r in records:
+        ts = str(r.get("timestamp", ""))[:19]
+        reason = str(r.get("reason", "unknown"))
+        ch = str(r.get("channel", "default"))
+        err = str(r.get("error_message") or r.get("raw_payload", "")[:40])
+        typer.echo(f"{ts:<24} ", nl=False)
+        typer.secho(f"{reason:<22}", fg=typer.colors.RED, bold=True, nl=False)
+        typer.echo(f" {ch:<10} {err}")
+    typer.echo("-" * 96)
+    typer.secho(f"Total: {len(records)} record(s)", bold=True)
+
+
+@app.command("replay-alerts")
+def replay_alerts_cmd(
+    file_path: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to JSON or JSONL file containing alert notifications to replay.",
+            exists=True,
+            readable=True,
+            dir_okay=False,
+        ),
+    ],
+    target_url: Annotated[
+        str,
+        typer.Option(
+            "--target-url",
+            "-u",
+            help="Webhook URL to replay alerts against.",
+        ),
+    ] = "http://localhost:8000/alerts/webhook",
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Simulate dispatch without sending HTTP requests.",
+        ),
+    ] = False,
+    interval: Annotated[
+        float,
+        typer.Option(
+            "--interval",
+            "-i",
+            help="Interval in seconds between alert dispatches.",
+            min=0.0,
+        ),
+    ] = 0.0,
+    format: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: 'table' or 'json'.",
+        ),
+    ] = "table",
+) -> None:
+    """Replay historical or synthetic alert sequences from a file against a webhook."""
+    normalized_format = format.lower().strip()
+    if normalized_format not in ("table", "json"):
+        typer.secho("Format must be 'table' or 'json'.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    engine = AlertReplayEngine(default_target_url=target_url)
+    try:
+        events = engine.load_events_from_file(file_path)
+    except Exception as exc:
+        typer.secho(f"Failed to load replay file: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    if not events:
+        typer.secho(f"No alert events found in {file_path}.", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=0)
+
+    report = engine.replay(
+        events,
+        target_url=target_url,
+        dry_run=dry_run,
+        interval_seconds=interval,
+    )
+
+    if normalized_format == "json":
+        typer.echo(json.dumps(report.to_dict(), indent=2))
+        if report.failed > 0:
+            raise typer.Exit(code=1)
+        return
+
+    mode_str = " (DRY-RUN)" if dry_run else ""
+    typer.secho(f"Alert Replay Sequence{mode_str}", bold=True)
+    typer.echo(f"Target: {report.target_url}")
+    typer.echo(
+        f"Events loaded: {report.total_events} | "
+        f"Dispatched: {report.dispatched} | Failed: {report.failed}"
+    )
+    typer.echo("-" * 96)
+    typer.echo(
+        f"{'#':<4} {'ALERT':<30} {'STATUS':<10} {'SUCCESS':<10} {'CODE':<8} {'DETAILS'}"
+    )
+    typer.echo("-" * 96)
+    for r in report.results:
+        status_color = typer.colors.GREEN if r.success else typer.colors.RED
+        success_str = "OK" if r.success else "FAIL"
+        code_str = str(r.status_code) if r.status_code else "-"
+        err_str = r.error or ""
+        typer.echo(f"{r.index + 1:<4} {r.alertname:<30} {r.status:<10} ", nl=False)
+        typer.secho(f"{success_str:<10}", fg=status_color, bold=True, nl=False)
+        typer.echo(f"{code_str:<8} {err_str}")
+    typer.echo("-" * 96)
+    duration_str = f"{report.duration_seconds:.2f}s"
+    if report.failed == 0:
+        typer.secho(
+            f"Replay completed successfully in {duration_str}.",
+            fg=typer.colors.GREEN,
+            bold=True,
+        )
+    else:
+        typer.secho(
+            f"Replay finished with {report.failed} failure(s) in {duration_str}.",
+            fg=typer.colors.RED,
+            bold=True,
+        )
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

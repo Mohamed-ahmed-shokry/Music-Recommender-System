@@ -54,21 +54,21 @@ Harden the production alerting and webhook architecture by implementing persiste
 - S3 / remote cloud object store alert backup (local disk JSONL fits container and persistent volume needs without adding external cloud SDK dependencies).
 
 ### 6. Micro-Task Breakdown
-- [ ] Task 1: Define Phase 159 roadmap, plan, and initialize progress record.
-- [ ] Task 2: Implement `DeadLetterAlertRecord` and `AlertSpilloverStorage` in `src/music_recommender/alerting.py`.
-- [ ] Task 3: Implement `AlertReplayEngine` and replay report models in `src/music_recommender/alerting.py`.
-- [ ] Task 4: Integrate eviction spillover in `AlertHistoryBuffer` in `src/music_recommender/alerting.py`.
-- [ ] Task 5: Add unit tests for storage, DLQ, and replay in `tests/test_alerting.py`.
-- [ ] Task 6: Integrate spillover storage, DLQ, and replay in `RecommenderService` in `src/music_recommender/service.py`.
-- [ ] Task 7: Implement DLQ ingestion, `GET /alerts/dlq`, `DELETE /alerts/dlq`, and `POST /alerts/replay` in `api/main.py`.
-- [ ] Task 8: Add API integration tests in `tests/test_api.py`.
-- [ ] Task 9: Implement `alert-dlq` and `replay-alerts` CLI commands in `src/music_recommender/cli.py`.
-- [ ] Task 10: Add unit tests for `alert-dlq` and `replay-alerts` in `tests/test_cli.py`.
-- [ ] Task 11: Add DLQ badge and spillover visibility in `src/music_recommender/dashboard.py`.
-- [ ] Task 12: Add dashboard DLQ tests in `tests/test_dashboard.py`.
-- [ ] Task 13: Update `README.md` and `CHANGELOG.md` with 0.35.0 documentation.
-- [ ] Task 14: Bump package version to `0.35.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
-- [ ] Task 15: Final CI parity verification, push, open draft PR, monitor remote CI to green.
+- [x] Task 1: Define Phase 159 roadmap, plan, and initialize progress record.
+- [x] Task 2: Implement `DeadLetterAlertRecord` and `AlertSpilloverStorage` in `src/music_recommender/alerting.py`.
+- [x] Task 3: Implement `AlertReplayEngine` and replay report models in `src/music_recommender/alerting.py`.
+- [x] Task 4: Integrate eviction spillover in `AlertHistoryBuffer` in `src/music_recommender/alerting.py`.
+- [x] Task 5: Add unit tests for storage, DLQ, and replay in `tests/test_alerting.py`.
+- [x] Task 6: Integrate spillover storage, DLQ, and replay in `RecommenderService` in `src/music_recommender/service.py`.
+- [x] Task 7: Implement DLQ ingestion, `GET /alerts/dlq`, `DELETE /alerts/dlq`, and `POST /alerts/replay` in `api/main.py`.
+- [x] Task 8: Add API integration tests in `tests/test_api.py`.
+- [x] Task 9: Implement `alert-dlq` and `replay-alerts` CLI commands in `src/music_recommender/cli.py`.
+- [x] Task 10: Add unit tests for `alert-dlq` and `replay-alerts` in `tests/test_cli.py`.
+- [x] Task 11: Add DLQ badge and spillover visibility in `src/music_recommender/dashboard.py`.
+- [x] Task 12: Add dashboard DLQ tests in `tests/test_dashboard.py`.
+- [x] Task 13: Update `README.md` and `CHANGELOG.md` with 0.35.0 documentation.
+- [x] Task 14: Bump package version to `0.35.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [x] Task 15: Final CI parity verification, push, open draft PR, monitor remote CI to green.
 
 ---
 

@@ -17,6 +17,9 @@ from music_recommender import __version__
 from music_recommender.alerting import (
     AlertEvaluator,
     AlertHistoryBuffer,
+    AlertSpilloverStorage,
+    DeadLetterAlertRecord,
+    ReceivedAlertEvent,
     parse_alert_payload,
 )
 from music_recommender.bandit import (
@@ -48,7 +51,17 @@ _CORS_ORIGINS_RAW = os.getenv(_CORS_ORIGINS_ENV, "*")
 service: RecommenderService | None = None
 service_load_error: str | None = None
 _fallback_alert_evaluator = AlertEvaluator()
-_fallback_alert_history = AlertHistoryBuffer()
+_fallback_storage: AlertSpilloverStorage | None = AlertSpilloverStorage(
+    storage_dir=Path("data/alerts")
+)
+_fallback_alert_history = AlertHistoryBuffer(spillover_storage=_fallback_storage)
+
+
+def _get_alert_storage() -> AlertSpilloverStorage | None:
+    if service is not None and service.alert_spillover_storage is not None:
+        return service.alert_spillover_storage
+    return _fallback_storage
+
 
 ABLATION_SUMMARY_PATH = REPORTS_DIR / "ablation_summary.json"
 
@@ -256,16 +269,43 @@ async def alerts_webhook(
     channel: str | None = None,
 ) -> dict[str, object]:
     """Ingest alert notifications from Alertmanager or direct webhooks."""
+    import json as _json
+
+    raw_bytes = await request.body()
+    raw_str = raw_bytes.decode("utf-8", errors="replace")
+
     try:
-        body = await request.json()
+        body = _json.loads(raw_str)
     except Exception as exc:
         logger.warning("Failed to decode JSON payload in /alerts/webhook: %s", exc)
+        dlq_rec = DeadLetterAlertRecord(
+            reason="malformed_json",
+            raw_payload=raw_str[:5000],
+            channel=channel or "default",
+            error_message=str(exc),
+            headers=dict(request.headers),
+            source=request.client.host if request.client else None,
+        )
+        storage = _get_alert_storage()
+        if storage is not None:
+            storage.record_dead_letter(dlq_rec)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid JSON payload: {exc}",
         ) from exc
 
     if not isinstance(body, dict):
+        dlq_rec = DeadLetterAlertRecord(
+            reason="invalid_payload_type",
+            raw_payload=raw_str[:5000],
+            channel=channel or "default",
+            error_message="Expected JSON object, got " + type(body).__name__,
+            headers=dict(request.headers),
+            source=request.client.host if request.client else None,
+        )
+        storage = _get_alert_storage()
+        if storage is not None:
+            storage.record_dead_letter(dlq_rec)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Alert payload must be a JSON object.",
@@ -301,9 +341,22 @@ def alerts_history(
     channel: str | None = None,
     status_filter: Annotated[str | None, Query(alias="status")] = None,
     severity: str | None = None,
+    include_spillover: bool = False,
 ) -> dict[str, object]:
     """Return recently received alert notifications matching criteria."""
     history = service.alert_history if service is not None else _fallback_alert_history
+    if include_spillover and hasattr(history, "get_combined_events"):
+        combined = history.get_combined_events(
+            limit=limit,
+            channel=channel,
+            status=status_filter,
+            severity=severity,
+        )
+        return {
+            "total": len(combined),
+            "events": combined,
+            "spillover_included": True,
+        }
     events = history.get_events(
         limit=limit,
         channel=channel,
@@ -313,6 +366,77 @@ def alerts_history(
     return {
         "total": len(events),
         "events": [e.to_dict() for e in events],
+        "spillover_included": False,
+    }
+
+
+@app.get("/alerts/dlq")
+def alerts_dlq(
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> dict[str, object]:
+    """Return captured dead-letter alert notifications from persistent storage."""
+    storage = _get_alert_storage()
+    records = storage.read_dead_letters(limit=limit) if storage is not None else []
+    return {
+        "total": len(records),
+        "records": records,
+    }
+
+
+@app.delete("/alerts/dlq")
+def purge_alerts_dlq() -> dict[str, object]:
+    """Clear all records in the dead-letter queue."""
+    storage = _get_alert_storage()
+    purged_count = storage.purge_dead_letters() if storage is not None else 0
+    return {
+        "status": "purged",
+        "purged_count": purged_count,
+    }
+
+
+@app.post("/alerts/replay")
+async def alerts_replay(
+    request: Request,
+    dry_run: bool = False,
+) -> dict[str, object]:
+    """Replay alert events into the active alert history buffer."""
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON payload: {exc}",
+        ) from exc
+
+    if not isinstance(body, dict) or "events" not in body:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payload must be a JSON object containing an 'events' list.",
+        )
+
+    raw_events = body.get("events")
+    if not isinstance(raw_events, list):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="'events' must be a list of alert objects.",
+        )
+
+    parsed_events: list[ReceivedAlertEvent] = []
+    for item in raw_events:
+        if isinstance(item, dict):
+            parsed_events.extend(parse_alert_payload(item))
+
+    if not dry_run:
+        history = (
+            service.alert_history if service is not None else _fallback_alert_history
+        )
+        history.record_many(parsed_events)
+
+    return {
+        "status": "replayed" if not dry_run else "dry_run",
+        "replayed_count": len(parsed_events),
+        "dry_run": dry_run,
+        "alerts": [e.alertname for e in parsed_events],
     }
 
 

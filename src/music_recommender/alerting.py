@@ -12,11 +12,13 @@ import operator
 import re
 import threading
 import time
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -409,22 +411,424 @@ def parse_alert_payload(
     return events
 
 
+@dataclass
+class DeadLetterAlertRecord:
+    """Dropped or unparseable alert payload captured for auditing."""
+
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    reason: str = "unparseable_payload"
+    raw_payload: str = ""
+    channel: str = "default"
+    error_message: str | None = None
+    headers: dict[str, str] = field(default_factory=dict)
+    source: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "timestamp": self.timestamp,
+            "reason": self.reason,
+            "raw_payload": self.raw_payload,
+            "channel": self.channel,
+            "error_message": self.error_message,
+            "headers": self.headers,
+            "source": self.source,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> DeadLetterAlertRecord:
+        return cls(
+            timestamp=str(data.get("timestamp") or datetime.now(UTC).isoformat()),
+            reason=str(data.get("reason") or "unspecified"),
+            raw_payload=str(data.get("raw_payload") or ""),
+            channel=str(data.get("channel") or "default"),
+            error_message=str(data["error_message"])
+            if data.get("error_message")
+            else None,
+            headers=dict(data.get("headers") or {}),
+            source=str(data["source"]) if data.get("source") else None,
+        )
+
+
+class AlertSpilloverStorage:
+    """Thread-safe persistent JSONL storage for evicted alerts and DLQ records."""
+
+    def __init__(
+        self,
+        storage_dir: Path | str,
+        spillover_filename: str = "alerts_spillover.jsonl",
+        dlq_filename: str = "alerts_dlq.jsonl",
+        max_file_size_bytes: int = 10 * 1024 * 1024,
+    ) -> None:
+        self.storage_dir = Path(storage_dir)
+        self.spillover_path = self.storage_dir / spillover_filename
+        self.dlq_path = self.storage_dir / dlq_filename
+        self.max_file_size_bytes = max_file_size_bytes
+        self._lock = threading.Lock()
+        self._ensure_dir()
+
+    def _ensure_dir(self) -> None:
+        try:
+            self.storage_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.warning(
+                "Could not create alert storage directory %s: %s",
+                self.storage_dir,
+                exc,
+            )
+
+    def record_spillover(self, event: ReceivedAlertEvent) -> bool:
+        """Append an evicted alert event to the spillover JSONL file."""
+        return self._append_jsonl(self.spillover_path, event.to_dict())
+
+    def record_dead_letter(self, record: DeadLetterAlertRecord) -> bool:
+        """Append an unparseable or rejected alert to the DLQ JSONL file."""
+        return self._append_jsonl(self.dlq_path, record.to_dict())
+
+    def _append_jsonl(self, target_path: Path, item: dict[str, Any]) -> bool:
+        with self._lock:
+            try:
+                self.storage_dir.mkdir(parents=True, exist_ok=True)
+                line = json.dumps(item, ensure_ascii=False) + "\n"
+                with target_path.open("a", encoding="utf-8") as f:
+                    f.write(line)
+                return True
+            except OSError as exc:
+                logger.warning(
+                    "Failed writing to alert storage %s: %s", target_path, exc
+                )
+                return False
+
+    def read_spillover(
+        self,
+        *,
+        limit: int = 50,
+        channel: str | None = None,
+        status: str | None = None,
+        severity: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read recent spilled alert events from disk in reverse chronological order."""
+        return self._read_jsonl(
+            self.spillover_path,
+            limit=limit,
+            channel=channel,
+            status=status,
+            severity=severity,
+        )
+
+    def read_dead_letters(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Read recent dead-letter records from disk in reverse chronological order."""
+        return self._read_jsonl(self.dlq_path, limit=limit)
+
+    def _read_jsonl(
+        self,
+        target_path: Path,
+        limit: int = 50,
+        channel: str | None = None,
+        status: str | None = None,
+        severity: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if not target_path.exists():
+            return []
+        with self._lock:
+            try:
+                with target_path.open("r", encoding="utf-8") as f:
+                    lines = f.readlines()
+            except OSError as exc:
+                logger.warning(
+                    "Failed reading from alert storage %s: %s", target_path, exc
+                )
+                return []
+
+        results: list[dict[str, Any]] = []
+        for line in reversed(lines):
+            line_str = line.strip()
+            if not line_str:
+                continue
+            try:
+                doc = json.loads(line_str)
+            except Exception:
+                continue
+            if channel and doc.get("channel") != channel:
+                continue
+            if status and doc.get("status") != status:
+                continue
+            if severity and doc.get("severity") != severity:
+                continue
+            results.append(doc)
+            if len(results) >= limit:
+                break
+        return results
+
+    def purge_dead_letters(self) -> int:
+        """Purge all records in the dead-letter queue, returning count purged."""
+        with self._lock:
+            if not self.dlq_path.exists():
+                return 0
+            try:
+                with self.dlq_path.open("r", encoding="utf-8") as f:
+                    count = sum(1 for line in f if line.strip())
+                self.dlq_path.write_text("", encoding="utf-8")
+                return count
+            except OSError as exc:
+                logger.warning("Failed purging DLQ at %s: %s", self.dlq_path, exc)
+                return 0
+
+    def purge_spillover(self) -> int:
+        """Purge all records in the spillover file, returning count purged."""
+        with self._lock:
+            if not self.spillover_path.exists():
+                return 0
+            try:
+                with self.spillover_path.open("r", encoding="utf-8") as f:
+                    count = sum(1 for line in f if line.strip())
+                self.spillover_path.write_text("", encoding="utf-8")
+                return count
+            except OSError as exc:
+                logger.warning(
+                    "Failed purging spillover at %s: %s", self.spillover_path, exc
+                )
+                return 0
+
+    def get_stats(self) -> dict[str, Any]:
+        """Return counts and file sizes for spillover and DLQ."""
+        with self._lock:
+            spill_size = (
+                self.spillover_path.stat().st_size
+                if self.spillover_path.exists()
+                else 0
+            )
+            dlq_size = self.dlq_path.stat().st_size if self.dlq_path.exists() else 0
+            spill_count = 0
+            if self.spillover_path.exists():
+                try:
+                    with self.spillover_path.open("r", encoding="utf-8") as f:
+                        spill_count = sum(1 for line in f if line.strip())
+                except OSError:
+                    pass
+            dlq_count = 0
+            if self.dlq_path.exists():
+                try:
+                    with self.dlq_path.open("r", encoding="utf-8") as f:
+                        dlq_count = sum(1 for line in f if line.strip())
+                except OSError:
+                    pass
+        return {
+            "spillover_count": spill_count,
+            "spillover_bytes": spill_size,
+            "dlq_count": dlq_count,
+            "dlq_bytes": dlq_size,
+            "storage_dir": str(self.storage_dir),
+        }
+
+
+@dataclass
+class ReplayItemResult:
+    """Result of replaying an individual alert notification."""
+
+    index: int
+    alertname: str
+    status: str
+    success: bool
+    status_code: int | None = None
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "index": self.index,
+            "alertname": self.alertname,
+            "status": self.status,
+            "success": self.success,
+            "status_code": self.status_code,
+            "error": self.error,
+        }
+
+
+@dataclass
+class ReplayReport:
+    """Aggregated outcome of an alert replay sequence."""
+
+    total_events: int
+    dispatched: int
+    failed: int
+    dry_run: bool
+    target_url: str | None
+    results: list[ReplayItemResult] = field(default_factory=list)
+    duration_seconds: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "total_events": self.total_events,
+            "dispatched": self.dispatched,
+            "failed": self.failed,
+            "dry_run": self.dry_run,
+            "target_url": self.target_url,
+            "results": [r.to_dict() for r in self.results],
+            "duration_seconds": round(self.duration_seconds, 4),
+        }
+
+
+class AlertReplayEngine:
+    """Loads past alert events or DLQ records and dispatches them sequentially."""
+
+    def __init__(
+        self,
+        default_target_url: str = "http://localhost:8000/alerts/webhook",
+        timeout_seconds: float = 5.0,
+    ) -> None:
+        self.default_target_url = default_target_url
+        self.timeout_seconds = timeout_seconds
+
+    @staticmethod
+    def load_events_from_file(file_path: Path | str) -> list[dict[str, Any]]:
+        """Load alert records from a JSON or JSONL file."""
+        p = Path(file_path)
+        if not p.exists():
+            raise FileNotFoundError(f"Alert replay file not found: {p}")
+
+        content = p.read_text(encoding="utf-8").strip()
+        if not content:
+            return []
+
+        if content.startswith("["):
+            try:
+                data = json.loads(content)
+                if isinstance(data, list):
+                    return [d for d in data if isinstance(d, dict)]
+            except Exception:
+                pass
+
+        events: list[dict[str, Any]] = []
+        for line in content.splitlines():
+            s = line.strip()
+            if not s:
+                continue
+            try:
+                doc = json.loads(s)
+                if isinstance(doc, dict):
+                    events.append(doc)
+            except Exception:
+                continue
+        return events
+
+    def replay(
+        self,
+        events: Sequence[dict[str, Any]],
+        *,
+        target_url: str | None = None,
+        dry_run: bool = False,
+        interval_seconds: float = 0.0,
+    ) -> ReplayReport:
+        """Replay a sequence of alert dictionaries with optional delays."""
+        url = target_url or self.default_target_url
+        results: list[ReplayItemResult] = []
+        dispatched = 0
+        failed = 0
+        start_time = time.monotonic()
+
+        for idx, item in enumerate(events):
+            alertname = str(
+                item.get("alertname") or item.get("alert") or f"Alert_{idx}"
+            )
+            status = str(item.get("status") or item.get("event") or "firing")
+
+            if dry_run:
+                results.append(
+                    ReplayItemResult(
+                        index=idx,
+                        alertname=alertname,
+                        status=status,
+                        success=True,
+                        status_code=200,
+                        error=None,
+                    )
+                )
+                dispatched += 1
+            else:
+                success, code, err = self._dispatch_one(url, item)
+                if success:
+                    dispatched += 1
+                else:
+                    failed += 1
+                results.append(
+                    ReplayItemResult(
+                        index=idx,
+                        alertname=alertname,
+                        status=status,
+                        success=success,
+                        status_code=code,
+                        error=err,
+                    )
+                )
+
+            if interval_seconds > 0 and idx < len(events) - 1:
+                time.sleep(interval_seconds)
+
+        elapsed = time.monotonic() - start_time
+        return ReplayReport(
+            total_events=len(events),
+            dispatched=dispatched,
+            failed=failed,
+            dry_run=dry_run,
+            target_url=url,
+            results=results,
+            duration_seconds=elapsed,
+        )
+
+    def _dispatch_one(
+        self, url: str, item: dict[str, Any]
+    ) -> tuple[bool, int | None, str | None]:
+        payload_bytes = json.dumps(item).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=payload_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "MusicRecommender-AlertReplayEngine/1.0",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
+                code = int(resp.status)
+                return (200 <= code < 300, code, None)
+        except urllib.error.HTTPError as exc:
+            return (False, exc.code, str(exc.reason))
+        except Exception as exc:
+            return (False, None, str(exc))
+
+
 class AlertHistoryBuffer:
     """Thread-safe, bounded in-memory ring buffer of received alert events."""
 
-    def __init__(self, capacity: int = 100) -> None:
+    def __init__(
+        self,
+        capacity: int = 100,
+        *,
+        spillover_storage: AlertSpilloverStorage | None = None,
+        spill_on_evict: bool = True,
+    ) -> None:
         if capacity < 1:
             raise ValueError("capacity must be >= 1")
         self.capacity = capacity
+        self.spillover_storage = spillover_storage
+        self.spill_on_evict = spill_on_evict
         self._events: list[ReceivedAlertEvent] = []
         self._lock = threading.Lock()
 
     def record(self, event: ReceivedAlertEvent) -> None:
         """Record a single alert event, evicting the oldest if at capacity."""
+        evicted_event: ReceivedAlertEvent | None = None
         with self._lock:
             if len(self._events) >= self.capacity:
-                self._events.pop(0)
+                evicted_event = self._events.pop(0)
             self._events.append(event)
+
+        if (
+            evicted_event is not None
+            and self.spill_on_evict
+            and self.spillover_storage is not None
+        ):
+            self.spillover_storage.record_spillover(evicted_event)
 
     def record_many(self, events: Sequence[ReceivedAlertEvent]) -> int:
         """Record multiple alert events, returning the number recorded."""
@@ -460,6 +864,36 @@ class AlertHistoryBuffer:
         """Clear all recorded events."""
         with self._lock:
             self._events.clear()
+
+    def get_combined_events(
+        self,
+        *,
+        limit: int = 50,
+        channel: str | None = None,
+        status: str | None = None,
+        severity: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return combined events from in-memory buffer and persistent spillover."""
+        memory_events = [
+            e.to_dict()
+            for e in self.get_events(
+                limit=limit,
+                channel=channel,
+                status=status,
+                severity=severity,
+            )
+        ]
+        if len(memory_events) >= limit or self.spillover_storage is None:
+            return memory_events[:limit]
+
+        remaining = limit - len(memory_events)
+        spillover_events = self.spillover_storage.read_spillover(
+            limit=remaining,
+            channel=channel,
+            status=status,
+            severity=severity,
+        )
+        return memory_events + spillover_events
 
     def __len__(self) -> int:
         with self._lock:
