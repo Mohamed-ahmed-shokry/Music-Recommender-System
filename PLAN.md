@@ -3,7 +3,31 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.35.0) — shipped (branch `phase/159-alert-dlq-and-replay`, draft PR #25)
+## Current milestone (0.36.0) — in progress (branch `phase/163-remote-write-and-correlation`)
+
+Push-Based Telemetry Exporter (InfluxDB Line Protocol & Prometheus Remote-Write) and Incident Root-Cause Alert Correlation Graph.
+The 0.35.0 release introduced persistent disk spillover, dead-letter queuing (DLQ), and alert incident replay.
+This milestone delivers push-based metric export (InfluxDB Line Protocol 2.0 and Prometheus remote-write HTTP adapter),
+on-demand metric push endpoints and CLI tools (`POST /metrics/push`, `music-recommender push-metrics`), a directed
+acyclic alert root-cause correlation engine (`AlertCorrelationGraph`) with causal chain extraction, and dashboard
+sidebar root-cause visibility (`GET /alerts/correlation`, `POST /alerts/correlate`, `music-recommender alert-correlate`).
+
+- Phase 163 — Push-based telemetry & InfluxDB Line Protocol:
+  `format_influxdb_line_protocol`, `TelemetryPushConfig`, and `TelemetryPushAdapter` in `telemetry.py`.
+- Phase 164 — Alert root-cause correlation graph:
+  `AlertCausalRule`, `AlertCorrelationGraph`, and incident report models in `alerting.py`.
+- Phase 165 — Service & API integration:
+  `GET /metrics/influxdb`, `POST /metrics/push`, `GET /alerts/correlation`, and `POST /alerts/correlate` in `api/main.py`.
+- Phase 166 — CLI tooling, dashboard, and 0.36.0 release:
+  CLI commands (`push-metrics`, `alert-correlate`), dashboard indicator, docs, version bump to 0.36.0, clean CI.
+
+## Next milestone (0.37.0) — planned
+
+Automated Alert Retention, Storage Size Rotation, and Disaster Recovery Snapshots.
+- Phase 167 — Size-capped file rotation and retention scheduler for persistent alert logs.
+- Phase 168 — Automated DLQ retry policies with exponential backoff and export archive bundles.
+
+## Previous milestone (0.35.0) — shipped (branch `phase/159-alert-dlq-and-replay`, PR #26)
 
 Alert Dead-Letter Queue (DLQ), Persistent Spillover Storage, Incident Sequence Replay, and Operator Audit Tooling.
 The 0.34.0 release provided the in-memory receiver endpoint `POST /alerts/webhook` and audit history `GET /alerts/history`.
@@ -21,11 +45,6 @@ replay engine for postmortems and staging drills (`music-recommender replay-aler
 - Phase 162 — Integration tests, docs, and 0.35.0 release:
   Unit, API, and CLI tests, documentation, version bump to 0.35.0, clean CI (shipped). ✅
 
-## Next milestone (0.36.0) — planned
-
-InfluxDB Metric & Alert Exporter, Prometheus Remote-Write Adapter, and Alert Correlation Graph.
-- Phase 163 — Push-based Prometheus remote-write exposition adapter.
-- Phase 164 — Alert root-cause correlation graph.
 
 ## Previous milestone (0.34.0) — shipped (branch `phase/154-alertmanager-webhook-receiver`, PR #22)
 
