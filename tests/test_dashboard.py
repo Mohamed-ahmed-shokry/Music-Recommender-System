@@ -562,6 +562,22 @@ class FakeDashboardService:
             {"dlq_count": 0, "spillover_count": 0, "storage_dir": None},
         )
 
+    def correlate_alert_history(self, **kwargs: Any) -> Any:
+        from music_recommender.alerting import AlertCorrelationReport
+
+        return getattr(
+            self,
+            "_fake_correlation_report",
+            AlertCorrelationReport(
+                root_causes=[],
+                symptoms=[],
+                unlinked_alerts=[],
+                causal_chains=[],
+                total_active_alerts=0,
+                summary="No active firing alerts to correlate.",
+            ),
+        )
+
 
 def dashboard_script(service) -> None:
     from music_recommender.dashboard import render_dashboard
@@ -1760,3 +1776,27 @@ def test_dashboard_sidebar_dlq_rendering() -> None:
     assert not app.exception
     assert any("Storage & Audit" in m.value for m in app.markdown)
     assert any("Dead-Letter Queue" in w.value for w in app.warning)
+
+
+def test_dashboard_sidebar_alert_correlation_rendering() -> None:
+    from music_recommender.alerting import AlertCorrelationReport
+
+    service = FakeDashboardService()
+    service._fake_correlation_report = AlertCorrelationReport(
+        root_causes=["StreamingQueueHighUtilization"],
+        symptoms=["StreamingRecordsDropped"],
+        unlinked_alerts=[],
+        causal_chains=[["StreamingQueueHighUtilization", "StreamingRecordsDropped"]],
+        total_active_alerts=2,
+        summary="Queue saturation causing dropped records",
+    )
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("Incident Root Cause" in m.value for m in app.markdown)
+    assert any("Root Cause:" in e.value for e in app.error)
+    assert any("StreamingQueueHighUtilization" in e.value for e in app.error)
