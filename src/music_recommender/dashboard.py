@@ -1513,6 +1513,24 @@ def render_dashboard(service: RecommenderService) -> None:
                     if spill_cnt > 0:
                         st.caption(f"💾 {spill_cnt} event(s) in persistent spillover")
 
+            if hasattr(service, "correlate_alert_history"):
+                try:
+                    corr = service.correlate_alert_history(limit=20)
+                    if getattr(corr, "total_active_alerts", 0) > 0:
+                        st.divider()
+                        st.markdown("**Incident Root Cause**")
+                        if getattr(corr, "root_causes", []):
+                            rc_str = ", ".join(corr.root_causes)
+                            sym_len = len(corr.symptoms)
+                            st.error(
+                                f"🎯 **Root Cause:** {rc_str} "
+                                f"({sym_len} linked symptom(s))"
+                            )
+                        else:
+                            st.info(corr.summary)
+                except Exception:
+                    pass
+
     tabs = st.tabs(
         [
             "For You",

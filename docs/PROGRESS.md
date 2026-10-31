@@ -1,10 +1,10 @@
-# Phase 159 & 160 Progress Record & Decision Log
+# Phase 163 & 164 Progress Record & Decision Log
 
-## Phase 159 & 160: Alert Dead-Letter Queue (DLQ), Persistent Spillover Storage, Incident Sequence Replay, and Operator Audit Tooling (0.35.0)
+## Phase 163 & 164: InfluxDB Metric & Alert Exporter, Prometheus Remote-Write Adapter, and Alert Correlation Graph (0.36.0)
 
-- **Milestone**: 0.35.0
+- **Milestone**: 0.36.0
 - **Status**: Completed
-- **Branch**: `phase/159-alert-dlq-and-replay`
+- **Branch**: `phase/163-remote-write-and-correlation`
 
 ---
 
@@ -12,21 +12,22 @@
 
 | Task ID | Task Description | Status | Commit |
 |---|---|---|---|
-| Task 1 | Roadmap, Plan & Progress initialization | Completed | `010bdf2`, `12622ba`, `77cff86` |
-| Task 2 | `DeadLetterAlertRecord` and `AlertSpilloverStorage` in `alerting.py` | Completed | `5c839a1` |
-| Task 3 | `AlertReplayEngine` and replay report models in `alerting.py` | Completed | `ac1fbf5` |
-| Task 4 | Eviction spillover in `AlertHistoryBuffer` in `alerting.py` | Completed | `b59de66` |
-| Task 5 | Unit tests for storage, DLQ, and replay in `tests/test_alerting.py` | Completed | `d585b8b` |
-| Task 6 | Service integration in `src/music_recommender/service.py` | Completed | `4137956`, `c693066` |
-| Task 7 | DLQ ingestion, endpoints (`/alerts/dlq`, `/alerts/replay`) in `api/main.py` | Completed | `fd0cf14` |
-| Task 8 | API integration tests in `tests/test_api.py` | Completed | `9455763` |
-| Task 9 | `alert-dlq` and `replay-alerts` CLI commands in `src/music_recommender/cli.py` | Completed | `dcaed90` |
-| Task 10 | Unit tests for `alert-dlq` and `replay-alerts` in `tests/test_cli.py` | Completed | `a0f5035` |
-| Task 11 | Dashboard DLQ badge & spillover visibility in `dashboard.py` | Completed | `4fb7e64` |
-| Task 12 | Dashboard DLQ tests in `tests/test_dashboard.py` | Completed | `a7ad875` |
-| Task 13 | Documentation updates in `README.md` and `CHANGELOG.md` | Completed | `3307c64`, `b00ac0e` |
-| Task 14 | Version bump to 0.35.0 in `pyproject.toml`, `uv lock`, and `uv build` | Completed | `9816fb8`, `6595a7f` |
-| Task 15 | CI parity verification, remote CI push, and green parity confirmation | Completed | `0ba3bdc`, `dedd6f4` |
+| Task 1 | Roadmap, Plan & Progress initialization | Completed | `4af65ca`, `11fcc8b`, `f9219ee` |
+| Task 2 | InfluxDB Line Protocol 2.0 formatter in `telemetry.py` | Completed | `792cba5` |
+| Task 3 | `TelemetryPushConfig`, `TelemetryPushResult`, and `TelemetryPushAdapter` in `telemetry.py` | Completed | `471160e` |
+| Task 4 | Unit tests for InfluxDB formatting & push adapter in `tests/test_telemetry.py` | Completed | `61a74c1` |
+| Task 5 | `AlertCausalRule`, `AlertCorrelationGraph`, and incident report models in `alerting.py` | Completed | `5929868` |
+| Task 6 | Unit tests for alert correlation graph and root-cause analysis in `tests/test_alerting.py` | Completed | `2b598fd` |
+| Task 7 | Service integration in `src/music_recommender/service.py` | Completed | `9f2f28d` |
+| Task 8 | FastAPI endpoints (`/metrics/influxdb`, `/metrics/push`, `/alerts/correlation`, `/alerts/correlate`) in `api/main.py` | Completed | `3b08d8f` |
+| Task 9 | API integration tests in `tests/test_api.py` | Completed | `062b6ba` |
+| Task 10 | CLI commands (`push-metrics`, `alert-correlate`, `export-metrics --format influxdb`) in `cli.py` | Completed | `8b7a0cb` |
+| Task 11 | Unit tests for new CLI commands in `tests/test_cli.py` | Completed | `c37cb0f` |
+| Task 12 | Dashboard alert correlation visibility in `dashboard.py` | Completed | `68988f8` |
+| Task 13 | Dashboard alert correlation tests in `tests/test_dashboard.py` | Completed | `e842ea4` |
+| Task 14 | Documentation updates in `README.md` and `CHANGELOG.md` | Completed | `f2d1386`, `efae7f6` |
+| Task 15 | Version bump to 0.36.0 in `pyproject.toml`, `uv lock`, and `uv build` | Completed | `0c9f69b`, `99578c3` |
+| Task 16 | CI parity verification, remote CI push, and green parity confirmation | Completed | `3f7716b`, `c7475cd` |
 
 ---
 
@@ -34,9 +35,9 @@
 
 | Decision | Options Considered | Rationale & Evidence |
 |---|---|---|
-| Disk storage format | (a) SQLite database, (b) JSON Lines (`.jsonl`), (c) Raw text files | (b) JSON Lines wins: append-only zero-lock crash-safe writes, streamable line-by-line inspection with standard CLI utilities (`grep`, `jq`), human-readable, and zero additional dependency overhead. |
-| In-memory vs. disk spillover | (a) Drop oldest events on eviction, (b) Spill evicted events to disk before dropping from RAM | (b) Spilling evicted events guarantees bounded memory consumption (default 500 in RAM) without losing long-term historical incident records. |
-| Dead-Letter Queue handling | (a) Reject with 400 and discard, (b) Record unparseable/rejected payloads to dedicated DLQ file with error context | (b) Preserving malformed alert notifications in DLQ enables forensic diagnosis of misconfigured external webhooks or payload syntax mismatches without service crashing. |
+| InfluxDB Line Protocol format | (a) InfluxDB 1.x line protocol, (b) InfluxDB 2.0 / Telegraf compatible line protocol with nanosecond precision | (b) InfluxDB 2.0 format is universally supported across InfluxDB v2/v3, Telegraf, QuestDB, VictoriaMetrics, and Prometheus Remote-Write ingestion bridges. |
+| Remote push transport | (a) Third-party `requests` / `httpx` / `influxdb_client`, (b) Python standard library `urllib.request` | (b) Pure standard library `urllib.request` keeps deployment zero-dependency, lightweight, and robust across all Python runtime environments. |
+| Alert root-cause graph algorithm | (a) Full Bayesian network, (b) Directed Acyclic Graph (DAG) with causal rule evaluation over timestamped windows | (b) Explicit deterministic causal DAG with parent->child dependency matching enables transparent, predictable root-cause attribution without training data or probabilistic uncertainty. |
 
 ---
 
@@ -47,8 +48,8 @@
 | `uv run ruff format --check .` | ✅ All files formatted |
 | `uv run ruff check .` | ✅ All checks passed |
 | `uv run mypy` | ✅ Success: no issues found in 30 source files |
-| `uv run --extra dashboard --extra tracking --extra spotify pytest -q` | ✅ 1,223 passed in ~100s |
-| `uv build` | ✅ Successfully built distributions for v0.35.0 |
+| `uv run --extra dashboard --extra tracking --extra spotify pytest -q` | ✅ 1,232 passed |
+| `uv build` | ✅ Successfully built distributions for v0.36.0 |
 
 ---
 
@@ -56,12 +57,13 @@
 
 | Criterion | Status | Evidence |
 |---|---|---|
-| AC-1 `DeadLetterAlertRecord` & `AlertSpilloverStorage` | Met | Implemented in `alerting.py` and validated with full CRUD and corruption tests in `tests/test_alerting.py`. |
-| AC-2 Eviction spillover in `AlertHistoryBuffer` | Met | Verified in `tests/test_alerting.py`: buffer evicts oldest events to JSONL disk spillover and merges on combined queries. |
-| AC-3 DLQ & replay FastAPI endpoints | Met | Verified in `tests/test_api.py`: `GET /alerts/dlq`, `DELETE /alerts/dlq`, `POST /alerts/replay`, and `GET /alerts/history?include_spillover=true`. |
-| AC-4 `alert-dlq` & `replay-alerts` CLI commands | Met | Verified in `tests/test_cli.py`: table and JSON formats, purge option, dry-run replay, and input validation. |
-| AC-5 Dashboard DLQ warning indicator | Met | Verified in `tests/test_dashboard.py`: Streamlit AppTest validates sidebar badge and warning for pending DLQ items. |
-| AC-6 100% green CI locally and remotely | Met | All checks pass locally and GitHub Actions CI workflow runs 100% green on PR #25. |
+| AC-1 InfluxDB Line Protocol 2.0 formatter | Met | Implemented in `telemetry.py` and validated in `tests/test_telemetry.py`. |
+| AC-2 Push telemetry adapter & result tracking | Met | `TelemetryPushAdapter` with dry-run and mock HTTP validated in `tests/test_telemetry.py`. |
+| AC-3 Alert correlation graph & root-cause detection | Met | `AlertCorrelationGraph` with causal DAG and chain detection validated in `tests/test_alerting.py`. |
+| AC-4 FastAPI metrics push & correlation endpoints | Met | Verified `GET /metrics/influxdb`, `POST /metrics/push`, `GET /alerts/correlation`, `POST /alerts/correlate` in `tests/test_api.py`. |
+| AC-5 Operator CLI export, push, and correlation commands | Met | Verified `export-metrics --format influxdb`, `push-metrics`, and `alert-correlate` in `tests/test_cli.py`. |
+| AC-6 Streamlit dashboard correlation indicators | Met | Validated in `tests/test_dashboard.py` via AppTest sidebar assertion. |
+| AC-7 100% green CI locally and remotely | Met | All local checks passing, verified via GitHub Actions CI workflow. |
 
 ---
 

@@ -2676,3 +2676,77 @@ def test_alerts_replay_endpoint() -> None:
 
         res_bad2 = client.post("/alerts/replay", json={"events": "not-a-list"})
         assert res_bad2.status_code == 400
+
+
+def test_metrics_influxdb_endpoint() -> None:
+    with TestClient(api_main.app) as client:
+        res = client.get("/metrics/influxdb?measurement=custom_meas")
+        assert res.status_code == 200
+        assert "text/plain" in res.headers["content-type"]
+        body = res.text
+        assert "custom_meas," in body or "custom_meas " in body
+        assert "music_recommender_up=" in body
+
+
+def test_metrics_push_endpoint() -> None:
+    with TestClient(api_main.app) as client:
+        # Dry-run push
+        res = client.post(
+            "/metrics/push",
+            json={
+                "endpoint_url": "http://collector.example.com/api/v2/write",
+                "protocol": "influxdb",
+                "dry_run": True,
+            },
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is True
+        assert data["samples_pushed"] > 0
+        assert data["protocol"] == "influxdb"
+
+        # Missing endpoint_url
+        res_missing = client.post("/metrics/push", json={"protocol": "influxdb"})
+        assert res_missing.status_code == 400
+
+        # Invalid URL scheme
+        res_bad_url = client.post(
+            "/metrics/push",
+            json={"endpoint_url": "ftp://collector.example.com"},
+        )
+        assert res_bad_url.status_code == 400
+
+
+def test_alerts_correlation_get_and_post_endpoints() -> None:
+    with TestClient(api_main.app) as client:
+        # 1. GET /alerts/correlation
+        res_get = client.get("/alerts/correlation?limit=20&window_seconds=300")
+        assert res_get.status_code == 200
+        get_data = res_get.json()
+        assert "root_causes" in get_data
+        assert "symptoms" in get_data
+        assert "causal_chains" in get_data
+        assert "summary" in get_data
+
+        # 2. POST /alerts/correlate
+        batch = {
+            "alerts": [
+                {"alertname": "MaintenanceWorkerStopped", "status": "firing"},
+                {"alertname": "StreamingQueueHighUtilization", "status": "firing"},
+                {"alertname": "StreamingRecordsDropped", "status": "firing"},
+            ]
+        }
+        res_post = client.post("/alerts/correlate?window_seconds=300", json=batch)
+        assert res_post.status_code == 200
+        post_data = res_post.json()
+        assert "MaintenanceWorkerStopped" in post_data["root_causes"]
+        assert "StreamingQueueHighUtilization" in post_data["symptoms"]
+        assert "StreamingRecordsDropped" in post_data["symptoms"]
+        assert post_data["total_active_alerts"] == 3
+
+        # 3. Invalid POST /alerts/correlate payload
+        res_bad = client.post("/alerts/correlate", json={"no_alerts": True})
+        assert res_bad.status_code == 400
+
+        res_bad2 = client.post("/alerts/correlate", json={"alerts": "not-a-list"})
+        assert res_bad2.status_code == 400
