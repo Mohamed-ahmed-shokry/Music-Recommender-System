@@ -935,7 +935,11 @@ class TelemetryPushAdapter:
         start = time.perf_counter()
         try:
             with urllib.request.urlopen(req, timeout=config.timeout_seconds) as resp:
-                status = resp.status if hasattr(resp, "status") else 200
+                raw_status = getattr(resp, "status", getattr(resp, "code", 200))
+                try:
+                    status = int(raw_status)
+                except (TypeError, ValueError):
+                    status = 200
                 duration_ms = (time.perf_counter() - start) * 1000
                 return TelemetryPushResult(
                     success=200 <= status < 300,
