@@ -930,6 +930,68 @@ class RecommenderService:
             indent=indent,
         )
 
+    def export_influxdb_metrics(
+        self,
+        *,
+        custom_labels: dict[str, str] | None = None,
+        request_tracker: Any | None = None,
+        default_measurement: str = "music_recommender",
+        include_timestamps: bool = True,
+    ) -> str:
+        """Export service state and telemetry in InfluxDB Line Protocol 2.0 format."""
+        from music_recommender.telemetry import export_influxdb_metrics
+
+        return export_influxdb_metrics(
+            self,
+            request_tracker=request_tracker,
+            custom_labels=custom_labels,
+            default_measurement=default_measurement,
+            include_timestamps=include_timestamps,
+        )
+
+    def push_telemetry(
+        self,
+        config: Any,
+        *,
+        request_tracker: Any | None = None,
+        custom_labels: dict[str, str] | None = None,
+    ) -> Any:
+        """Push service telemetry to a remote collector endpoint."""
+        from music_recommender.telemetry import (
+            TelemetryPushAdapter,
+            collect_service_metric_families,
+            get_global_request_tracker,
+        )
+
+        families = collect_service_metric_families(self, custom_labels=custom_labels)
+        tracker = request_tracker or get_global_request_tracker()
+        families.extend(tracker.to_metric_families())
+
+        adapter = TelemetryPushAdapter()
+        return adapter.push(families, config)
+
+    def correlate_alert_history(
+        self,
+        *,
+        limit: int = 50,
+        window_seconds: float = 300.0,
+        include_spillover: bool = False,
+        custom_rules: Any | None = None,
+    ) -> Any:
+        """Perform root-cause correlation analysis over active/recent alert history."""
+        from music_recommender.alerting import (
+            DEFAULT_ALERT_CORRELATION_RULES,
+            AlertCorrelationGraph,
+        )
+
+        history = self.get_alert_history(
+            limit=limit,
+            include_spillover=include_spillover,
+        )
+        rules = custom_rules or DEFAULT_ALERT_CORRELATION_RULES
+        graph = AlertCorrelationGraph(rules=rules)
+        return graph.correlate(history, window_seconds=window_seconds)
+
     def record_request(
         self,
         endpoint: str,
