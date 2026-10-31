@@ -1,3 +1,86 @@
+# Milestone 0.36.0 Roadmap — Phase 163 & 164
+
+## Phase 163 & 164: InfluxDB Metric & Alert Exporter, Prometheus Remote-Write Adapter, and Alert Correlation Graph (0.36.0)
+
+### 1. Objective
+Provide push-based telemetry integration and advanced incident root-cause analysis by implementing an InfluxDB Line Protocol 2.0 metrics formatter and push adapter (`POST /metrics/push`, `music-recommender push-metrics`), Prometheus remote-write compatibility, a directed acyclic alert root-cause correlation graph (`AlertCorrelationGraph`) with causal chain detection and symptom filtering (`GET /alerts/correlation`, `music-recommender alert-correlate`), and Streamlit dashboard visibility, releasing Milestone 0.36.0 with 100% green CI.
+
+### 2. Scope
+1. **Push Telemetry & InfluxDB Line Protocol (`src/music_recommender/telemetry.py`)**:
+   - `format_influxdb_line_protocol`: converts `MetricFamily` samples to InfluxDB Line Protocol 2.0 with escaping for measurement, tag keys/values, field values, and nanosecond timestamps.
+   - `TelemetryPushConfig`: dataclass specifying endpoint URL, protocol (`"influxdb"`, `"prometheus_json"`, `"prometheus_text"`), custom headers, timeout, and batch size.
+   - `TelemetryPushResult`: dataclass recording success, sample count, status code, duration, and error.
+   - `TelemetryPushAdapter`: sends serialized metric batches via standard library HTTP client.
+2. **Alert Root-Cause Correlation Engine (`src/music_recommender/alerting.py`)**:
+   - `AlertCausalRule`: defines directed causal dependency (`parent_alert` -> `child_alert`, e.g. `StreamingQueueHighUtilization` -> `StreamingQueueDroppedRecords`).
+   - `DEFAULT_ALERT_CORRELATION_RULES`: baseline domain causal dependencies between streaming queue, maintenance worker, latency, and drift alert rules.
+   - `AlertCorrelationGraph`: constructs causal DAG, identifies root-cause alerts vs downstream symptoms, and computes incident causal chains within configurable time windows.
+   - `AlertCorrelationReport`: dataclass summarizing root causes, symptoms, unlinked alerts, and causal paths.
+3. **Service Integration (`src/music_recommender/service.py`)**:
+   - Expose `export_influxdb_metrics(custom_labels, default_measurement)`.
+   - Expose `push_telemetry(config)`.
+   - Expose `correlate_alert_history(window_seconds, custom_rules)`.
+4. **FastAPI Endpoints (`api/main.py`)**:
+   - `GET /metrics/influxdb`: exposes real-time service metrics formatted in InfluxDB Line Protocol (`text/plain; charset=utf-8`).
+   - `POST /metrics/push`: pushes current service metrics to an external telemetry collector URL.
+   - `GET /alerts/correlation`: evaluates active alert history from buffer and returns root-cause analysis report.
+   - `POST /alerts/correlate`: accepts an external batch of alert events and returns correlation graph report.
+5. **Operator CLI Tooling (`src/music_recommender/cli.py`)**:
+   - `music-recommender export-metrics --format influxdb`: outputs InfluxDB Line Protocol to stdout or file.
+   - `music-recommender push-metrics`: pushes live telemetry to remote HTTP endpoint.
+   - `music-recommender alert-correlate`: evaluates active alert history or file, printing root causes and causal chains in tabular/ASCII/JSON formats.
+6. **Dashboard Visibility (`src/music_recommender/dashboard.py`)**:
+   - Show root-cause analysis and symptom indicators in sidebar alerting expander.
+7. **Comprehensive Tests**:
+   - Unit tests in `tests/test_telemetry.py` for InfluxDB formatting and push adapter.
+   - Unit tests in `tests/test_alerting.py` for causal rules, DAG construction, and root-cause detection.
+   - Integration tests in `tests/test_api.py` for `/metrics/influxdb`, `/metrics/push`, `/alerts/correlation`, `/alerts/correlate`.
+   - CLI tests in `tests/test_cli.py` for `export-metrics --format influxdb`, `push-metrics`, `alert-correlate`.
+   - Dashboard tests in `tests/test_dashboard.py` for root-cause badge rendering.
+8. **Documentation & Release 0.36.0**:
+   - Update `README.md`, `CHANGELOG.md`, `PLAN.md`, `docs/PROGRESS.md`.
+   - Bump version to `0.36.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+
+### 3. Acceptance Criteria
+- [ ] AC-1: `format_influxdb_line_protocol` renders `MetricFamily` samples into valid InfluxDB Line Protocol 2.0 with proper escaping and nanosecond timestamps.
+- [ ] AC-2: `TelemetryPushAdapter` dispatches metric batches via HTTP to remote collectors with `TelemetryPushResult` tracking.
+- [ ] AC-3: `AlertCorrelationGraph` identifies root-cause alerts, isolates downstream symptoms, and traces causal chains within time windows.
+- [ ] AC-4: FastAPI endpoints `GET /metrics/influxdb`, `POST /metrics/push`, `GET /alerts/correlation`, and `POST /alerts/correlate` respond with valid schemas.
+- [ ] AC-5: CLI commands `export-metrics --format influxdb`, `push-metrics`, and `alert-correlate` operate cleanly in terminal and headless modes.
+- [ ] AC-6: Streamlit dashboard sidebar surfaces alert root-cause analysis and symptom counts.
+- [ ] AC-7: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Validation & CI Plan
+- `uv run ruff format --check .`
+- `uv run ruff check .`
+- `uv run mypy`
+- `uv run --extra dashboard --extra tracking --extra spotify pytest -q`
+- `uv build`
+- Remote GitHub Actions CI on PR branch 100% green.
+
+### 5. Exclusions
+- External InfluxDB server provisioning or Docker compose service dependency (pure Python exporter and push adapter allows connecting to any remote InfluxDB/Prometheus endpoint without requiring a local InfluxDB container).
+
+### 6. Micro-Task Breakdown
+- [ ] Task 1: Define Phase 163 & 164 roadmap, plan, and initialize progress record.
+- [ ] Task 2: Implement InfluxDB Line Protocol 2.0 formatter in `src/music_recommender/telemetry.py`.
+- [ ] Task 3: Implement `TelemetryPushConfig`, `TelemetryPushResult`, and `TelemetryPushAdapter` in `src/music_recommender/telemetry.py`.
+- [ ] Task 4: Add unit tests for InfluxDB formatting and push adapter in `tests/test_telemetry.py`.
+- [ ] Task 5: Implement `AlertCausalRule`, `AlertCorrelationGraph`, and `AlertCorrelationReport` in `src/music_recommender/alerting.py`.
+- [ ] Task 6: Add unit tests for alert correlation graph and root-cause analysis in `tests/test_alerting.py`.
+- [ ] Task 7: Integrate InfluxDB export, push telemetry, and alert correlation in `RecommenderService` in `src/music_recommender/service.py`.
+- [ ] Task 8: Implement `GET /metrics/influxdb`, `POST /metrics/push`, `GET /alerts/correlation`, and `POST /alerts/correlate` in `api/main.py`.
+- [ ] Task 9: Add API integration tests in `tests/test_api.py`.
+- [ ] Task 10: Implement `push-metrics` and `alert-correlate` CLI commands, and extend `export-metrics --format influxdb` in `src/music_recommender/cli.py`.
+- [ ] Task 11: Add unit tests for new CLI commands in `tests/test_cli.py`.
+- [ ] Task 12: Add alert correlation indicator to sidebar in `src/music_recommender/dashboard.py`.
+- [ ] Task 13: Add dashboard alert correlation tests in `tests/test_dashboard.py`.
+- [ ] Task 14: Update `README.md` and `CHANGELOG.md` with 0.36.0 documentation.
+- [ ] Task 15: Bump package version to `0.36.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [ ] Task 16: Final CI parity verification, push, open draft PR, monitor remote CI to green.
+
+---
+
 # Milestone 0.35.0 Roadmap — Phase 159 & 160
 
 ## Phase 159 & 160: Alert Dead-Letter Queue (DLQ), Persistent Spillover Storage, Incident Sequence Replay, and Operator Audit Tooling (0.35.0)
