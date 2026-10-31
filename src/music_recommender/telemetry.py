@@ -175,6 +175,87 @@ def render_prometheus_exposition(families: list[MetricFamily]) -> str:
     return "\n".join(rendered_blocks) + "\n"
 
 
+def escape_influxdb_key(text: str) -> str:
+    """Escape commas, equal signs, and spaces for InfluxDB measurements/tag keys."""
+    return (
+        text.replace("\\", "\\\\")
+        .replace(",", "\\,")
+        .replace("=", "\\=")
+        .replace(" ", "\\ ")
+    )
+
+
+def escape_influxdb_tag_value(value: Any) -> str:
+    """Escape commas, equal signs, and spaces for InfluxDB tag values."""
+    text = str(value)
+    return (
+        text.replace("\\", "\\\\")
+        .replace(",", "\\,")
+        .replace("=", "\\=")
+        .replace(" ", "\\ ")
+    )
+
+
+def format_influxdb_field_value(value: float | int | bool | str) -> str | None:
+    """Format a scalar value for InfluxDB Line Protocol field representation."""
+    if isinstance(value, bool):
+        return "t" if value else "f"
+    if isinstance(value, int):
+        return f"{value}i"
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return None
+        return f"{value:.6g}" if abs(value) < 1e-4 or abs(value) >= 1e6 else f"{value}"
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    return None
+
+
+def render_influxdb_line_protocol(
+    families: list[MetricFamily],
+    default_measurement: str = "music_recommender",
+    fallback_timestamp_ns: int | None = None,
+) -> str:
+    """Render metric families into InfluxDB Line Protocol 2.0 text format."""
+    lines: list[str] = []
+    measurement_str = escape_influxdb_key(default_measurement)
+
+    for fam in families:
+        for sample in fam.samples:
+            field_val = format_influxdb_field_value(sample.value)
+            if field_val is None:
+                continue
+
+            field_str = f"{escape_influxdb_key(sample.name)}={field_val}"
+
+            if sample.labels:
+                sorted_tags = sorted(sample.labels.items())
+                tag_parts = [
+                    f"{escape_influxdb_key(k)}={escape_influxdb_tag_value(v)}"
+                    for k, v in sorted_tags
+                ]
+                tags_str = ",".join(tag_parts)
+                line_prefix = f"{measurement_str},{tags_str}"
+            else:
+                line_prefix = measurement_str
+
+            ts_ns = (
+                sample.timestamp_ms * 1_000_000
+                if sample.timestamp_ms is not None
+                else fallback_timestamp_ns
+            )
+
+            if ts_ns is not None:
+                lines.append(f"{line_prefix} {field_str} {ts_ns}")
+            else:
+                lines.append(f"{line_prefix} {field_str}")
+
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
+
+
 def collect_service_metric_families(
     service: Any | None,
     *,
@@ -675,6 +756,26 @@ def export_metrics_json(
         families = _apply_timestamps(families, now_ms)
     metrics_data = {"metrics": [f.to_dict() for f in families if f.samples]}
     return json.dumps(metrics_data, indent=indent) + "\n"
+
+
+def export_influxdb_metrics(
+    service: Any | None,
+    *,
+    request_tracker: RequestTelemetryTracker | None = None,
+    custom_labels: dict[str, str] | None = None,
+    default_measurement: str = "music_recommender",
+    include_timestamps: bool = True,
+) -> str:
+    """Export complete metrics in InfluxDB Line Protocol 2.0 format for the service."""
+    families = collect_service_metric_families(service, custom_labels=custom_labels)
+    tracker = request_tracker or get_global_request_tracker()
+    families.extend(tracker.to_metric_families())
+    fallback_ts_ns = int(time.time() * 1_000_000_000) if include_timestamps else None
+    return render_influxdb_line_protocol(
+        families,
+        default_measurement=default_measurement,
+        fallback_timestamp_ns=fallback_ts_ns,
+    )
 
 
 KNOWN_PROMETHEUS_METRIC_NAMES: frozenset[str] = frozenset(
