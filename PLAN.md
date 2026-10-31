@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.36.0) — in progress (branch `phase/163-remote-write-and-correlation`)
+## Current milestone (0.36.0) — shipped (branch `phase/163-remote-write-and-correlation`)
 
 Push-Based Telemetry Exporter (InfluxDB Line Protocol & Prometheus Remote-Write) and Incident Root-Cause Alert Correlation Graph.
 The 0.35.0 release introduced persistent disk spillover, dead-letter queuing (DLQ), and alert incident replay.
@@ -13,13 +13,13 @@ acyclic alert root-cause correlation engine (`AlertCorrelationGraph`) with causa
 sidebar root-cause visibility (`GET /alerts/correlation`, `POST /alerts/correlate`, `music-recommender alert-correlate`).
 
 - Phase 163 — Push-based telemetry & InfluxDB Line Protocol:
-  `format_influxdb_line_protocol`, `TelemetryPushConfig`, and `TelemetryPushAdapter` in `telemetry.py`.
+  `format_influxdb_line_protocol`, `TelemetryPushConfig`, and `TelemetryPushAdapter` in `telemetry.py` (shipped). ✅
 - Phase 164 — Alert root-cause correlation graph:
-  `AlertCausalRule`, `AlertCorrelationGraph`, and incident report models in `alerting.py`.
+  `AlertCausalRule`, `AlertCorrelationGraph`, and incident report models in `alerting.py` (shipped). ✅
 - Phase 165 — Service & API integration:
-  `GET /metrics/influxdb`, `POST /metrics/push`, `GET /alerts/correlation`, and `POST /alerts/correlate` in `api/main.py`.
+  `GET /metrics/influxdb`, `POST /metrics/push`, `GET /alerts/correlation`, and `POST /alerts/correlate` in `api/main.py` (shipped). ✅
 - Phase 166 — CLI tooling, dashboard, and 0.36.0 release:
-  CLI commands (`push-metrics`, `alert-correlate`), dashboard indicator, docs, version bump to 0.36.0, clean CI.
+  CLI commands (`push-metrics`, `alert-correlate`), dashboard indicator, docs, version bump to 0.36.0, clean CI (shipped). ✅
 
 ## Next milestone (0.37.0) — planned
 
