@@ -3785,3 +3785,161 @@ def test_alert_history_include_spillover_flag(monkeypatch: pytest.MonkeyPatch) -
     res = runner.invoke(cli.app, ["alert-history", "--include-spillover"])
     assert res.exit_code == 0
     assert called_kwargs.get("include_spillover") is True
+
+
+def test_export_metrics_influxdb_format(tmp_path: Path) -> None:
+    # 1. Stdout output
+    res_stdout = runner.invoke(cli.app, ["export-metrics", "--format", "influxdb"])
+    assert res_stdout.exit_code == 0
+    assert "music_recommender" in res_stdout.output
+    assert "music_recommender_up=" in res_stdout.output
+
+    # 2. File output
+    out_file = tmp_path / "metrics.lp"
+    res_file = runner.invoke(
+        cli.app,
+        ["export-metrics", "--format", "influxdb", "--output", str(out_file)],
+    )
+    assert res_file.exit_code == 0
+    assert out_file.exists()
+    content = out_file.read_text(encoding="utf-8")
+    assert "music_recommender_up=" in content
+
+
+def test_push_metrics_cli_dry_run_and_json() -> None:
+    # Dry-run tabular output
+    res_dry = runner.invoke(
+        cli.app,
+        [
+            "push-metrics",
+            "--endpoint-url",
+            "http://collector.local/api/v2/write",
+            "--protocol",
+            "influxdb",
+            "--header",
+            "Authorization: Token secret-tok",
+            "--dry-run",
+        ],
+    )
+    assert res_dry.exit_code == 0
+    assert "Telemetry Push: SUCCESS (DRY-RUN)" in res_dry.output
+    assert "Samples pushed:" in res_dry.output
+
+    # Dry-run JSON output
+    res_json = runner.invoke(
+        cli.app,
+        [
+            "push-metrics",
+            "--endpoint-url",
+            "http://collector.local/api/v2/write",
+            "--dry-run",
+            "--json",
+        ],
+    )
+    assert res_json.exit_code == 0
+    data = json.loads(res_json.output)
+    assert data["success"] is True
+    assert data["samples_pushed"] > 0
+
+
+def test_push_metrics_cli_errors() -> None:
+    # 1. Invalid header format
+    res_hdr = runner.invoke(
+        cli.app,
+        [
+            "push-metrics",
+            "--endpoint-url",
+            "http://collector.local",
+            "--header",
+            "BadHeaderNoColon",
+            "--dry-run",
+        ],
+    )
+    assert res_hdr.exit_code == 1
+    assert "Invalid header format" in res_hdr.output
+
+    # 2. Invalid URL
+    res_url = runner.invoke(
+        cli.app,
+        [
+            "push-metrics",
+            "--endpoint-url",
+            "ftp://invalid.scheme",
+            "--dry-run",
+        ],
+    )
+    assert res_url.exit_code == 1
+    assert "Configuration error" in res_url.output
+
+
+def test_alert_correlate_cli_with_input_file(tmp_path: Path) -> None:
+    incident_file = tmp_path / "incident.json"
+    incident_data = [
+        {"alertname": "MaintenanceWorkerStopped", "status": "firing"},
+        {"alertname": "StreamingQueueHighUtilization", "status": "firing"},
+        {"alertname": "StreamingRecordsDropped", "status": "firing"},
+    ]
+    incident_file.write_text(json.dumps(incident_data), encoding="utf-8")
+
+    # Table format
+    res_table = runner.invoke(
+        cli.app,
+        ["alert-correlate", "--input-file", str(incident_file)],
+    )
+    assert res_table.exit_code == 0
+    assert "Alert Root-Cause Correlation Report" in res_table.output
+    assert "MaintenanceWorkerStopped" in res_table.output
+    assert "StreamingQueueHighUtilization" in res_table.output
+    assert "StreamingRecordsDropped" in res_table.output
+
+    # JSON format
+    res_json = runner.invoke(
+        cli.app,
+        ["alert-correlate", "--input-file", str(incident_file), "--format", "json"],
+    )
+    assert res_json.exit_code == 0
+    data = json.loads(res_json.output)
+    assert "MaintenanceWorkerStopped" in data["root_causes"]
+    assert "StreamingRecordsDropped" in data["symptoms"]
+    assert len(data["causal_chains"]) >= 1
+
+    # Invalid format
+    res_bad = runner.invoke(
+        cli.app,
+        ["alert-correlate", "--format", "invalid_fmt"],
+    )
+    assert res_bad.exit_code == 2
+
+
+def test_alert_correlate_cli_service_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    from music_recommender.alerting import AlertSeverity, ReceivedAlertEvent
+
+    def fake_get_alert_history(**kwargs: object) -> list[ReceivedAlertEvent]:
+        return [
+            ReceivedAlertEvent(
+                alertname="BanditDriftViolation",
+                status="firing",
+                severity=AlertSeverity.WARNING,
+                summary="Drift detected",
+            ),
+            ReceivedAlertEvent(
+                alertname="BanditAutoRollback",
+                status="firing",
+                severity=AlertSeverity.CRITICAL,
+                summary="Rollback occurred",
+            ),
+        ]
+
+    fake_service = SimpleNamespace(
+        get_alert_history=fake_get_alert_history,
+    )
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(lambda: fake_service),
+    )
+
+    res = runner.invoke(cli.app, ["alert-correlate"])
+    assert res.exit_code == 0
+    assert "BanditDriftViolation" in res.output
+    assert "BanditAutoRollback" in res.output

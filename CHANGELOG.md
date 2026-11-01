@@ -5,6 +5,25 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.0] - 2026-10-31
+
+### Added
+
+- **InfluxDB Line Protocol 2.0 & Telemetry Push Adapter (Phase 163):**
+  - Pure-Python InfluxDB Line Protocol 2.0 metrics formatter `render_influxdb_line_protocol()` and `export_influxdb_metrics()` in `src/music_recommender/telemetry.py` with nanosecond timestamps and escaping for measurements, tag sets, and field values.
+  - `TelemetryPushAdapter`, `TelemetryPushConfig`, and `TelemetryPushResult` supporting on-demand metric push via HTTP to remote ingestion systems (InfluxDB v2/v3, VictoriaMetrics, Telegraf, Prometheus Remote-Write bridges) with dry-run support and timing metrics.
+  - FastAPI endpoints `GET /metrics/influxdb` and `POST /metrics/push` in `api/main.py`.
+  - Operator CLI command `music-recommender push-metrics` and support for `--format influxdb` in `music-recommender export-metrics`.
+- **Alert Root-Cause Correlation Graph (Phase 164):**
+  - Directed Acyclic Graph (DAG) correlation engine `AlertCorrelationGraph`, causal rule model `AlertCausalRule`, and `AlertCorrelationReport` in `src/music_recommender/alerting.py`.
+  - `DEFAULT_ALERT_CORRELATION_RULES` defining causal dependencies between streaming queue saturation, record drops, pipeline health degradation, maintenance worker stoppage, sweep errors, and policy drift rollbacks.
+  - Incident causal chain tracing, root-cause isolation, and downstream symptom suppression within configurable time windows.
+  - FastAPI endpoints `GET /alerts/correlation` (analyzing active service history) and `POST /alerts/correlate` (analyzing arbitrary incident batches).
+  - Operator CLI command `music-recommender alert-correlate` with tabular ASCII tree and JSON output.
+  - Streamlit dashboard sidebar visibility for active incident root causes and linked symptoms.
+- **Comprehensive Verification:**
+  - Full test suite across InfluxDB line protocol escaping, push adapter dry-run and mock HTTP calls, DAG correlation rules, root-cause isolation, API endpoints, CLI commands, and dashboard rendering.
+
 ## [0.35.0] - 2026-10-29
 
 ### Added

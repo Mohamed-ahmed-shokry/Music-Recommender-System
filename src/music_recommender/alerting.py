@@ -1206,6 +1206,256 @@ def render_alertmanager_config(
     return "\n".join(lines) + "\n"
 
 
+@dataclass(frozen=True)
+class AlertCausalRule:
+    """Directed causal dependency between an upstream cause and downstream alert."""
+
+    parent_alert: str
+    child_alert: str
+    description: str = ""
+    max_time_lag_seconds: float = 300.0
+
+    def __post_init__(self) -> None:
+        if not self.parent_alert or not self.child_alert:
+            raise ValueError("parent_alert and child_alert must not be empty.")
+        if self.parent_alert == self.child_alert:
+            raise ValueError(f"Self-referential causal rule: {self.parent_alert}")
+
+
+DEFAULT_ALERT_CORRELATION_RULES: tuple[AlertCausalRule, ...] = (
+    AlertCausalRule(
+        parent_alert="MaintenanceSweepErrors",
+        child_alert="MaintenanceWorkerStopped",
+        description="Repeated sweep errors cause maintenance worker daemon stoppage.",
+    ),
+    AlertCausalRule(
+        parent_alert="MaintenanceWorkerStopped",
+        child_alert="StreamingQueueHighUtilization",
+        description="Stopped worker causes queue saturation.",
+    ),
+    AlertCausalRule(
+        parent_alert="StreamingQueueHighUtilization",
+        child_alert="StreamingRecordsDropped",
+        description="Queue capacity exhaustion triggers backpressure drop.",
+    ),
+    AlertCausalRule(
+        parent_alert="StreamingRecordsDropped",
+        child_alert="StreamingHealthUnhealthy",
+        description="Dropped feedback records degrade streaming health.",
+    ),
+    AlertCausalRule(
+        parent_alert="StreamingFlushErrors",
+        child_alert="StreamingHealthDegraded",
+        description="Transient batch flush errors degrade streaming pipeline health.",
+    ),
+    AlertCausalRule(
+        parent_alert="StreamingFlushErrors",
+        child_alert="StreamingHealthUnhealthy",
+        description="Persistent flush failures render streaming pipeline unhealthy.",
+    ),
+    AlertCausalRule(
+        parent_alert="BanditDriftViolation",
+        child_alert="BanditAutoRollback",
+        description="Drift safety breaches trigger automated champion policy rollback.",
+    ),
+    AlertCausalRule(
+        parent_alert="ServiceDown",
+        child_alert="StreamingHealthUnhealthy",
+        description="Service outage knocks out dependent streaming services.",
+    ),
+)
+
+
+@dataclass(frozen=True)
+class AlertCorrelationReport:
+    """Incident root-cause correlation analysis of active alert notifications."""
+
+    root_causes: list[str]
+    symptoms: list[str]
+    unlinked_alerts: list[str]
+    causal_chains: list[list[str]]
+    total_active_alerts: int
+    summary: str
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert report to dictionary representation."""
+        return {
+            "root_causes": list(self.root_causes),
+            "symptoms": list(self.symptoms),
+            "unlinked_alerts": list(self.unlinked_alerts),
+            "causal_chains": [list(chain) for chain in self.causal_chains],
+            "total_active_alerts": self.total_active_alerts,
+            "summary": self.summary,
+        }
+
+
+class AlertCorrelationGraph:
+    """Directed Acyclic Graph (DAG) for incident root-cause attribution."""
+
+    def __init__(
+        self,
+        rules: Sequence[AlertCausalRule] = DEFAULT_ALERT_CORRELATION_RULES,
+    ) -> None:
+        self.rules = tuple(rules)
+        self._children: dict[str, list[AlertCausalRule]] = {}
+        self._parents: dict[str, list[AlertCausalRule]] = {}
+
+        for rule in self.rules:
+            self._children.setdefault(rule.parent_alert, []).append(rule)
+            self._parents.setdefault(rule.child_alert, []).append(rule)
+
+    def correlate(
+        self,
+        events: Sequence[ReceivedAlertEvent | dict[str, Any] | str],
+        window_seconds: float = 300.0,
+    ) -> AlertCorrelationReport:
+        """Analyze a collection of alerts and attribute root causes and symptoms."""
+        parsed_alerts: list[dict[str, Any]] = []
+
+        for item in events:
+            if isinstance(item, str):
+                parsed_alerts.append(
+                    {
+                        "alertname": item,
+                        "status": "firing",
+                        "timestamp": time.time(),
+                    }
+                )
+            elif isinstance(item, dict):
+                alertname = str(item.get("alertname") or item.get("name") or "")
+                status = str(item.get("status", "firing")).lower()
+                ts_val = item.get("timestamp") or item.get("starts_at")
+                ts = time.time()
+                if isinstance(ts_val, (int, float)):
+                    ts = float(ts_val)
+                elif isinstance(ts_val, str):
+                    try:
+                        ts = datetime.fromisoformat(
+                            ts_val.replace("Z", "+00:00")
+                        ).timestamp()
+                    except ValueError:
+                        ts = time.time()
+                if alertname:
+                    parsed_alerts.append(
+                        {"alertname": alertname, "status": status, "timestamp": ts}
+                    )
+            elif hasattr(item, "alertname"):
+                # ReceivedAlertEvent instance
+                status = getattr(item, "status", "firing").lower()
+                ts_str = getattr(item, "starts_at", None)
+                ts = time.time()
+                if ts_str:
+                    try:
+                        ts = datetime.fromisoformat(
+                            ts_str.replace("Z", "+00:00")
+                        ).timestamp()
+                    except ValueError:
+                        ts = time.time()
+                parsed_alerts.append(
+                    {
+                        "alertname": item.alertname,
+                        "status": status,
+                        "timestamp": ts,
+                    }
+                )
+
+        firing_alerts = [
+            a for a in parsed_alerts if a.get("status") in ("firing", "active")
+        ]
+        if not firing_alerts:
+            return AlertCorrelationReport(
+                root_causes=[],
+                symptoms=[],
+                unlinked_alerts=[],
+                causal_chains=[],
+                total_active_alerts=0,
+                summary="No active firing alerts to correlate.",
+            )
+
+        # Map alertname to earliest occurrence timestamp
+        alert_times: dict[str, float] = {}
+        for a in firing_alerts:
+            name = a["alertname"]
+            ts = a["timestamp"]
+            if name not in alert_times or ts < alert_times[name]:
+                alert_times[name] = ts
+
+        firing_names = set(alert_times.keys())
+        symptom_set: set[str] = set()
+        parent_map: dict[str, list[str]] = {}
+
+        for child_name in firing_names:
+            child_ts = alert_times[child_name]
+            possible_rules = self._parents.get(child_name, [])
+            for rule in possible_rules:
+                if rule.parent_alert in firing_names:
+                    parent_ts = alert_times[rule.parent_alert]
+                    time_diff = child_ts - parent_ts
+                    effective_max = min(rule.max_time_lag_seconds, window_seconds)
+                    # Causal parent fired before child or within allowed window
+                    if -5.0 <= time_diff <= effective_max:
+                        symptom_set.add(child_name)
+                        parent_map.setdefault(child_name, []).append(rule.parent_alert)
+
+        root_causes: list[str] = []
+        unlinked: list[str] = []
+
+        for name in sorted(firing_names):
+            if name in symptom_set:
+                continue
+            # Check if this alert caused any other firing alert
+            has_children = False
+            for rule in self._children.get(name, []):
+                if rule.child_alert in firing_names:
+                    has_children = True
+                    break
+            if has_children:
+                root_causes.append(name)
+            else:
+                unlinked.append(name)
+
+        symptoms = sorted(symptom_set)
+
+        # Build causal chains from root causes down
+        causal_chains: list[list[str]] = []
+
+        def _build_chains(current: str, path: list[str]) -> None:
+            child_rules = self._children.get(current, [])
+            active_children = [
+                r.child_alert
+                for r in child_rules
+                if r.child_alert in firing_names and r.child_alert not in path
+            ]
+            if not active_children:
+                if len(path) > 1:
+                    causal_chains.append(list(path))
+                return
+            for child in active_children:
+                _build_chains(child, path + [child])
+
+        for root in root_causes:
+            _build_chains(root, [root])
+
+        if root_causes:
+            summary = (
+                f"Identified {len(root_causes)} root cause(s) "
+                f"({', '.join(root_causes)}) linking {len(symptoms)} symptom(s)."
+            )
+        elif unlinked:
+            summary = f"No causal links detected; {len(unlinked)} independent alert(s)."
+        else:
+            summary = "No root causes isolated."
+
+        return AlertCorrelationReport(
+            root_causes=root_causes,
+            symptoms=symptoms,
+            unlinked_alerts=unlinked,
+            causal_chains=causal_chains,
+            total_active_alerts=len(firing_names),
+            summary=summary,
+        )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Write generated Prometheus rules or Alertmanager config to PATH or stdout."""
     import sys

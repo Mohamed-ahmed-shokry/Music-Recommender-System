@@ -2267,3 +2267,55 @@ def test_service_alert_webhook_from_env_and_validation(
 
     monkeypatch.delenv(ALERT_WEBHOOK_URL_ENV_VAR)
     assert create_service(tmp_path).alert_dispatcher is None
+
+
+def test_service_export_influxdb_metrics(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    exported = service.export_influxdb_metrics(
+        custom_labels={"cluster": "test_cluster"},
+        default_measurement="test_recommender",
+    )
+    assert "test_recommender," in exported
+    assert "cluster=test_cluster" in exported
+    assert "music_recommender_up=" in exported
+
+
+def test_service_push_telemetry_dry_run(tmp_path: Path) -> None:
+    from music_recommender.telemetry import TelemetryPushConfig, TelemetryPushProtocol
+
+    service = create_service(tmp_path)
+    cfg = TelemetryPushConfig(
+        endpoint_url="http://collector.example.com/write",
+        protocol=TelemetryPushProtocol.INFLUXDB,
+        dry_run=True,
+    )
+    res = service.push_telemetry(cfg)
+    assert res.success is True
+    assert res.samples_pushed > 0
+    assert res.status_code == 200
+
+
+def test_service_correlate_alert_history(tmp_path: Path) -> None:
+    from music_recommender.alerting import AlertSeverity, ReceivedAlertEvent
+
+    service = create_service(tmp_path)
+    service.alert_history.record(
+        ReceivedAlertEvent(
+            alertname="StreamingQueueHighUtilization",
+            status="firing",
+            severity=AlertSeverity.WARNING,
+            summary="Queue utilization is high",
+        )
+    )
+    service.alert_history.record(
+        ReceivedAlertEvent(
+            alertname="StreamingRecordsDropped",
+            status="firing",
+            severity=AlertSeverity.CRITICAL,
+            summary="Records dropped due to backpressure",
+        )
+    )
+    report = service.correlate_alert_history(limit=10, window_seconds=300.0)
+    assert report.total_active_alerts == 2
+    assert "StreamingQueueHighUtilization" in report.root_causes
+    assert "StreamingRecordsDropped" in report.symptoms

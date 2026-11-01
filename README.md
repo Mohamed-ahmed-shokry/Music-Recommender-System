@@ -1035,6 +1035,18 @@ The service provides standard, pure-Python Prometheus text exposition (version 0
    # Export formatted JSON to stdout
    uv run python -m music_recommender.cli export-metrics --format json
 
+   # Export InfluxDB Line Protocol 2.0 format to stdout or file
+   uv run python -m music_recommender.cli export-metrics --format influxdb
+
+   # Push metrics to external collector (InfluxDB v2, VictoriaMetrics, or Telegraf)
+   uv run python -m music_recommender.cli push-metrics \
+     --endpoint-url http://localhost:8086/api/v2/write \
+     --protocol influxdb \
+     --dry-run
+
+   # Correlate active alert incidents and attribute root causes
+   uv run python -m music_recommender.cli alert-correlate
+
    # Export to a file with custom monitoring labels and timestamps
    uv run python -m music_recommender.cli export-metrics \
      --format prometheus \
@@ -1117,10 +1129,14 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/metrics` | Prometheus 0.0.4 text exposition metrics for Prometheus and OpenTelemetry collectors |
 | `GET` | `/alerts?dispatch=true` | Evaluate alert rules on live metrics, notify the webhook on state changes, and return rule states |
 | `POST` | `/alerts/webhook?channel=alertmanager` | Ingest external Prometheus/Alertmanager or internal webhook notifications into the ring buffer |
+| `GET` | `/metrics/influxdb?measurement=music_recommender` | Real-time service metrics formatted in InfluxDB Line Protocol 2.0 |
+| `POST` | `/metrics/push` | Push current service metrics to a remote telemetry collector endpoint |
 | `GET` | `/alerts/history?limit=50&channel=alertmanager&include_spillover=true` | Query received alert notification history and audit log |
 | `GET` | `/alerts/dlq?limit=50` | Query captured dead-letter queue records for unparseable or rejected alerts |
 | `DELETE` | `/alerts/dlq` | Purge captured dead-letter queue records |
 | `POST` | `/alerts/replay?dry_run=false` | Replay serialized alert notification sequence into the service |
+| `GET` | `/alerts/correlation?limit=50&window_seconds=300` | Incident root-cause correlation analysis of active alert notifications |
+| `POST` | `/alerts/correlate` | Analyze an arbitrary batch of alert events and attribute root causes and symptoms |
 | `GET` | `/metadata` | Training config, dataset fingerprint, artifact metadata |
 | `GET` | `/evaluation/ablation-summary` | Persisted aggregated knob-importance summary |
 | `GET` | `/catalog/artists?query=pop&limit=25` | Search and page through artists and metadata |

@@ -5,7 +5,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -240,6 +240,69 @@ def metrics() -> Response:
     )
 
 
+@app.get("/metrics/influxdb")
+def metrics_influxdb(
+    measurement: str = "music_recommender",
+) -> Response:
+    """Return metrics in InfluxDB Line Protocol 2.0 format."""
+    from music_recommender.telemetry import export_influxdb_metrics
+
+    return PlainTextResponse(
+        content=export_influxdb_metrics(
+            service,
+            default_measurement=measurement,
+        ),
+        media_type="text/plain; charset=utf-8",
+    )
+
+
+@app.post("/metrics/push")
+async def metrics_push(request: Request) -> dict[str, object]:
+    """Push current service metrics to a remote telemetry collector."""
+    from music_recommender.telemetry import (
+        TelemetryPushAdapter,
+        TelemetryPushConfig,
+        collect_service_metric_families,
+        get_global_request_tracker,
+    )
+
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON payload: {exc}",
+        ) from exc
+
+    if not isinstance(body, dict) or "endpoint_url" not in body:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payload must include 'endpoint_url'.",
+        )
+
+    try:
+        cfg = TelemetryPushConfig(
+            endpoint_url=str(body["endpoint_url"]),
+            protocol=body.get("protocol", "influxdb"),
+            headers=body.get("headers", {}),
+            timeout_seconds=float(body.get("timeout_seconds", 10.0)),
+            default_measurement=body.get("default_measurement", "music_recommender"),
+            dry_run=bool(body.get("dry_run", False)),
+        )
+    except Exception as err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid push configuration: {err}",
+        ) from err
+
+    families = collect_service_metric_families(service)
+    families.extend(get_global_request_tracker().to_metric_families())
+
+    adapter = TelemetryPushAdapter()
+    res = adapter.push(families, cfg)
+    return res.to_dict()
+
+
 @app.get("/alerts")
 def alerts(dispatch: bool = True) -> dict[str, object]:
     """Evaluate alert rules against live metrics and return their states.
@@ -438,6 +501,63 @@ async def alerts_replay(
         "dry_run": dry_run,
         "alerts": [e.alertname for e in parsed_events],
     }
+
+
+@app.get("/alerts/correlation")
+def alerts_correlation(
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    window_seconds: Annotated[float, Query(ge=1.0, le=86400.0)] = 300.0,
+    include_spillover: bool = False,
+) -> dict[str, object]:
+    """Perform incident root-cause correlation analysis over active alert history."""
+    from music_recommender.alerting import AlertCorrelationGraph
+
+    if service is not None:
+        report = service.correlate_alert_history(
+            limit=limit,
+            window_seconds=window_seconds,
+            include_spillover=include_spillover,
+        )
+        return cast(dict[str, object], report.to_dict())
+
+    events = _fallback_alert_history.get_events(limit=limit)
+    graph = AlertCorrelationGraph()
+    fallback_report = graph.correlate(events, window_seconds=window_seconds)
+    return cast(dict[str, object], fallback_report.to_dict())
+
+
+@app.post("/alerts/correlate")
+async def alerts_correlate(
+    request: Request,
+    window_seconds: float = 300.0,
+) -> dict[str, object]:
+    """Analyze an arbitrary collection of alert events and attribute root causes."""
+    from music_recommender.alerting import AlertCorrelationGraph
+
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON payload: {exc}",
+        ) from exc
+
+    if not isinstance(body, dict) or "alerts" not in body:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payload must be a JSON object containing an 'alerts' list.",
+        )
+
+    alerts_list = body.get("alerts")
+    if not isinstance(alerts_list, list):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="'alerts' must be a list of alert notifications.",
+        )
+
+    graph = AlertCorrelationGraph()
+    report = graph.correlate(alerts_list, window_seconds=window_seconds)
+    return report.to_dict()
 
 
 @app.get("/maintenance/status")

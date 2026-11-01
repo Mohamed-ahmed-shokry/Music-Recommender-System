@@ -8,6 +8,8 @@ import re
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -173,6 +175,87 @@ def render_prometheus_exposition(families: list[MetricFamily]) -> str:
     if not rendered_blocks:
         return ""
     return "\n".join(rendered_blocks) + "\n"
+
+
+def escape_influxdb_key(text: str) -> str:
+    """Escape commas, equal signs, and spaces for InfluxDB measurements/tag keys."""
+    return (
+        text.replace("\\", "\\\\")
+        .replace(",", "\\,")
+        .replace("=", "\\=")
+        .replace(" ", "\\ ")
+    )
+
+
+def escape_influxdb_tag_value(value: Any) -> str:
+    """Escape commas, equal signs, and spaces for InfluxDB tag values."""
+    text = str(value)
+    return (
+        text.replace("\\", "\\\\")
+        .replace(",", "\\,")
+        .replace("=", "\\=")
+        .replace(" ", "\\ ")
+    )
+
+
+def format_influxdb_field_value(value: float | int | bool | str) -> str | None:
+    """Format a scalar value for InfluxDB Line Protocol field representation."""
+    if isinstance(value, bool):
+        return "t" if value else "f"
+    if isinstance(value, int):
+        return f"{value}i"
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return None
+        return f"{value:.6g}" if abs(value) < 1e-4 or abs(value) >= 1e6 else f"{value}"
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    return None
+
+
+def render_influxdb_line_protocol(
+    families: list[MetricFamily],
+    default_measurement: str = "music_recommender",
+    fallback_timestamp_ns: int | None = None,
+) -> str:
+    """Render metric families into InfluxDB Line Protocol 2.0 text format."""
+    lines: list[str] = []
+    measurement_str = escape_influxdb_key(default_measurement)
+
+    for fam in families:
+        for sample in fam.samples:
+            field_val = format_influxdb_field_value(sample.value)
+            if field_val is None:
+                continue
+
+            field_str = f"{escape_influxdb_key(sample.name)}={field_val}"
+
+            if sample.labels:
+                sorted_tags = sorted(sample.labels.items())
+                tag_parts = [
+                    f"{escape_influxdb_key(k)}={escape_influxdb_tag_value(v)}"
+                    for k, v in sorted_tags
+                ]
+                tags_str = ",".join(tag_parts)
+                line_prefix = f"{measurement_str},{tags_str}"
+            else:
+                line_prefix = measurement_str
+
+            ts_ns = (
+                sample.timestamp_ms * 1_000_000
+                if sample.timestamp_ms is not None
+                else fallback_timestamp_ns
+            )
+
+            if ts_ns is not None:
+                lines.append(f"{line_prefix} {field_str} {ts_ns}")
+            else:
+                lines.append(f"{line_prefix} {field_str}")
+
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
 
 
 def collect_service_metric_families(
@@ -675,6 +758,221 @@ def export_metrics_json(
         families = _apply_timestamps(families, now_ms)
     metrics_data = {"metrics": [f.to_dict() for f in families if f.samples]}
     return json.dumps(metrics_data, indent=indent) + "\n"
+
+
+def export_influxdb_metrics(
+    service: Any | None,
+    *,
+    request_tracker: RequestTelemetryTracker | None = None,
+    custom_labels: dict[str, str] | None = None,
+    default_measurement: str = "music_recommender",
+    include_timestamps: bool = True,
+) -> str:
+    """Export complete metrics in InfluxDB Line Protocol 2.0 format for the service."""
+    families = collect_service_metric_families(service, custom_labels=custom_labels)
+    tracker = request_tracker or get_global_request_tracker()
+    families.extend(tracker.to_metric_families())
+    fallback_ts_ns = int(time.time() * 1_000_000_000) if include_timestamps else None
+    return render_influxdb_line_protocol(
+        families,
+        default_measurement=default_measurement,
+        fallback_timestamp_ns=fallback_ts_ns,
+    )
+
+
+class TelemetryPushProtocol(StrEnum):
+    """Supported push protocols for remote telemetry collection."""
+
+    INFLUXDB = "influxdb"
+    PROMETHEUS_TEXT = "prometheus_text"
+    PROMETHEUS_JSON = "prometheus_json"
+
+
+@dataclass(frozen=True)
+class TelemetryPushConfig:
+    """Configuration for dispatching telemetry metrics to a remote collector."""
+
+    endpoint_url: str
+    protocol: TelemetryPushProtocol | str = TelemetryPushProtocol.INFLUXDB
+    headers: dict[str, str] = field(default_factory=dict)
+    timeout_seconds: float = 10.0
+    default_measurement: str = "music_recommender"
+    dry_run: bool = False
+    include_timestamps: bool = True
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "protocol",
+            (
+                self.protocol
+                if isinstance(self.protocol, TelemetryPushProtocol)
+                else TelemetryPushProtocol(str(self.protocol).lower())
+            ),
+        )
+        if not self.endpoint_url.startswith(("http://", "https://")):
+            raise ValueError(
+                f"Invalid telemetry push endpoint URL '{self.endpoint_url}'. "
+                "Must start with http:// or https://"
+            )
+
+
+@dataclass(frozen=True)
+class TelemetryPushResult:
+    """Report outcome of pushing metrics to a remote telemetry collector."""
+
+    success: bool
+    samples_pushed: int
+    protocol: str
+    endpoint_url: str
+    status_code: int | None = None
+    duration_ms: float = 0.0
+    error: str | None = None
+    payload_bytes: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert result to dictionary representation."""
+        return {
+            "success": self.success,
+            "samples_pushed": self.samples_pushed,
+            "protocol": self.protocol,
+            "endpoint_url": self.endpoint_url,
+            "status_code": self.status_code,
+            "duration_ms": round(self.duration_ms, 2),
+            "error": self.error,
+            "payload_bytes": self.payload_bytes,
+        }
+
+
+class TelemetryPushAdapter:
+    """HTTP client adapter for pushing metric samples to remote collectors."""
+
+    def serialize_payload(
+        self,
+        families: list[MetricFamily],
+        config: TelemetryPushConfig,
+    ) -> tuple[bytes, str]:
+        """Serialize metric families into protocol-specific bytes and content type."""
+        proto = (
+            config.protocol.value
+            if isinstance(config.protocol, TelemetryPushProtocol)
+            else str(config.protocol).lower()
+        )
+
+        if proto == TelemetryPushProtocol.INFLUXDB:
+            fb_ts = (
+                int(time.time() * 1_000_000_000) if config.include_timestamps else None
+            )
+            body = render_influxdb_line_protocol(
+                families,
+                default_measurement=config.default_measurement,
+                fallback_timestamp_ns=fb_ts,
+            )
+            return body.encode("utf-8"), "text/plain; charset=utf-8"
+
+        if proto == TelemetryPushProtocol.PROMETHEUS_TEXT:
+            body = render_prometheus_exposition(families)
+            return (
+                body.encode("utf-8"),
+                "text/plain; version=0.0.4; charset=utf-8",
+            )
+
+        if proto == TelemetryPushProtocol.PROMETHEUS_JSON:
+            metrics_data = {"metrics": [f.to_dict() for f in families if f.samples]}
+            body = json.dumps(metrics_data, indent=2) + "\n"
+            return body.encode("utf-8"), "application/json; charset=utf-8"
+
+        raise ValueError(f"Unsupported telemetry push protocol: '{proto}'")
+
+    def push(
+        self,
+        families: list[MetricFamily],
+        config: TelemetryPushConfig,
+    ) -> TelemetryPushResult:
+        """Dispatch serialized metric families to remote endpoint."""
+        total_samples = sum(len(f.samples) for f in families)
+        proto_str = (
+            config.protocol.value
+            if isinstance(config.protocol, TelemetryPushProtocol)
+            else str(config.protocol)
+        )
+
+        try:
+            payload_bytes, content_type = self.serialize_payload(families, config)
+        except Exception as exc:
+            return TelemetryPushResult(
+                success=False,
+                samples_pushed=0,
+                protocol=proto_str,
+                endpoint_url=config.endpoint_url,
+                error=f"Serialization failed: {exc}",
+            )
+
+        if config.dry_run:
+            return TelemetryPushResult(
+                success=True,
+                samples_pushed=total_samples,
+                protocol=proto_str,
+                endpoint_url=config.endpoint_url,
+                status_code=200,
+                duration_ms=0.0,
+                payload_bytes=len(payload_bytes),
+            )
+
+        headers = {
+            "Content-Type": content_type,
+            "User-Agent": "MusicRecommender-TelemetryPush/1.0",
+        }
+        headers.update(config.headers)
+
+        req = urllib.request.Request(
+            config.endpoint_url,
+            data=payload_bytes,
+            headers=headers,
+            method="POST",
+        )
+
+        start = time.perf_counter()
+        try:
+            with urllib.request.urlopen(req, timeout=config.timeout_seconds) as resp:
+                raw_status = getattr(resp, "status", getattr(resp, "code", 200))
+                try:
+                    status = int(raw_status)
+                except (TypeError, ValueError):
+                    status = 200
+                duration_ms = (time.perf_counter() - start) * 1000
+                return TelemetryPushResult(
+                    success=200 <= status < 300,
+                    samples_pushed=total_samples,
+                    protocol=proto_str,
+                    endpoint_url=config.endpoint_url,
+                    status_code=status,
+                    duration_ms=duration_ms,
+                    payload_bytes=len(payload_bytes),
+                )
+        except urllib.error.HTTPError as http_err:
+            duration_ms = (time.perf_counter() - start) * 1000
+            return TelemetryPushResult(
+                success=False,
+                samples_pushed=0,
+                protocol=proto_str,
+                endpoint_url=config.endpoint_url,
+                status_code=http_err.code,
+                duration_ms=duration_ms,
+                error=f"HTTP {http_err.code}: {http_err.reason}",
+                payload_bytes=len(payload_bytes),
+            )
+        except Exception as err:
+            duration_ms = (time.perf_counter() - start) * 1000
+            return TelemetryPushResult(
+                success=False,
+                samples_pushed=0,
+                protocol=proto_str,
+                endpoint_url=config.endpoint_url,
+                duration_ms=duration_ms,
+                error=str(err),
+                payload_bytes=len(payload_bytes),
+            )
 
 
 KNOWN_PROMETHEUS_METRIC_NAMES: frozenset[str] = frozenset(

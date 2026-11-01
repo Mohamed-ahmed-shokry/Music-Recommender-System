@@ -1,6 +1,8 @@
 """Tests for Prometheus exposition models, formatting, and telemetry."""
 
+import urllib.error
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
@@ -10,12 +12,20 @@ from music_recommender.telemetry import (
     MetricSample,
     MetricType,
     RequestTelemetryTracker,
+    TelemetryPushAdapter,
+    TelemetryPushConfig,
+    TelemetryPushProtocol,
     collect_service_metric_families,
     escape_help_string,
+    escape_influxdb_key,
+    escape_influxdb_tag_value,
     escape_label_value,
+    export_influxdb_metrics,
     export_metrics_json,
     export_prometheus_metrics,
+    format_influxdb_field_value,
     format_metric_value,
+    render_influxdb_line_protocol,
     render_prometheus_exposition,
     validate_dashboard_metrics,
 )
@@ -494,3 +504,141 @@ def test_validate_dashboard_metrics_invalid_and_edge_cases(tmp_path: Path) -> No
     res_empty = validate_dashboard_metrics(empty_dash)
     assert not res_empty.is_valid
     assert any("contains no panels" in e for e in res_empty.errors)
+
+
+def test_escape_influxdb_key_and_tag_value() -> None:
+    assert escape_influxdb_key("simple_key") == "simple_key"
+    assert escape_influxdb_key("key,with=special chars") == r"key\,with\=special\ chars"
+    assert escape_influxdb_tag_value("tag value") == r"tag\ value"
+    assert escape_influxdb_tag_value("foo=bar,baz") == r"foo\=bar\,baz"
+
+
+def test_format_influxdb_field_value() -> None:
+    assert format_influxdb_field_value(True) == "t"
+    assert format_influxdb_field_value(False) == "f"
+    assert format_influxdb_field_value(42) == "42i"
+    assert format_influxdb_field_value(3.14159) == "3.14159"
+    assert format_influxdb_field_value('quoted "text"') == '"quoted \\"text\\""'
+    assert format_influxdb_field_value(float("nan")) is None
+    assert format_influxdb_field_value(float("inf")) is None
+
+
+def test_render_influxdb_line_protocol() -> None:
+    fam = MetricFamily(
+        name="music_recommender_queue_size",
+        help_text="Queue size",
+        metric_type=MetricType.GAUGE,
+    )
+    fam.add_sample(
+        value=10, labels={"env": "prod", "host": "srv 01"}, timestamp_ms=1700000000000
+    )
+
+    lines = render_influxdb_line_protocol([fam], default_measurement="recommender")
+    expected = (
+        "recommender,env=prod,host=srv\\ 01 "
+        "music_recommender_queue_size=10i 1700000000000000000\n"
+    )
+    assert lines == expected
+
+    # Empty families
+    assert render_influxdb_line_protocol([]) == ""
+
+
+def test_export_influxdb_metrics_with_service() -> None:
+    exported = export_influxdb_metrics(
+        service=None,
+        custom_labels={"tier": "streaming"},
+        default_measurement="test_music",
+        include_timestamps=True,
+    )
+    assert "test_music," in exported
+    assert "tier=streaming" in exported
+    assert "music_recommender_up=" in exported
+
+
+def test_telemetry_push_config_validation() -> None:
+    cfg = TelemetryPushConfig(
+        endpoint_url="http://localhost:8086/api/v2/write",
+        protocol="influxdb",
+    )
+    assert cfg.protocol == TelemetryPushProtocol.INFLUXDB
+
+    with pytest.raises(ValueError, match="Invalid telemetry push endpoint URL"):
+        TelemetryPushConfig(endpoint_url="invalid_url")
+
+    with pytest.raises(ValueError, match="is not a valid TelemetryPushProtocol"):
+        TelemetryPushConfig(
+            endpoint_url="http://localhost:8086", protocol="unsupported_proto"
+        )
+
+
+def test_telemetry_push_adapter_dry_run() -> None:
+    fam = MetricFamily(
+        name="music_recommender_up",
+        help_text="Service status",
+        metric_type=MetricType.GAUGE,
+    )
+    fam.add_sample(value=1)
+
+    adapter = TelemetryPushAdapter()
+
+    for proto in (
+        TelemetryPushProtocol.INFLUXDB,
+        TelemetryPushProtocol.PROMETHEUS_TEXT,
+        TelemetryPushProtocol.PROMETHEUS_JSON,
+    ):
+        cfg = TelemetryPushConfig(
+            endpoint_url="http://localhost:8086",
+            protocol=proto,
+            dry_run=True,
+        )
+        res = adapter.push([fam], cfg)
+        assert res.success is True
+        assert res.samples_pushed == 1
+        assert res.status_code == 200
+        assert res.payload_bytes > 0
+        as_dict = res.to_dict()
+        assert as_dict["success"] is True
+
+
+def test_telemetry_push_adapter_mock_http() -> None:
+    fam = MetricFamily(
+        name="music_recommender_up",
+        help_text="Service status",
+        metric_type=MetricType.GAUGE,
+    )
+    fam.add_sample(value=1)
+    adapter = TelemetryPushAdapter()
+    cfg = TelemetryPushConfig(
+        endpoint_url="http://collector.example.com/write",
+        protocol=TelemetryPushProtocol.INFLUXDB,
+    )
+
+    # 1. Success 204
+    mock_resp = MagicMock()
+    mock_resp.status = 204
+    mock_resp.__enter__.return_value = mock_resp
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        res = adapter.push([fam], cfg)
+        assert res.success is True
+        assert res.status_code == 204
+
+    # 2. HTTP Error 401
+    http_err = urllib.error.HTTPError(
+        url=cfg.endpoint_url,
+        code=401,
+        msg="Unauthorized",
+        hdrs=None,  # type: ignore[arg-type]
+        fp=None,
+    )
+    with patch("urllib.request.urlopen", side_effect=http_err):
+        res_err = adapter.push([fam], cfg)
+        assert res_err.success is False
+        assert res_err.status_code == 401
+        assert "Unauthorized" in (res_err.error or "")
+
+    # 3. Connection Error
+    with patch("urllib.request.urlopen", side_effect=OSError("Connection refused")):
+        res_conn = adapter.push([fam], cfg)
+        assert res_conn.success is False
+        assert "Connection refused" in (res_conn.error or "")

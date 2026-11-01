@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -833,3 +834,126 @@ def test_alert_replay_engine_dry_run_and_dispatch(
     assert report_live.failed == 1
     assert report_live.results[0].success is True
     assert report_live.results[1].success is False
+
+
+def test_alert_causal_rule_validation() -> None:
+    from music_recommender.alerting import AlertCausalRule
+
+    rule = AlertCausalRule("Parent", "Child", description="Test rule")
+    assert rule.parent_alert == "Parent"
+    assert rule.child_alert == "Child"
+
+    with pytest.raises(ValueError, match="must not be empty"):
+        AlertCausalRule("", "Child")
+
+    with pytest.raises(ValueError, match="Self-referential causal rule"):
+        AlertCausalRule("SameAlert", "SameAlert")
+
+
+def test_alert_correlation_graph_empty_and_resolved() -> None:
+    from music_recommender.alerting import AlertCorrelationGraph
+
+    graph = AlertCorrelationGraph()
+    res_empty = graph.correlate([])
+    assert res_empty.total_active_alerts == 0
+    assert res_empty.root_causes == []
+    assert res_empty.symptoms == []
+
+    # All resolved
+    res_resolved = graph.correlate(
+        [
+            {"alertname": "StreamingQueueHighUtilization", "status": "resolved"},
+            {"alertname": "StreamingRecordsDropped", "status": "resolved"},
+        ]
+    )
+    assert res_resolved.total_active_alerts == 0
+
+
+def test_alert_correlation_graph_root_cause_and_symptoms() -> None:
+    from music_recommender.alerting import AlertCorrelationGraph
+
+    graph = AlertCorrelationGraph()
+    now = time.time()
+    events = [
+        {"alertname": "MaintenanceWorkerStopped", "status": "firing", "timestamp": now},
+        {
+            "alertname": "StreamingQueueHighUtilization",
+            "status": "firing",
+            "timestamp": now + 10,
+        },
+        {
+            "alertname": "StreamingRecordsDropped",
+            "status": "firing",
+            "timestamp": now + 20,
+        },
+        {"alertname": "UnrelatedAlert", "status": "firing", "timestamp": now + 5},
+    ]
+
+    report = graph.correlate(events, window_seconds=300.0)
+    assert report.total_active_alerts == 4
+    assert "MaintenanceWorkerStopped" in report.root_causes
+    assert "StreamingQueueHighUtilization" in report.symptoms
+    assert "StreamingRecordsDropped" in report.symptoms
+    assert "UnrelatedAlert" in report.unlinked_alerts
+    assert len(report.causal_chains) >= 1
+    assert report.causal_chains[0] == [
+        "MaintenanceWorkerStopped",
+        "StreamingQueueHighUtilization",
+        "StreamingRecordsDropped",
+    ]
+
+    d = report.to_dict()
+    assert d["total_active_alerts"] == 4
+    assert "MaintenanceWorkerStopped" in d["root_causes"]
+
+
+def test_alert_correlation_graph_time_window_expiry() -> None:
+    from music_recommender.alerting import AlertCorrelationGraph
+
+    graph = AlertCorrelationGraph()
+    t0 = 1000.0
+    events = [
+        {
+            "alertname": "StreamingQueueHighUtilization",
+            "status": "firing",
+            "timestamp": t0,
+        },
+        # Child alert fires 500s later (window is 100s)
+        {
+            "alertname": "StreamingRecordsDropped",
+            "status": "firing",
+            "timestamp": t0 + 500.0,
+        },
+    ]
+    report = graph.correlate(events, window_seconds=100.0)
+    # Child alert should not be linked because lag exceeds window
+    assert "StreamingRecordsDropped" not in report.symptoms
+    assert "StreamingRecordsDropped" in report.unlinked_alerts
+
+
+def test_alert_correlation_graph_received_alert_event_objects() -> None:
+    from music_recommender.alerting import (
+        AlertCorrelationGraph,
+        AlertSeverity,
+        ReceivedAlertEvent,
+    )
+
+    graph = AlertCorrelationGraph()
+    e1 = ReceivedAlertEvent(
+        alertname="BanditDriftViolation",
+        status="firing",
+        severity=AlertSeverity.WARNING,
+        summary="Policy drift detected",
+        starts_at="2026-10-31T01:00:00Z",
+    )
+    e2 = ReceivedAlertEvent(
+        alertname="BanditAutoRollback",
+        status="firing",
+        severity=AlertSeverity.CRITICAL,
+        summary="Auto rollback executed",
+        starts_at="2026-10-31T01:01:00Z",
+    )
+    report = graph.correlate([e1, e2], window_seconds=300.0)
+    assert report.root_causes == ["BanditDriftViolation"]
+    assert report.symptoms == ["BanditAutoRollback"]
+    assert report.causal_chains == [["BanditDriftViolation", "BanditAutoRollback"]]

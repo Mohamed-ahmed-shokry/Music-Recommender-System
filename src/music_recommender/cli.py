@@ -15,6 +15,7 @@ import typer
 
 from music_recommender import __version__
 from music_recommender.alerting import (
+    AlertCorrelationGraph,
     AlertEvaluator,
     AlertReplayEngine,
     AlertRule,
@@ -119,7 +120,10 @@ from music_recommender.surfaces import (
     write_surface_comparison_report,
 )
 from music_recommender.telemetry import (
+    TelemetryPushAdapter,
+    TelemetryPushConfig,
     collect_service_metric_families,
+    export_influxdb_metrics,
     export_metrics_json,
     export_prometheus_metrics,
     validate_dashboard_metrics,
@@ -3786,7 +3790,7 @@ def export_metrics(
         typer.Option(
             "--format",
             "-f",
-            help="Export format: 'prometheus' (0.0.4 text) or 'json'.",
+            help="Export format: 'prometheus', 'json', or 'influxdb'.",
         ),
     ] = "prometheus",
     label: Annotated[
@@ -3810,10 +3814,10 @@ def export_metrics(
 ) -> None:
     """Export recommender system metrics in Prometheus or structured JSON format."""
     normalized_format = format.strip().lower()
-    if normalized_format not in ("prometheus", "json"):
+    if normalized_format not in ("prometheus", "json", "influxdb"):
         typer.secho(
             f"Error: Unsupported format '{format}'. "
-            "Supported formats are: prometheus, json",
+            "Supported formats are: prometheus, json, influxdb",
             fg=typer.colors.RED,
             err=True,
         )
@@ -3840,6 +3844,12 @@ def export_metrics(
             custom_labels=custom_labels or None,
             include_timestamps=include_timestamps,
             indent=2,
+        )
+    elif normalized_format == "influxdb":
+        rendered = export_influxdb_metrics(
+            service=service,
+            custom_labels=custom_labels or None,
+            include_timestamps=include_timestamps,
         )
     else:
         rendered = export_prometheus_metrics(
@@ -4505,6 +4515,224 @@ def replay_alerts_cmd(
             bold=True,
         )
         raise typer.Exit(code=1)
+
+
+@app.command(name="push-metrics")
+def push_metrics(
+    endpoint_url: Annotated[
+        str,
+        typer.Option(
+            "--endpoint-url",
+            "-u",
+            help="Remote collector URL (e.g. http://localhost:8086/api/v2/write).",
+        ),
+    ],
+    protocol: Annotated[
+        str,
+        typer.Option(
+            "--protocol",
+            "-p",
+            help="Push protocol: 'influxdb', 'prometheus_text', 'prometheus_json'.",
+        ),
+    ] = "influxdb",
+    measurement: Annotated[
+        str,
+        typer.Option(
+            "--measurement",
+            "-m",
+            help="Default measurement name for InfluxDB line protocol.",
+        ),
+    ] = "music_recommender",
+    header: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--header",
+            "-H",
+            help="Custom HTTP header in 'Key: Value' format. Can be repeated.",
+        ),
+    ] = None,
+    timeout: Annotated[
+        float,
+        typer.Option(
+            "--timeout",
+            help="HTTP request timeout in seconds.",
+        ),
+    ] = 10.0,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Simulate serialization and push without sending network requests.",
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Format output as JSON.",
+        ),
+    ] = False,
+) -> None:
+    """Push system metrics to an external telemetry collector."""
+    headers_dict: dict[str, str] = {}
+    if header:
+        for h in header:
+            if ":" not in h:
+                typer.secho(
+                    f"Error: Invalid header format '{h}'. Must be 'Key: Value'.",
+                    fg=typer.colors.RED,
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+            k, v = h.split(":", 1)
+            headers_dict[k.strip()] = v.strip()
+
+    try:
+        config = TelemetryPushConfig(
+            endpoint_url=endpoint_url,
+            protocol=protocol,
+            headers=headers_dict,
+            timeout_seconds=timeout,
+            default_measurement=measurement,
+            dry_run=dry_run,
+        )
+    except Exception as exc:
+        typer.secho(f"Configuration error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable for telemetry push: %s", exc)
+        service = None
+
+    families = collect_service_metric_families(service)
+    adapter = TelemetryPushAdapter()
+    result = adapter.push(families, config)
+
+    if json_output:
+        typer.echo(json.dumps(result.to_dict(), indent=2))
+    else:
+        status_color = typer.colors.GREEN if result.success else typer.colors.RED
+        status_str = "SUCCESS" if result.success else "FAILURE"
+        mode_str = " (DRY-RUN)" if dry_run else ""
+        typer.secho(
+            f"Telemetry Push: {status_str}{mode_str}", fg=status_color, bold=True
+        )
+        typer.echo(f"  Endpoint: {result.endpoint_url}")
+        typer.echo(f"  Protocol: {result.protocol}")
+        typer.echo(f"  Samples pushed: {result.samples_pushed}")
+        if result.status_code is not None:
+            typer.echo(f"  Status code: {result.status_code}")
+        typer.echo(f"  Duration: {result.duration_ms:.2f} ms")
+        if result.error:
+            typer.secho(f"  Error: {result.error}", fg=typer.colors.RED)
+
+    if not result.success:
+        raise typer.Exit(code=1)
+
+
+@app.command(name="alert-correlate")
+def alert_correlate(
+    input_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--input-file",
+            "-i",
+            help="Path to alert events JSON/JSONL. If omitted, uses active history.",
+        ),
+    ] = None,
+    window_seconds: Annotated[
+        float,
+        typer.Option(
+            "--window-seconds",
+            "-w",
+            help="Maximum causal time window in seconds between parent and child.",
+        ),
+    ] = 300.0,
+    format: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output display format: 'table' or 'json'.",
+        ),
+    ] = "table",
+    include_spillover: Annotated[
+        bool,
+        typer.Option(
+            "--include-spillover",
+            help="Include persistent disk spillover when reading active history.",
+        ),
+    ] = False,
+) -> None:
+    """Analyze alert notifications and attribute root causes and symptoms."""
+    normalized_format = format.lower().strip()
+    if normalized_format not in ("table", "json"):
+        typer.secho("Format must be 'table' or 'json'.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    events: list[Any] = []
+    if input_file is not None:
+        engine = AlertReplayEngine()
+        try:
+            events = engine.load_events_from_file(input_file)
+        except Exception as exc:
+            typer.secho(
+                f"Failed to load file '{input_file}': {exc}",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=1) from exc
+    else:
+        service: RecommenderService | None = None
+        try:
+            service = RecommenderService.from_artifacts()
+            events = service.get_alert_history(
+                limit=100, include_spillover=include_spillover
+            )
+        except Exception as exc:
+            logger.debug(
+                "RecommenderService unavailable for alert correlation: %s", exc
+            )
+            events = []
+
+    graph = AlertCorrelationGraph()
+    report = graph.correlate(events, window_seconds=window_seconds)
+
+    if normalized_format == "json":
+        typer.echo(json.dumps(report.to_dict(), indent=2))
+        return
+
+    typer.secho("Alert Root-Cause Correlation Report", bold=True)
+    typer.echo(f"Active Alerts Analyzed: {report.total_active_alerts}")
+    typer.echo(f"Summary: {report.summary}")
+    typer.echo("-" * 88)
+
+    if report.root_causes:
+        typer.secho("Identified Root Causes:", fg=typer.colors.RED, bold=True)
+        for rc in report.root_causes:
+            typer.echo(f"  * {rc}")
+
+    if report.symptoms:
+        typer.secho("Downstream Symptoms:", fg=typer.colors.YELLOW, bold=True)
+        for sym in report.symptoms:
+            typer.echo(f"  * {sym}")
+
+    if report.causal_chains:
+        typer.secho(
+            "Causal Chains (Root -> Symptoms):", fg=typer.colors.CYAN, bold=True
+        )
+        for idx, chain in enumerate(report.causal_chains, 1):
+            typer.echo(f"  {idx}. " + " -> ".join(chain))
+
+    if report.unlinked_alerts:
+        typer.secho("Independent / Unlinked Alerts:", fg=typer.colors.MAGENTA)
+        for unl in report.unlinked_alerts:
+            typer.echo(f"  * {unl}")
+
+    typer.echo("-" * 88)
 
 
 if __name__ == "__main__":
