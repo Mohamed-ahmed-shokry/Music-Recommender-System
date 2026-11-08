@@ -2319,3 +2319,41 @@ def test_service_correlate_alert_history(tmp_path: Path) -> None:
     assert report.total_active_alerts == 2
     assert "StreamingQueueHighUtilization" in report.root_causes
     assert "StreamingRecordsDropped" in report.symptoms
+
+
+def test_service_alert_storage_rotation_and_retention(tmp_path: Path) -> None:
+    from music_recommender.alerting import AlertSpilloverStorage
+
+    service = create_service(tmp_path)
+    service.alert_spillover_storage = AlertSpilloverStorage(tmp_path / "alerts")
+    assert service.alert_spillover_storage is not None
+
+    service.record_dead_letter({"reason": "bad_json", "raw_payload": "{malformed"})
+    stats = service.get_alert_storage_stats()
+    assert stats["dlq_count"] == 1
+
+    rot = service.rotate_alert_storage(max_backups=2)
+    assert rot["dlq_rotated"] is True
+
+    ret = service.enforce_alert_retention(max_age_days=30.0, max_backups=2)
+    assert "pruned_files" in ret
+
+
+def test_service_alert_storage_retry_and_archive(tmp_path: Path) -> None:
+    from music_recommender.alerting import AlertSpilloverStorage
+
+    service = create_service(tmp_path)
+    service.alert_spillover_storage = AlertSpilloverStorage(tmp_path / "alerts")
+    service.record_dead_letter(
+        {"reason": "retry_me", "raw_payload": '{"alert": "test"}', "channel": "test"}
+    )
+
+    report = service.retry_dead_letters(dry_run=True)
+    assert report.dry_run is True
+    assert report.total_scanned == 1
+    assert report.succeeded == 1
+
+    archive_path = tmp_path / "service_bundle.tar.gz"
+    res = service.archive_alert_storage(archive_path, format="tar.gz")
+    assert res.exists()
+    assert res.stat().st_size > 0
