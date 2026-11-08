@@ -476,11 +476,15 @@ class AlertSpilloverStorage:
         spillover_filename: str = "alerts_spillover.jsonl",
         dlq_filename: str = "alerts_dlq.jsonl",
         max_file_size_bytes: int = 10 * 1024 * 1024,
+        rotation_config: AlertLogRotationConfig | None = None,
     ) -> None:
         self.storage_dir = Path(storage_dir)
         self.spillover_path = self.storage_dir / spillover_filename
         self.dlq_path = self.storage_dir / dlq_filename
-        self.max_file_size_bytes = max_file_size_bytes
+        self.rotation_config = rotation_config or AlertLogRotationConfig(
+            max_file_size_bytes=max_file_size_bytes
+        )
+        self.max_file_size_bytes = self.rotation_config.max_file_size_bytes
         self._lock = threading.Lock()
         self._ensure_dir()
 
@@ -494,6 +498,52 @@ class AlertSpilloverStorage:
                 exc,
             )
 
+    def _rotate_file_if_needed(self, target_path: Path) -> bool:
+        """Rotate file if it exceeds size limit. Caller must hold self._lock."""
+        if not self.rotation_config.auto_rotate or not target_path.exists():
+            return False
+        try:
+            if target_path.stat().st_size >= self.rotation_config.max_file_size_bytes:
+                return self._rotate_file_locked(
+                    target_path, self.rotation_config.max_backups
+                )
+        except OSError:
+            pass
+        return False
+
+    def _rotate_file_locked(self, target_path: Path, max_backups: int) -> bool:
+        """Rotate target_path -> target_path.1, etc. Caller must hold self._lock."""
+        if not target_path.exists() or max_backups <= 0:
+            return False
+        try:
+            oldest = target_path.with_name(f"{target_path.name}.{max_backups}")
+            if oldest.exists():
+                oldest.unlink(missing_ok=True)
+            for i in range(max_backups - 1, 0, -1):
+                src = target_path.with_name(f"{target_path.name}.{i}")
+                dst = target_path.with_name(f"{target_path.name}.{i + 1}")
+                if src.exists():
+                    src.replace(dst)
+            first_backup = target_path.with_name(f"{target_path.name}.1")
+            target_path.replace(first_backup)
+            return True
+        except OSError as exc:
+            logger.warning("Failed rotating %s: %s", target_path, exc)
+            return False
+
+    def rotate_storage(self, max_backups: int | None = None) -> dict[str, bool]:
+        """Manually rotate both spillover and DLQ files."""
+        limit = (
+            max_backups if max_backups is not None else self.rotation_config.max_backups
+        )
+        with self._lock:
+            spill_rotated = self._rotate_file_locked(self.spillover_path, limit)
+            dlq_rotated = self._rotate_file_locked(self.dlq_path, limit)
+        return {
+            "spillover_rotated": spill_rotated,
+            "dlq_rotated": dlq_rotated,
+        }
+
     def record_spillover(self, event: ReceivedAlertEvent) -> bool:
         """Append an evicted alert event to the spillover JSONL file."""
         return self._append_jsonl(self.spillover_path, event.to_dict())
@@ -506,6 +556,7 @@ class AlertSpilloverStorage:
         with self._lock:
             try:
                 self.storage_dir.mkdir(parents=True, exist_ok=True)
+                self._rotate_file_if_needed(target_path)
                 line = json.dumps(item, ensure_ascii=False) + "\n"
                 with target_path.open("a", encoding="utf-8") as f:
                     f.write(line)
