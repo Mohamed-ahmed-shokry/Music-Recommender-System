@@ -42,13 +42,13 @@ Harden persistent alert storage and recovery operations by implementing size-cap
    - Bump version to `0.37.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
 
 ### 3. Acceptance Criteria
-- [ ] AC-1: `AlertSpilloverStorage` supports size-capped log rotation (`rotate_storage`) and age-based retention pruning (`enforce_retention`).
-- [ ] AC-2: `create_archive_bundle` produces valid `.tar.gz` and `.zip` archives containing spillover, DLQ logs, and manifest metadata.
-- [ ] AC-3: `retry_dead_letters` executes exponential backoff retries on DLQ records with `DLQRetryReport` tracking and purged-on-success updates.
-- [ ] AC-4: FastAPI endpoints `POST /alerts/rotate`, `POST /alerts/dlq/retry`, `GET /alerts/archive`, and `GET /alerts/storage/stats` return correct schemas.
-- [ ] AC-5: Operator CLI commands `rotate-alerts`, `retry-dlq`, and `archive-alerts` function cleanly with table and JSON outputs.
-- [ ] AC-6: Streamlit dashboard sidebar surfaces storage rotation and DLQ retry indicators.
-- [ ] AC-7: All local CI-parity checks and remote CI workflow runs pass 100%.
+- [x] AC-1: `AlertSpilloverStorage` supports size-capped log rotation (`rotate_storage`) and age-based retention pruning (`enforce_retention`).
+- [x] AC-2: `create_archive_bundle` produces valid `.tar.gz` and `.zip` archives containing spillover, DLQ logs, and manifest metadata.
+- [x] AC-3: `retry_dead_letters` executes exponential backoff retries on DLQ records with `DLQRetryReport` tracking and purged-on-success updates.
+- [x] AC-4: FastAPI endpoints `POST /alerts/rotate`, `POST /alerts/dlq/retry`, `GET /alerts/archive`, and `GET /alerts/storage/stats` return correct schemas.
+- [x] AC-5: Operator CLI commands `rotate-alerts`, `retry-dlq`, and `archive-alerts` function cleanly with table and JSON outputs.
+- [x] AC-6: Streamlit dashboard sidebar surfaces storage rotation and DLQ retry indicators.
+- [x] AC-7: All local CI-parity checks and remote CI workflow runs pass 100%.
 
 ### 4. Validation & CI Plan
 - `uv run ruff format --check .`
@@ -62,25 +62,25 @@ Harden persistent alert storage and recovery operations by implementing size-cap
 - External cloud object storage (S3/GCS) uploading is excluded in favor of standard tarball/zip archive bundles and HTTP file streaming.
 
 ### 6. Micro-Task Breakdown
-- [ ] Task 1: Define Phase 167 & 168 roadmap, update plan, and initialize progress record.
-- [ ] Task 2: Implement `AlertLogRotationConfig` and size-capped rotation in `AlertSpilloverStorage` (`src/music_recommender/alerting.py`).
-- [ ] Task 3: Implement age-based retention pruning in `AlertSpilloverStorage` (`src/music_recommender/alerting.py`).
-- [ ] Task 4: Add unit tests for log rotation and retention pruning in `tests/test_alerting.py`.
-- [ ] Task 5: Implement `create_archive_bundle` and `restore_archive_bundle` in `src/music_recommender/alerting.py`.
-- [ ] Task 6: Add unit tests for archive bundle creation and extraction in `tests/test_alerting.py`.
-- [ ] Task 7: Implement `DLQRetryPolicy`, `DLQRetryResult`, `DLQRetryReport`, and `retry_dead_letters` in `src/music_recommender/alerting.py`.
-- [ ] Task 8: Add unit tests for DLQ retry engine in `tests/test_alerting.py`.
-- [ ] Task 9: Integrate storage rotation, retention, archiving, and DLQ retry into `RecommenderService` in `src/music_recommender/service.py`.
-- [ ] Task 10: Add service tests in `tests/test_service.py`.
-- [ ] Task 11: Implement `/alerts/rotate`, `/alerts/dlq/retry`, `/alerts/archive`, `/alerts/storage/stats` in `api/main.py`.
-- [ ] Task 12: Add API integration tests in `tests/test_api.py`.
-- [ ] Task 13: Implement `rotate-alerts`, `retry-dlq`, and `archive-alerts` in `src/music_recommender/cli.py`.
-- [ ] Task 14: Add CLI unit tests in `tests/test_cli.py`.
-- [ ] Task 15: Add storage rotation and retry indicators in `src/music_recommender/dashboard.py`.
-- [ ] Task 16: Add dashboard tests in `tests/test_dashboard.py`.
-- [ ] Task 17: Update `README.md` and `CHANGELOG.md` with 0.37.0 documentation.
-- [ ] Task 18: Bump package version to `0.37.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
-- [ ] Task 19: CI parity verification, push, open draft PR, monitor remote CI to green.
+- [x] Task 1: Define Phase 167 & 168 roadmap, update plan, and initialize progress record.
+- [x] Task 2: Implement `AlertLogRotationConfig` and size-capped rotation in `AlertSpilloverStorage` (`src/music_recommender/alerting.py`).
+- [x] Task 3: Implement age-based retention pruning in `AlertSpilloverStorage` (`src/music_recommender/alerting.py`).
+- [x] Task 4: Add unit tests for log rotation and retention pruning in `tests/test_alerting.py`.
+- [x] Task 5: Implement `create_archive_bundle` and `restore_archive_bundle` in `src/music_recommender/alerting.py`.
+- [x] Task 6: Add unit tests for archive bundle creation and extraction in `tests/test_alerting.py`.
+- [x] Task 7: Implement `DLQRetryPolicy`, `DLQRetryResult`, `DLQRetryReport`, and `retry_dead_letters` in `src/music_recommender/alerting.py`.
+- [x] Task 8: Add unit tests for DLQ retry engine in `tests/test_alerting.py`.
+- [x] Task 9: Integrate storage rotation, retention, archiving, and DLQ retry into `RecommenderService` in `src/music_recommender/service.py`.
+- [x] Task 10: Add service tests in `tests/test_service.py`.
+- [x] Task 11: Implement `/alerts/rotate`, `/alerts/dlq/retry`, `/alerts/archive`, `/alerts/storage/stats` in `api/main.py`.
+- [x] Task 12: Add API integration tests in `tests/test_api.py`.
+- [x] Task 13: Implement `rotate-alerts`, `retry-dlq`, and `archive-alerts` in `src/music_recommender/cli.py`.
+- [x] Task 14: Add CLI unit tests in `tests/test_cli.py`.
+- [x] Task 15: Add storage rotation and retry indicators in `src/music_recommender/dashboard.py`.
+- [x] Task 16: Add dashboard tests in `tests/test_dashboard.py`.
+- [x] Task 17: Update `README.md` and `CHANGELOG.md` with 0.37.0 documentation.
+- [x] Task 18: Bump package version to `0.37.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [x] Task 19: CI parity verification, push, open draft PR, monitor remote CI to green.
 
 ---
 
