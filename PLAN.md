@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.37.0) — in progress (branch `phase/167-alert-rotation-and-retention`)
+## Current milestone (0.37.0) — shipped (branch `phase/167-alert-rotation-and-retention`)
 
 Automated Alert Storage Rotation, Retention Pruning, DLQ Exponential Retry, and Disaster Recovery Snapshots.
 The 0.36.0 release introduced push-based telemetry (InfluxDB Line Protocol 2.0 and Prometheus remote-write)
@@ -15,9 +15,9 @@ REST API endpoints (`POST /alerts/rotate`, `POST /alerts/dlq/retry`, `GET /alert
 (`rotate-alerts`, `retry-dlq`, `archive-alerts`), and Streamlit dashboard storage management visibility.
 
 - Phase 167 — Size-capped file rotation, retention pruning, and disaster recovery archive bundles:
-  `AlertLogRotationConfig`, `rotate_storage`, `enforce_retention`, `create_archive_bundle` in `alerting.py`.
+  `AlertLogRotationConfig`, `rotate_storage`, `enforce_retention`, `create_archive_bundle` in `alerting.py` (shipped). ✅
 - Phase 168 — Automated DLQ retry policies with exponential backoff and operator tooling:
-  `DLQRetryPolicy`, `retry_dead_letters`, service & API integration, CLI commands, dashboard indicators, clean CI.
+  `DLQRetryPolicy`, `retry_dead_letters`, service & API integration, CLI commands, dashboard indicators, clean CI (shipped). ✅
 
 ## Next milestone (0.38.0) — planned
 
