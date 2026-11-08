@@ -477,6 +477,77 @@ class AlertLogRotationConfig:
         }
 
 
+@dataclass
+class DLQRetryPolicy:
+    """Exponential backoff retry policy for dead-letter alert queue records."""
+
+    max_retries: int = 3
+    base_delay_seconds: float = 1.0
+    backoff_multiplier: float = 2.0
+    max_delay_seconds: float = 30.0
+
+    def calculate_delay(self, retry_count: int) -> float:
+        """Calculate exponential delay for given attempt count."""
+        raw = self.base_delay_seconds * (self.backoff_multiplier**retry_count)
+        return min(raw, self.max_delay_seconds)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "max_retries": self.max_retries,
+            "base_delay_seconds": self.base_delay_seconds,
+            "backoff_multiplier": self.backoff_multiplier,
+            "max_delay_seconds": self.max_delay_seconds,
+        }
+
+
+@dataclass
+class DLQRetryResult:
+    """Outcome of attempting to re-deliver or re-process a single DLQ record."""
+
+    index: int
+    channel: str
+    reason: str
+    success: bool
+    retry_count: int
+    error: str | None = None
+    status_code: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "index": self.index,
+            "channel": self.channel,
+            "reason": self.reason,
+            "success": self.success,
+            "retry_count": self.retry_count,
+            "error": self.error,
+            "status_code": self.status_code,
+        }
+
+
+@dataclass
+class DLQRetryReport:
+    """Aggregated report of DLQ retry operation."""
+
+    total_scanned: int
+    retried: int
+    succeeded: int
+    failed: int
+    exhausted: int
+    dry_run: bool
+    results: list[DLQRetryResult] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "total_scanned": self.total_scanned,
+            "retried": self.retried,
+            "succeeded": self.succeeded,
+            "failed": self.failed,
+            "exhausted": self.exhausted,
+            "dry_run": self.dry_run,
+            "results": [r.to_dict() for r in self.results],
+        }
+
+
 class AlertSpilloverStorage:
     """Thread-safe persistent JSONL storage for evicted alerts and DLQ records."""
 
