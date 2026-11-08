@@ -1055,3 +1055,50 @@ def test_alert_spillover_storage_retention_pruning(tmp_path: Path) -> None:
     assert res2["pruned_files"] == 1
     assert not f2.exists()
     assert f1.exists()
+
+
+def test_alert_spillover_storage_archive_tar_and_zip(tmp_path: Path) -> None:
+    from music_recommender.alerting import (
+        AlertSpilloverStorage,
+        DeadLetterAlertRecord,
+        ReceivedAlertEvent,
+    )
+
+    src_dir = tmp_path / "alerts_src"
+    storage = AlertSpilloverStorage(storage_dir=src_dir)
+    ev = ReceivedAlertEvent(
+        alertname="ArchiveTestAlert",
+        status="firing",
+        severity="critical",
+        summary="Testing archive bundling",
+    )
+    storage.record_spillover(ev)
+    dlq = DeadLetterAlertRecord(reason="unparseable", raw_payload="malformed_json_here")
+    storage.record_dead_letter(dlq)
+
+    # 1. Test .tar.gz bundle
+    tar_path = tmp_path / "bundle.tar.gz"
+    res_path = storage.create_archive_bundle(tar_path, format="tar.gz")
+    assert res_path.exists()
+    assert res_path.stat().st_size > 0
+
+    restore_dir = tmp_path / "alerts_restored_tar"
+    restore_info = storage.restore_archive_bundle(tar_path, target_dir=restore_dir)
+    assert restore_info["status"] == "extracted"
+    assert (restore_dir / "alerts_spillover.jsonl").exists()
+    assert (restore_dir / "alerts_dlq.jsonl").exists()
+    assert restore_info["manifest"]["file_count"] == 2
+
+    # 2. Test .zip bundle
+    zip_path = tmp_path / "bundle.zip"
+    res_zip = storage.create_archive_bundle(zip_path, format="zip")
+    assert res_zip.exists()
+    assert res_zip.stat().st_size > 0
+
+    restore_zip_dir = tmp_path / "alerts_restored_zip"
+    restore_zip_info = storage.restore_archive_bundle(
+        zip_path, target_dir=restore_zip_dir
+    )
+    assert restore_zip_info["status"] == "extracted"
+    assert (restore_zip_dir / "alerts_spillover.jsonl").exists()
+    assert (restore_zip_dir / "alerts_dlq.jsonl").exists()
