@@ -24,9 +24,9 @@
 | Task 10 | Service tests in `tests/test_service.py` | Completed | `5b95e26` |
 | Task 11 | Endpoints `/alerts/rotate`, `/alerts/dlq/retry`, `/alerts/archive`, `/alerts/storage/stats` in `api/main.py` | Completed | `0d4d93e` |
 | Task 12 | API integration tests in `tests/test_api.py` | Completed | `e29a453` |
-| Task 13 | CLI commands `rotate-alerts`, `retry-dlq`, and `archive-alerts` in `cli.py` | In Progress | |
-| Task 14 | CLI unit tests in `tests/test_cli.py` | Pending | |
-| Task 15 | Storage rotation and retry indicators in `src/music_recommender/dashboard.py` | Pending | |
+| Task 13 | CLI commands `rotate-alerts`, `retry-dlq`, and `archive-alerts` in `cli.py` | Completed | `de26b12` |
+| Task 14 | CLI unit tests in `tests/test_cli.py` | Completed | `ec06990` |
+| Task 15 | Storage rotation and retry indicators in `src/music_recommender/dashboard.py` | In Progress | |
 | Task 16 | Dashboard tests in `tests/test_dashboard.py` | Pending | |
 | Task 17 | Documentation updates in `README.md` and `CHANGELOG.md` | Pending | |
 | Task 18 | Package version bump to `0.37.0` in `pyproject.toml`, `uv lock`, and `uv build` | Pending | |
