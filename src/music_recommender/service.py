@@ -18,6 +18,8 @@ from music_recommender.alerting import (
     AlertHistoryBuffer,
     AlertSpilloverStorage,
     DeadLetterAlertRecord,
+    DLQRetryPolicy,
+    DLQRetryReport,
     WebhookDispatcher,
 )
 from music_recommender.artifacts import RecommenderArtifact, load_artifact
@@ -893,6 +895,67 @@ class RecommenderService:
                 "storage_dir": None,
             }
         return self.alert_spillover_storage.get_stats()
+
+    def rotate_alert_storage(self, max_backups: int | None = None) -> dict[str, Any]:
+        """Trigger size-capped rotation of alert storage files."""
+        if self.alert_spillover_storage is None:
+            return {"spillover_rotated": False, "dlq_rotated": False}
+        return self.alert_spillover_storage.rotate_storage(max_backups=max_backups)
+
+    def enforce_alert_retention(
+        self,
+        max_age_days: float | None = None,
+        max_backups: int | None = None,
+    ) -> dict[str, int]:
+        """Prune outdated rotated files according to retention limits."""
+        if self.alert_spillover_storage is None:
+            return {"pruned_files": 0}
+        return self.alert_spillover_storage.enforce_retention(
+            max_age_days=max_age_days, max_backups=max_backups
+        )
+
+    def retry_dead_letters(
+        self,
+        policy: DLQRetryPolicy | None = None,
+        target_url: str | None = None,
+        channel: str | None = None,
+        reason: str | None = None,
+        dry_run: bool = False,
+    ) -> DLQRetryReport:
+        """Retry dead-letter alert queue records with exponential backoff."""
+        if self.alert_spillover_storage is None:
+            return DLQRetryReport(
+                total_scanned=0,
+                retried=0,
+                succeeded=0,
+                failed=0,
+                exhausted=0,
+                dry_run=dry_run,
+            )
+        return self.alert_spillover_storage.retry_dead_letters(
+            policy=policy,
+            target_url=target_url,
+            channel=channel,
+            reason=reason,
+            dry_run=dry_run,
+        )
+
+    def archive_alert_storage(
+        self,
+        output_path: Path | str,
+        format: str = "tar.gz",
+        include_spillover: bool = True,
+        include_dlq: bool = True,
+    ) -> Path:
+        """Package alert storage files into a compressed disaster recovery archive."""
+        if self.alert_spillover_storage is None:
+            raise RuntimeError("Alert spillover storage is not configured")
+        return self.alert_spillover_storage.create_archive_bundle(
+            output_path,
+            format=format,
+            include_spillover=include_spillover,
+            include_dlq=include_dlq,
+        )
 
     def export_prometheus_metrics(
         self,
