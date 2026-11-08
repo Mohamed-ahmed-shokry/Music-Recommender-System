@@ -20,9 +20,9 @@
 | Task 6 | Unit tests for archive bundle creation and extraction in `tests/test_alerting.py` | Completed | `6e55ac3` |
 | Task 7 | `DLQRetryPolicy`, `DLQRetryResult`, `DLQRetryReport`, and `retry_dead_letters` in `alerting.py` | Completed | `1f20869`, `bf951dd`, `5d624ba` |
 | Task 8 | Unit tests for DLQ retry engine in `tests/test_alerting.py` | Completed | `1d4fbe7` |
-| Task 9 | Integration in `RecommenderService` in `src/music_recommender/service.py` | In Progress | |
-| Task 10 | Service tests in `tests/test_service.py` | Pending | |
-| Task 11 | Endpoints `/alerts/rotate`, `/alerts/dlq/retry`, `/alerts/archive`, `/alerts/storage/stats` in `api/main.py` | Pending | |
+| Task 9 | Integration in `RecommenderService` in `src/music_recommender/service.py` | Completed | `70d0817` |
+| Task 10 | Service tests in `tests/test_service.py` | Completed | `5b95e26` |
+| Task 11 | Endpoints `/alerts/rotate`, `/alerts/dlq/retry`, `/alerts/archive`, `/alerts/storage/stats` in `api/main.py` | In Progress | |
 | Task 12 | API integration tests in `tests/test_api.py` | Pending | |
 | Task 13 | CLI commands `rotate-alerts`, `retry-dlq`, and `archive-alerts` in `cli.py` | Pending | |
 | Task 14 | CLI unit tests in `tests/test_cli.py` | Pending | |
