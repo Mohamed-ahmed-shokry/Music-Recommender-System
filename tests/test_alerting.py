@@ -957,3 +957,101 @@ def test_alert_correlation_graph_received_alert_event_objects() -> None:
     assert report.root_causes == ["BanditDriftViolation"]
     assert report.symptoms == ["BanditAutoRollback"]
     assert report.causal_chains == [["BanditDriftViolation", "BanditAutoRollback"]]
+
+
+def test_alert_log_rotation_config() -> None:
+    from music_recommender.alerting import AlertLogRotationConfig
+
+    cfg = AlertLogRotationConfig(
+        max_file_size_bytes=1024,
+        max_backups=3,
+        retention_days=7.0,
+        auto_rotate=True,
+    )
+    d = cfg.to_dict()
+    assert d["max_file_size_bytes"] == 1024
+    assert d["max_backups"] == 3
+    assert d["retention_days"] == 7.0
+    assert d["auto_rotate"] is True
+
+
+def test_alert_spillover_storage_rotation(tmp_path: Path) -> None:
+    from music_recommender.alerting import (
+        AlertLogRotationConfig,
+        AlertSpilloverStorage,
+        DeadLetterAlertRecord,
+        ReceivedAlertEvent,
+    )
+
+    storage_dir = tmp_path / "alerts"
+    cfg = AlertLogRotationConfig(
+        max_file_size_bytes=150,  # low threshold to trigger auto-rotation
+        max_backups=3,
+        auto_rotate=True,
+    )
+    storage = AlertSpilloverStorage(storage_dir=storage_dir, rotation_config=cfg)
+
+    # 1. Write several events to trigger size-capped rotation
+    for i in range(5):
+        ev = ReceivedAlertEvent(
+            alertname=f"Alert_{i}",
+            status="firing",
+            severity="warning",
+            summary=f"Event summary description {i}",
+        )
+        assert storage.record_spillover(ev)
+
+    # Verify that rotated files exist
+    rotations = list(storage_dir.glob("alerts_spillover.jsonl.*"))
+    assert len(rotations) >= 1
+
+    # 2. Test manual rotation
+    dlq_rec = DeadLetterAlertRecord(reason="unparseable", raw_payload="bad-data")
+    assert storage.record_dead_letter(dlq_rec)
+    res = storage.rotate_storage(max_backups=2)
+    assert res["spillover_rotated"] is True
+    assert res["dlq_rotated"] is True
+    assert (storage_dir / "alerts_dlq.jsonl.1").exists()
+
+    stats = storage.get_stats()
+    assert stats["spillover_rotations"] >= 1
+    assert stats["dlq_rotations"] == 1
+    assert stats["max_backups"] == 3
+
+
+def test_alert_spillover_storage_retention_pruning(tmp_path: Path) -> None:
+    import os
+    import time
+
+    from music_recommender.alerting import (
+        AlertLogRotationConfig,
+        AlertSpilloverStorage,
+    )
+
+    storage_dir = tmp_path / "alerts_retention"
+    cfg = AlertLogRotationConfig(max_backups=2, retention_days=1.0)
+    storage = AlertSpilloverStorage(storage_dir=storage_dir, rotation_config=cfg)
+
+    # Create dummy rotated files: .1, .2, .3, .4
+    f1 = storage_dir / "alerts_spillover.jsonl.1"
+    f2 = storage_dir / "alerts_spillover.jsonl.2"
+    f3 = storage_dir / "alerts_spillover.jsonl.3"
+    f4 = storage_dir / "alerts_spillover.jsonl.4"
+    for f in (f1, f2, f3, f4):
+        f.write_text('{"dummy": true}\n', encoding="utf-8")
+
+    # Enforce retention with max_backups=2 (should prune .3 and .4)
+    res = storage.enforce_retention(max_backups=2)
+    assert res["pruned_files"] == 2
+    assert f1.exists()
+    assert f2.exists()
+    assert not f3.exists()
+    assert not f4.exists()
+
+    # Old age pruning: set f2 mtime to 3 days ago
+    old_time = time.time() - (3 * 86400)
+    os.utime(f2, (old_time, old_time))
+    res2 = storage.enforce_retention(max_age_days=1.0)
+    assert res2["pruned_files"] == 1
+    assert not f2.exists()
+    assert f1.exists()
