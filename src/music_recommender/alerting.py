@@ -723,6 +723,179 @@ class AlertSpilloverStorage:
                 logger.warning("Failed purging DLQ at %s: %s", self.dlq_path, exc)
                 return 0
 
+    def retry_dead_letters(
+        self,
+        policy: DLQRetryPolicy | None = None,
+        target_url: str | None = None,
+        channel: str | None = None,
+        reason: str | None = None,
+        dry_run: bool = False,
+    ) -> DLQRetryReport:
+        """Retry delivery or reprocessing of dead-letter alert queue records."""
+        pol = policy or DLQRetryPolicy()
+        with self._lock:
+            if not self.dlq_path.exists():
+                return DLQRetryReport(
+                    total_scanned=0,
+                    retried=0,
+                    succeeded=0,
+                    failed=0,
+                    exhausted=0,
+                    dry_run=dry_run,
+                )
+
+            try:
+                with self.dlq_path.open("r", encoding="utf-8") as f:
+                    raw_lines = f.readlines()
+            except OSError as exc:
+                logger.warning(
+                    "Failed reading DLQ for retry %s: %s", self.dlq_path, exc
+                )
+                return DLQRetryReport(
+                    total_scanned=0,
+                    retried=0,
+                    succeeded=0,
+                    failed=0,
+                    exhausted=0,
+                    dry_run=dry_run,
+                )
+
+            records: list[DeadLetterAlertRecord] = []
+            for line in raw_lines:
+                s = line.strip()
+                if not s:
+                    continue
+                try:
+                    data = json.loads(s)
+                    records.append(DeadLetterAlertRecord.from_dict(data))
+                except Exception:
+                    continue
+
+            results: list[DLQRetryResult] = []
+            retained_records: list[DeadLetterAlertRecord] = []
+            retried = 0
+            succeeded = 0
+            failed = 0
+            exhausted = 0
+
+            for idx, rec in enumerate(records):
+                if channel and rec.channel != channel:
+                    retained_records.append(rec)
+                    continue
+                if reason and rec.reason != reason:
+                    retained_records.append(rec)
+                    continue
+                if rec.retry_count >= pol.max_retries:
+                    exhausted += 1
+                    retained_records.append(rec)
+                    results.append(
+                        DLQRetryResult(
+                            index=idx,
+                            channel=rec.channel,
+                            reason=rec.reason,
+                            success=False,
+                            retry_count=rec.retry_count,
+                            error=f"Max retries ({pol.max_retries}) exhausted",
+                        )
+                    )
+                    continue
+
+                retried += 1
+                if dry_run:
+                    succeeded += 1
+                    results.append(
+                        DLQRetryResult(
+                            index=idx,
+                            channel=rec.channel,
+                            reason=rec.reason,
+                            success=True,
+                            retry_count=rec.retry_count + 1,
+                            status_code=200,
+                        )
+                    )
+                    retained_records.append(rec)
+                else:
+                    url = target_url or "http://localhost:8000/alerts/webhook"
+                    success, code, err = self._dispatch_retry_record(url, rec)
+                    if success:
+                        succeeded += 1
+                        results.append(
+                            DLQRetryResult(
+                                index=idx,
+                                channel=rec.channel,
+                                reason=rec.reason,
+                                success=True,
+                                retry_count=rec.retry_count + 1,
+                                status_code=code,
+                            )
+                        )
+                    else:
+                        failed += 1
+                        rec.retry_count += 1
+                        rec.last_retry_at = datetime.now(UTC).isoformat()
+                        rec.error_message = err
+                        retained_records.append(rec)
+                        results.append(
+                            DLQRetryResult(
+                                index=idx,
+                                channel=rec.channel,
+                                reason=rec.reason,
+                                success=False,
+                                retry_count=rec.retry_count,
+                                status_code=code,
+                                error=err,
+                            )
+                        )
+
+            if not dry_run:
+                try:
+                    with self.dlq_path.open("w", encoding="utf-8") as f:
+                        for r in retained_records:
+                            f.write(json.dumps(r.to_dict(), ensure_ascii=False) + "\n")
+                except OSError as exc:
+                    logger.warning(
+                        "Failed writing updated DLQ %s: %s", self.dlq_path, exc
+                    )
+
+            return DLQRetryReport(
+                total_scanned=len(records),
+                retried=retried,
+                succeeded=succeeded,
+                failed=failed,
+                exhausted=exhausted,
+                dry_run=dry_run,
+                results=results,
+            )
+
+    def _dispatch_retry_record(
+        self, url: str, rec: DeadLetterAlertRecord
+    ) -> tuple[bool, int | None, str | None]:
+        """Dispatch a single dead-letter record to a target webhook URL."""
+        payload_str = rec.raw_payload.strip() if rec.raw_payload else ""
+        if payload_str.startswith("{") or payload_str.startswith("["):
+            payload_bytes = payload_str.encode("utf-8")
+        else:
+            payload_bytes = json.dumps(rec.to_dict()).encode("utf-8")
+
+        req = urllib.request.Request(
+            url,
+            data=payload_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "MusicRecommender-DLQRetry/1.0",
+                **rec.headers,
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                status_code = getattr(resp, "status", 200)
+                return True, int(status_code), None
+        except urllib.error.HTTPError as exc:
+            return False, exc.code, f"HTTP {exc.code}: {exc.reason}"
+        except Exception as exc:
+            return False, None, str(exc)
+
     def purge_spillover(self) -> int:
         """Purge all records in the spillover file, returning count purged."""
         with self._lock:
