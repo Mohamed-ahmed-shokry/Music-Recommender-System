@@ -1102,3 +1102,87 @@ def test_alert_spillover_storage_archive_tar_and_zip(tmp_path: Path) -> None:
     assert restore_zip_info["status"] == "extracted"
     assert (restore_zip_dir / "alerts_spillover.jsonl").exists()
     assert (restore_zip_dir / "alerts_dlq.jsonl").exists()
+
+
+def test_dlq_retry_policy() -> None:
+    from music_recommender.alerting import DLQRetryPolicy
+
+    pol = DLQRetryPolicy(
+        max_retries=4,
+        base_delay_seconds=2.0,
+        backoff_multiplier=2.0,
+        max_delay_seconds=10.0,
+    )
+    assert pol.calculate_delay(0) == 2.0
+    assert pol.calculate_delay(1) == 4.0
+    assert pol.calculate_delay(2) == 8.0
+    assert pol.calculate_delay(3) == 10.0  # capped at max_delay_seconds
+    d = pol.to_dict()
+    assert d["max_retries"] == 4
+
+
+def test_alert_spillover_storage_dlq_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from music_recommender.alerting import (
+        AlertSpilloverStorage,
+        DeadLetterAlertRecord,
+        DLQRetryPolicy,
+    )
+
+    storage_dir = tmp_path / "alerts_dlq_retry"
+    storage = AlertSpilloverStorage(storage_dir=storage_dir)
+
+    r1 = DeadLetterAlertRecord(
+        reason="network_timeout",
+        raw_payload='{"alertname": "Test1"}',
+        channel="default",
+    )
+    r2 = DeadLetterAlertRecord(
+        reason="invalid_signature",
+        raw_payload='{"alertname": "Test2"}',
+        channel="critical",
+    )
+    assert storage.record_dead_letter(r1)
+    assert storage.record_dead_letter(r2)
+
+    # 1. Dry run
+    report_dry = storage.retry_dead_letters(dry_run=True)
+    assert report_dry.dry_run is True
+    assert report_dry.total_scanned == 2
+    assert report_dry.succeeded == 2
+    assert len(storage.read_dead_letters()) == 2
+
+    # 2. Channel filter with simulated failure
+    def mock_fail(url: str, rec: DeadLetterAlertRecord) -> tuple[bool, int, str]:
+        return False, 500, "Internal Server Error"
+
+    monkeypatch.setattr(storage, "_dispatch_retry_record", mock_fail)
+    report_fail = storage.retry_dead_letters(
+        policy=DLQRetryPolicy(max_retries=1), channel="default"
+    )
+    assert report_fail.retried == 1
+    assert report_fail.failed == 1
+
+    records_after_fail = storage.read_dead_letters()
+    assert len(records_after_fail) == 2
+    r_default = [r for r in records_after_fail if r["channel"] == "default"][0]
+    assert r_default["retry_count"] == 1
+
+    # 3. Retry again: max_retries exhausted
+    report_exhausted = storage.retry_dead_letters(
+        policy=DLQRetryPolicy(max_retries=1), channel="default"
+    )
+    assert report_exhausted.exhausted == 1
+
+    # 4. Success case: resolves and removes from DLQ
+    def mock_success(url: str, rec: DeadLetterAlertRecord) -> tuple[bool, int, None]:
+        return True, 200, None
+
+    monkeypatch.setattr(storage, "_dispatch_retry_record", mock_success)
+    report_success = storage.retry_dead_letters(channel="critical")
+    assert report_success.succeeded == 1
+    # Critical record is resolved and removed; only default remains
+    remaining = storage.read_dead_letters()
+    assert len(remaining) == 1
+    assert remaining[0]["channel"] == "default"
