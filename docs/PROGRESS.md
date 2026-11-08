@@ -13,10 +13,10 @@
 | Task ID | Task Description | Status | Commit |
 |---|---|---|---|
 | Task 1 | Roadmap, Plan & Progress initialization | Completed | `d057d67`, `3b38839` |
-| Task 2 | `AlertLogRotationConfig` and size-capped rotation in `AlertSpilloverStorage` | In Progress | |
-| Task 3 | Age-based retention pruning in `AlertSpilloverStorage` | Pending | |
-| Task 4 | Unit tests for log rotation and retention pruning in `tests/test_alerting.py` | Pending | |
-| Task 5 | `create_archive_bundle` and `restore_archive_bundle` in `alerting.py` | Pending | |
+| Task 2 | `AlertLogRotationConfig` and size-capped rotation in `AlertSpilloverStorage` | Completed | `b1242f2`, `32a7a3a` |
+| Task 3 | Age-based retention pruning in `AlertSpilloverStorage` | Completed | `741aafe` |
+| Task 4 | Unit tests for log rotation and retention pruning in `tests/test_alerting.py` | Completed | `9772aea` |
+| Task 5 | `create_archive_bundle` and `restore_archive_bundle` in `alerting.py` | In Progress | |
 | Task 6 | Unit tests for archive bundle creation and extraction in `tests/test_alerting.py` | Pending | |
 | Task 7 | `DLQRetryPolicy`, `DLQRetryResult`, `DLQRetryReport`, and `retry_dead_letters` in `alerting.py` | Pending | |
 | Task 8 | Unit tests for DLQ retry engine in `tests/test_alerting.py` | Pending | |
