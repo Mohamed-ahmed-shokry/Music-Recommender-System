@@ -424,6 +424,8 @@ class DeadLetterAlertRecord:
     error_message: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
     source: str | None = None
+    retry_count: int = 0
+    last_retry_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -434,6 +436,8 @@ class DeadLetterAlertRecord:
             "error_message": self.error_message,
             "headers": self.headers,
             "source": self.source,
+            "retry_count": self.retry_count,
+            "last_retry_at": self.last_retry_at,
         }
 
     @classmethod
@@ -448,6 +452,10 @@ class DeadLetterAlertRecord:
             else None,
             headers=dict(data.get("headers") or {}),
             source=str(data["source"]) if data.get("source") else None,
+            retry_count=int(data.get("retry_count") or 0),
+            last_retry_at=str(data["last_retry_at"])
+            if data.get("last_retry_at")
+            else None,
         )
 
 
