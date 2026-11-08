@@ -3,7 +3,7 @@
 ## Phase 167 & 168: Size-Capped Log Rotation, Retention Pruning, DLQ Exponential Retry, and Archive Snapshots (0.37.0)
 
 - **Milestone**: 0.37.0
-- **Status**: In Progress
+- **Status**: Completed
 - **Branch**: `phase/167-alert-rotation-and-retention`
 
 ---
@@ -28,9 +28,9 @@
 | Task 14 | CLI unit tests in `tests/test_cli.py` | Completed | `ec06990` |
 | Task 15 | Storage rotation and retry indicators in `src/music_recommender/dashboard.py` | Completed | `441169f` |
 | Task 16 | Dashboard tests in `tests/test_dashboard.py` | Completed | `1b9c035` |
-| Task 17 | Documentation updates in `README.md` and `CHANGELOG.md` | In Progress | |
-| Task 18 | Package version bump to `0.37.0` in `pyproject.toml`, `uv lock`, and `uv build` | Pending | |
-| Task 19 | CI parity verification, push, open draft PR, monitor remote CI to green | Pending | |
+| Task 17 | Documentation updates in `README.md` and `CHANGELOG.md` | Completed | `67414b6`, `b9cfebf` |
+| Task 18 | Package version bump to `0.37.0` in `pyproject.toml`, `uv lock`, and `uv build` | Completed | `fcbefbd`, `0b533d2` |
+| Task 19 | CI parity verification, push, open draft PR, monitor remote CI to green | Completed | `51af8d3`, `7d5dbf2` |
 
 ---
 
@@ -48,11 +48,11 @@
 
 | Command | Result |
 |---|---|
-| `uv run ruff format --check .` | Pending |
-| `uv run ruff check .` | Pending |
-| `uv run mypy` | Pending |
-| `uv run --extra dashboard --extra tracking --extra spotify pytest -q` | Pending |
-| `uv build` | Pending |
+| `uv run ruff format --check .` | ✅ 65 files already formatted |
+| `uv run ruff check .` | ✅ All checks passed |
+| `uv run mypy` | ✅ Success: no issues found in 30 source files |
+| `uv run --extra dashboard --extra tracking --extra spotify pytest -q` | ✅ 1,256 passed in 94s |
+| `uv build` | ✅ Successfully built distributions for v0.37.0 |
 
 ---
 
@@ -60,13 +60,13 @@
 
 | Criterion | Status | Evidence |
 |---|---|---|
-| AC-1 Size-capped log rotation & retention pruning | Pending | |
-| AC-2 Disaster recovery archive bundling (`.tar.gz`/`.zip`) | Pending | |
-| AC-3 DLQ exponential retry engine | Pending | |
-| AC-4 FastAPI rotation, retry, and archive endpoints | Pending | |
-| AC-5 Operator CLI rotation, retry, and archive commands | Pending | |
-| AC-6 Streamlit dashboard storage management visibility | Pending | |
-| AC-7 100% green CI locally and remotely | Pending | |
+| AC-1 Size-capped log rotation & retention pruning | Met | Implemented in `AlertSpilloverStorage` and verified in `tests/test_alerting.py`. |
+| AC-2 Disaster recovery archive bundling (`.tar.gz`/`.zip`) | Met | Implemented `create_archive_bundle`/`restore_archive_bundle` and verified in `tests/test_alerting.py`. |
+| AC-3 DLQ exponential retry engine | Met | Implemented `retry_dead_letters` and verified in `tests/test_alerting.py`. |
+| AC-4 FastAPI rotation, retry, and archive endpoints | Met | Implemented in `api/main.py` and verified in `tests/test_api.py`. |
+| AC-5 Operator CLI rotation, retry, and archive commands | Met | Implemented in `cli.py` and verified in `tests/test_cli.py`. |
+| AC-6 Streamlit dashboard storage management visibility | Met | Implemented in `dashboard.py` and verified in `tests/test_dashboard.py`. |
+| AC-7 100% green CI locally and remotely | Met | All local checks pass (1256 tests); remote GitHub Actions CI workflows green. |
 
 ---
 
