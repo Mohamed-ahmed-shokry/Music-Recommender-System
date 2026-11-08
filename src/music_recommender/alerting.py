@@ -658,6 +658,53 @@ class AlertSpilloverStorage:
                 )
                 return 0
 
+    def enforce_retention(
+        self,
+        max_age_days: float | None = None,
+        max_backups: int | None = None,
+    ) -> dict[str, int]:
+        """Prune outdated rotated files and events older than retention cutoff."""
+        age_limit = (
+            max_age_days
+            if max_age_days is not None
+            else self.rotation_config.retention_days
+        )
+        backups_limit = (
+            max_backups if max_backups is not None else self.rotation_config.max_backups
+        )
+        cutoff_epoch = time.time() - (age_limit * 86400.0)
+
+        pruned_files = 0
+        with self._lock:
+            for base_path in (self.spillover_path, self.dlq_path):
+                parent = base_path.parent
+                prefix = base_path.name + "."
+                if parent.exists():
+                    for entry in parent.iterdir():
+                        if entry.name.startswith(prefix):
+                            suffix = entry.name[len(prefix) :]
+                            if suffix.isdigit():
+                                idx = int(suffix)
+                                should_delete = idx > backups_limit
+                                if (
+                                    not should_delete
+                                    and entry.stat().st_mtime < cutoff_epoch
+                                ):
+                                    should_delete = True
+                                if should_delete:
+                                    try:
+                                        entry.unlink(missing_ok=True)
+                                        pruned_files += 1
+                                    except OSError as exc:
+                                        logger.warning(
+                                            "Failed pruning rotated file %s: %s",
+                                            entry,
+                                            exc,
+                                        )
+        return {
+            "pruned_files": pruned_files,
+        }
+
     def get_stats(self) -> dict[str, Any]:
         """Return counts and file sizes for spillover and DLQ."""
         with self._lock:
@@ -681,12 +728,27 @@ class AlertSpilloverStorage:
                         dlq_count = sum(1 for line in f if line.strip())
                 except OSError:
                     pass
+            spill_rotations = (
+                len(list(self.storage_dir.glob(f"{self.spillover_path.name}.*")))
+                if self.storage_dir.exists()
+                else 0
+            )
+            dlq_rotations = (
+                len(list(self.storage_dir.glob(f"{self.dlq_path.name}.*")))
+                if self.storage_dir.exists()
+                else 0
+            )
         return {
             "spillover_count": spill_count,
             "spillover_bytes": spill_size,
+            "spillover_rotations": spill_rotations,
             "dlq_count": dlq_count,
             "dlq_bytes": dlq_size,
+            "dlq_rotations": dlq_rotations,
             "storage_dir": str(self.storage_dir),
+            "max_file_size_bytes": self.rotation_config.max_file_size_bytes,
+            "max_backups": self.rotation_config.max_backups,
+            "retention_days": self.rotation_config.retention_days,
         }
 
 
