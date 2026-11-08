@@ -20,7 +20,9 @@ from music_recommender.alerting import (
     AlertReplayEngine,
     AlertRule,
     AlertSeverity,
+    AlertSpilloverStorage,
     AlertTransition,
+    DLQRetryPolicy,
     WebhookDispatcher,
 )
 from music_recommender.bandit import (
@@ -4515,6 +4517,238 @@ def replay_alerts_cmd(
             bold=True,
         )
         raise typer.Exit(code=1)
+
+
+@app.command("rotate-alerts")
+def rotate_alerts_cmd(
+    storage_dir: Annotated[
+        Path,
+        typer.Option(
+            "--storage-dir",
+            "-d",
+            help="Path to persistent alert storage directory.",
+        ),
+    ] = Path("data/alerts"),
+    max_backups: Annotated[
+        int,
+        typer.Option(
+            "--max-backups",
+            "-b",
+            help="Maximum number of rotated backups to keep.",
+            min=1,
+            max=20,
+        ),
+    ] = 5,
+    max_age_days: Annotated[
+        float,
+        typer.Option(
+            "--max-age-days",
+            "-a",
+            help="Maximum age in days before pruning rotated logs.",
+            min=0.1,
+        ),
+    ] = 30.0,
+    format: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: 'table' or 'json'.",
+        ),
+    ] = "table",
+) -> None:
+    """Manually rotate alert spillover and DLQ files and enforce retention policies."""
+    normalized_format = format.lower().strip()
+    if normalized_format not in ("table", "json"):
+        typer.secho("Format must be 'table' or 'json'.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    storage = AlertSpilloverStorage(storage_dir=storage_dir)
+    rot = storage.rotate_storage(max_backups=max_backups)
+    ret = storage.enforce_retention(max_age_days=max_age_days, max_backups=max_backups)
+
+    payload = {
+        "storage_dir": str(storage_dir),
+        "spillover_rotated": rot["spillover_rotated"],
+        "dlq_rotated": rot["dlq_rotated"],
+        "pruned_files": ret.get("pruned_files", 0),
+        "max_backups": max_backups,
+        "max_age_days": max_age_days,
+    }
+
+    if normalized_format == "json":
+        typer.echo(json.dumps(payload, indent=2))
+        return
+
+    typer.secho("Alert Storage Rotation & Retention Enforcement", bold=True)
+    typer.echo(f"Storage dir: {storage_dir}")
+    typer.echo(f"Spillover rotated: {rot['spillover_rotated']}")
+    typer.echo(f"DLQ rotated:       {rot['dlq_rotated']}")
+    typer.echo(f"Pruned files:      {ret.get('pruned_files', 0)}")
+    typer.echo("-" * 60)
+    typer.secho(
+        "Storage rotation completed successfully.", fg=typer.colors.GREEN, bold=True
+    )
+
+
+@app.command("retry-dlq")
+def retry_dlq_cmd(
+    storage_dir: Annotated[
+        Path,
+        typer.Option(
+            "--storage-dir",
+            "-d",
+            help="Path to persistent alert storage directory.",
+        ),
+    ] = Path("data/alerts"),
+    target_url: Annotated[
+        str,
+        typer.Option(
+            "--target-url",
+            "-u",
+            help="Webhook URL to retry alerts against.",
+        ),
+    ] = "http://localhost:8000/alerts/webhook",
+    channel: Annotated[
+        str | None,
+        typer.Option(
+            "--channel",
+            "-c",
+            help="Filter DLQ records by channel.",
+        ),
+    ] = None,
+    reason: Annotated[
+        str | None,
+        typer.Option(
+            "--reason",
+            "-r",
+            help="Filter DLQ records by reason.",
+        ),
+    ] = None,
+    max_retries: Annotated[
+        int,
+        typer.Option(
+            "--max-retries",
+            "-m",
+            help="Maximum retries per DLQ record.",
+            min=1,
+            max=10,
+        ),
+    ] = 3,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Simulate retry without modifying DLQ or sending requests.",
+        ),
+    ] = False,
+    format: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: 'table' or 'json'.",
+        ),
+    ] = "table",
+) -> None:
+    """Retry dead-letter alert queue records with exponential backoff."""
+    normalized_format = format.lower().strip()
+    if normalized_format not in ("table", "json"):
+        typer.secho("Format must be 'table' or 'json'.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    storage = AlertSpilloverStorage(storage_dir=storage_dir)
+    pol = DLQRetryPolicy(max_retries=max_retries)
+    report = storage.retry_dead_letters(
+        policy=pol,
+        target_url=target_url,
+        channel=channel,
+        reason=reason,
+        dry_run=dry_run,
+    )
+
+    if normalized_format == "json":
+        typer.echo(json.dumps(report.to_dict(), indent=2))
+        if report.failed > 0:
+            raise typer.Exit(code=1)
+        return
+
+    mode_str = " (DRY-RUN)" if dry_run else ""
+    typer.secho(f"Dead-Letter Queue Retry{mode_str}", bold=True)
+    typer.echo(
+        f"Scanned: {report.total_scanned} | Retried: {report.retried} | "
+        f"Succeeded: {report.succeeded} | Failed: {report.failed} | "
+        f"Exhausted: {report.exhausted}"
+    )
+    typer.echo("-" * 80)
+    for res in report.results:
+        color = typer.colors.GREEN if res.success else typer.colors.RED
+        status_str = "OK" if res.success else "FAIL"
+        err_str = f" - {res.error}" if res.error else ""
+        typer.echo(f"#{res.index + 1} [{res.channel}] {res.reason} -> ", nl=False)
+        typer.secho(
+            f"{status_str} (attempt {res.retry_count})",
+            fg=color,
+            bold=True,
+            nl=False,
+        )
+        typer.echo(err_str)
+    typer.echo("-" * 80)
+    if report.failed > 0:
+        typer.secho(
+            f"Retry finished with {report.failed} failure(s).",
+            fg=typer.colors.RED,
+            bold=True,
+        )
+        raise typer.Exit(code=1)
+    typer.secho("DLQ retry completed successfully.", fg=typer.colors.GREEN, bold=True)
+
+
+@app.command("archive-alerts")
+def archive_alerts_cmd(
+    output_path: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to output archive file (e.g. alerts_backup.tar.gz).",
+        ),
+    ],
+    storage_dir: Annotated[
+        Path,
+        typer.Option(
+            "--storage-dir",
+            "-d",
+            help="Path to persistent alert storage directory.",
+        ),
+    ] = Path("data/alerts"),
+    format: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Archive format: 'tar.gz' or 'zip'.",
+        ),
+    ] = "tar.gz",
+) -> None:
+    """Create a compressed disaster recovery archive bundle of alert logs."""
+    norm_fmt = format.lower().strip()
+    if norm_fmt not in ("tar.gz", "tgz", "zip"):
+        typer.secho("Format must be 'tar.gz' or 'zip'.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    storage = AlertSpilloverStorage(storage_dir=storage_dir)
+    try:
+        created = storage.create_archive_bundle(output_path, format=norm_fmt)
+        typer.secho(
+            f"Successfully created alert archive: {created}",
+            fg=typer.colors.GREEN,
+            bold=True,
+        )
+        typer.echo(f"Archive size: {created.stat().st_size} bytes")
+    except Exception as exc:
+        typer.secho(
+            f"Failed to create alert archive: {exc}", fg=typer.colors.RED, err=True
+        )
+        raise typer.Exit(code=1) from exc
 
 
 @app.command(name="push-metrics")
