@@ -10,10 +10,12 @@ import json
 import logging
 import operator
 import re
+import tarfile
 import threading
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -703,6 +705,111 @@ class AlertSpilloverStorage:
                                         )
         return {
             "pruned_files": pruned_files,
+        }
+
+    def create_archive_bundle(
+        self,
+        output_path: Path | str,
+        format: str = "tar.gz",
+        include_spillover: bool = True,
+        include_dlq: bool = True,
+    ) -> Path:
+        """Create a compressed snapshot archive of alert spillover and DLQ files."""
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fmt = format.lower().strip()
+        if fmt not in ("tar.gz", "tgz", "zip"):
+            raise ValueError(
+                f"Unsupported archive format: {format}. Must be 'tar.gz' or 'zip'."
+            )
+
+        with self._lock:
+            files_to_archive: list[Path] = []
+            if include_spillover:
+                if self.spillover_path.exists():
+                    files_to_archive.append(self.spillover_path)
+                files_to_archive.extend(
+                    sorted(self.storage_dir.glob(f"{self.spillover_path.name}.*"))
+                )
+            if include_dlq:
+                if self.dlq_path.exists():
+                    files_to_archive.append(self.dlq_path)
+                files_to_archive.extend(
+                    sorted(self.storage_dir.glob(f"{self.dlq_path.name}.*"))
+                )
+
+            manifest = {
+                "version": "1.0",
+                "created_at": datetime.now(UTC).isoformat(),
+                "storage_dir": str(self.storage_dir),
+                "file_count": len(files_to_archive),
+                "files": [f.name for f in files_to_archive],
+            }
+            manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
+
+            if fmt in ("tar.gz", "tgz"):
+                import io
+
+                with tarfile.open(out, "w:gz") as tar:
+                    ti = tarfile.TarInfo(name="manifest.json")
+                    ti.size = len(manifest_bytes)
+                    ti.mtime = int(time.time())
+                    tar.addfile(ti, io.BytesIO(manifest_bytes))
+                    for f in files_to_archive:
+                        tar.add(f, arcname=f.name)
+            else:
+                with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    zf.writestr("manifest.json", manifest_bytes)
+                    for f in files_to_archive:
+                        zf.write(f, arcname=f.name)
+        return out
+
+    def restore_archive_bundle(
+        self,
+        archive_path: Path | str,
+        target_dir: Path | str | None = None,
+    ) -> dict[str, Any]:
+        """Extract an alert archive bundle into the target directory."""
+        arch = Path(archive_path)
+        if not arch.exists():
+            raise FileNotFoundError(f"Archive bundle not found: {arch}")
+        dest = Path(target_dir) if target_dir is not None else self.storage_dir
+        dest.mkdir(parents=True, exist_ok=True)
+
+        extracted_files: list[str] = []
+        manifest: dict[str, Any] = {}
+
+        if tarfile.is_tarfile(arch):
+            with tarfile.open(arch, "r:*") as tar:
+                manifest_member = (
+                    tar.getmember("manifest.json")
+                    if "manifest.json" in tar.getnames()
+                    else None
+                )
+                if manifest_member is not None:
+                    mf = tar.extractfile(manifest_member)
+                    if mf is not None:
+                        manifest = json.loads(mf.read().decode("utf-8"))
+                for member in tar.getmembers():
+                    if member.name != "manifest.json":
+                        tar.extract(member, path=dest)
+                        extracted_files.append(member.name)
+        elif zipfile.is_zipfile(arch):
+            with zipfile.ZipFile(arch, "r") as zf:
+                if "manifest.json" in zf.namelist():
+                    manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+                for name in zf.namelist():
+                    if name != "manifest.json":
+                        zf.extract(name, path=dest)
+                        extracted_files.append(name)
+        else:
+            raise ValueError(f"Unknown archive format: {arch}")
+
+        return {
+            "status": "extracted",
+            "target_dir": str(dest),
+            "manifest": manifest,
+            "extracted_files": extracted_files,
         }
 
     def get_stats(self) -> dict[str, Any]:
