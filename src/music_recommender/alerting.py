@@ -449,6 +449,24 @@ class DeadLetterAlertRecord:
         )
 
 
+@dataclass
+class AlertLogRotationConfig:
+    """Configuration for size-based rotation and age retention of alert logs."""
+
+    max_file_size_bytes: int = 10 * 1024 * 1024
+    max_backups: int = 5
+    retention_days: float = 30.0
+    auto_rotate: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "max_file_size_bytes": self.max_file_size_bytes,
+            "max_backups": self.max_backups,
+            "retention_days": self.retention_days,
+            "auto_rotate": self.auto_rotate,
+        }
+
+
 class AlertSpilloverStorage:
     """Thread-safe persistent JSONL storage for evicted alerts and DLQ records."""
 
