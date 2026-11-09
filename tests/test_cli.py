@@ -3943,3 +3943,109 @@ def test_alert_correlate_cli_service_history(monkeypatch: pytest.MonkeyPatch) ->
     assert res.exit_code == 0
     assert "BanditDriftViolation" in res.output
     assert "BanditAutoRollback" in res.output
+
+
+def test_rotate_alerts_cli(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "alerts_cli_rot"
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    (storage_dir / "alerts_spillover.jsonl").write_text('{"a": 1}\n', encoding="utf-8")
+
+    # Table output
+    res_table = runner.invoke(
+        cli.app,
+        ["rotate-alerts", "--storage-dir", str(storage_dir), "--max-backups", "2"],
+    )
+    assert res_table.exit_code == 0
+    assert "Alert Storage Rotation" in res_table.output
+
+    # JSON output
+    res_json = runner.invoke(
+        cli.app,
+        [
+            "rotate-alerts",
+            "--storage-dir",
+            str(storage_dir),
+            "--format",
+            "json",
+        ],
+    )
+    assert res_json.exit_code == 0
+    data = json.loads(res_json.output)
+    assert "spillover_rotated" in data
+    assert "pruned_files" in data
+
+
+def test_retry_dlq_cli(tmp_path: Path) -> None:
+    from music_recommender.alerting import AlertSpilloverStorage, DeadLetterAlertRecord
+
+    storage_dir = tmp_path / "alerts_cli_dlq"
+    storage = AlertSpilloverStorage(storage_dir=storage_dir)
+    storage.record_dead_letter(
+        DeadLetterAlertRecord(reason="unparseable", raw_payload="bad-data")
+    )
+
+    # Dry-run
+    res_dry = runner.invoke(
+        cli.app,
+        ["retry-dlq", "--storage-dir", str(storage_dir), "--dry-run"],
+    )
+    assert res_dry.exit_code == 0
+    assert "Dead-Letter Queue Retry" in res_dry.output
+    assert "Scanned: 1" in res_dry.output
+
+    # JSON output
+    res_json = runner.invoke(
+        cli.app,
+        [
+            "retry-dlq",
+            "--storage-dir",
+            str(storage_dir),
+            "--dry-run",
+            "--format",
+            "json",
+        ],
+    )
+    assert res_json.exit_code == 0
+    data = json.loads(res_json.output)
+    assert data["dry_run"] is True
+    assert data["total_scanned"] == 1
+
+
+def test_archive_alerts_cli(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "alerts_cli_arch"
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    (storage_dir / "alerts_spillover.jsonl").write_text(
+        '{"event": "test"}\n', encoding="utf-8"
+    )
+
+    tar_out = tmp_path / "cli_backup.tar.gz"
+    res_tar = runner.invoke(
+        cli.app,
+        ["archive-alerts", str(tar_out), "--storage-dir", str(storage_dir)],
+    )
+    assert res_tar.exit_code == 0
+    assert "Successfully created alert archive" in res_tar.output
+    assert tar_out.exists()
+
+    zip_out = tmp_path / "cli_backup.zip"
+    res_zip = runner.invoke(
+        cli.app,
+        [
+            "archive-alerts",
+            str(zip_out),
+            "--storage-dir",
+            str(storage_dir),
+            "--format",
+            "zip",
+        ],
+    )
+    assert res_zip.exit_code == 0
+    assert zip_out.exists()
+
+    # Invalid format
+    bad_out = tmp_path / "bad.rar"
+    res_bad = runner.invoke(
+        cli.app,
+        ["archive-alerts", str(bad_out), "--format", "rar"],
+    )
+    assert res_bad.exit_code == 2

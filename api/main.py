@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Annotated, Literal, cast
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from api.middleware import RequestSafetyMiddleware
@@ -19,6 +20,7 @@ from music_recommender.alerting import (
     AlertHistoryBuffer,
     AlertSpilloverStorage,
     DeadLetterAlertRecord,
+    DLQRetryPolicy,
     ReceivedAlertEvent,
     parse_alert_payload,
 )
@@ -455,6 +457,110 @@ def purge_alerts_dlq() -> dict[str, object]:
         "status": "purged",
         "purged_count": purged_count,
     }
+
+
+@app.get("/alerts/storage/stats")
+def alert_storage_stats() -> dict[str, object]:
+    """Return storage metrics, file sizes, and rotation configurations."""
+    storage = _get_alert_storage()
+    if storage is None:
+        return {
+            "spillover_count": 0,
+            "spillover_bytes": 0,
+            "spillover_rotations": 0,
+            "dlq_count": 0,
+            "dlq_bytes": 0,
+            "dlq_rotations": 0,
+            "storage_dir": None,
+        }
+    return cast(dict[str, object], storage.get_stats())
+
+
+@app.post("/alerts/rotate")
+def alerts_rotate(
+    max_backups: Annotated[int, Query(ge=1, le=20)] = 5,
+    max_age_days: Annotated[float, Query(ge=0.1, le=365.0)] = 30.0,
+) -> dict[str, object]:
+    """Trigger file rotation and retention pruning for persistent alert storage."""
+    storage = _get_alert_storage()
+    if storage is None:
+        return {
+            "status": "noop",
+            "spillover_rotated": False,
+            "dlq_rotated": False,
+            "pruned_files": 0,
+        }
+    rot = storage.rotate_storage(max_backups=max_backups)
+    ret = storage.enforce_retention(max_age_days=max_age_days, max_backups=max_backups)
+    return {
+        "status": "rotated",
+        "spillover_rotated": rot["spillover_rotated"],
+        "dlq_rotated": rot["dlq_rotated"],
+        "pruned_files": ret.get("pruned_files", 0),
+    }
+
+
+@app.post("/alerts/dlq/retry")
+def alerts_dlq_retry(
+    max_retries: Annotated[int, Query(ge=1, le=10)] = 3,
+    channel: Annotated[str | None, Query(max_length=50)] = None,
+    reason: Annotated[str | None, Query(max_length=50)] = None,
+    dry_run: bool = False,
+    target_url: Annotated[str | None, Query(max_length=255)] = None,
+) -> dict[str, object]:
+    """Retry dead-letter alert queue records with exponential backoff."""
+    storage = _get_alert_storage()
+    if storage is None:
+        return {
+            "total_scanned": 0,
+            "retried": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "exhausted": 0,
+            "dry_run": dry_run,
+            "results": [],
+        }
+    policy = DLQRetryPolicy(max_retries=max_retries)
+    report = storage.retry_dead_letters(
+        policy=policy,
+        target_url=target_url,
+        channel=channel,
+        reason=reason,
+        dry_run=dry_run,
+    )
+    return cast(dict[str, object], report.to_dict())
+
+
+@app.get("/alerts/archive")
+def alerts_archive(
+    format: Annotated[str, Query(pattern=r"^(tar\.gz|zip)$")] = "tar.gz",
+) -> Response:
+    """Create and stream a compressed disaster recovery archive of alert logs."""
+    import tempfile
+
+    storage = _get_alert_storage()
+    if storage is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert storage is not configured",
+        )
+    temp_dir = Path(tempfile.gettempdir())
+    ext = "zip" if format == "zip" else "tar.gz"
+    archive_file = temp_dir / f"alert_archive_{int(time.time())}.{ext}"
+    try:
+        storage.create_archive_bundle(archive_file, format=format)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create archive bundle: {exc}",
+        ) from exc
+
+    media_type = "application/zip" if format == "zip" else "application/gzip"
+    return FileResponse(
+        archive_file,
+        media_type=media_type,
+        filename=archive_file.name,
+    )
 
 
 @app.post("/alerts/replay")

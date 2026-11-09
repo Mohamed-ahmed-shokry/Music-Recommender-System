@@ -1503,7 +1503,9 @@ def render_dashboard(service: RecommenderService) -> None:
                 storage_stats = service.get_alert_storage_stats()
                 dlq_cnt = storage_stats.get("dlq_count", 0)
                 spill_cnt = storage_stats.get("spillover_count", 0)
-                if dlq_cnt > 0 or spill_cnt > 0:
+                spill_rot = storage_stats.get("spillover_rotations", 0)
+                dlq_rot = storage_stats.get("dlq_rotations", 0)
+                if dlq_cnt > 0 or spill_cnt > 0 or spill_rot > 0 or dlq_rot > 0:
                     st.divider()
                     st.markdown("**Storage & Audit**")
                     if dlq_cnt > 0:
@@ -1512,6 +1514,10 @@ def render_dashboard(service: RecommenderService) -> None:
                         )
                     if spill_cnt > 0:
                         st.caption(f"💾 {spill_cnt} event(s) in persistent spillover")
+                    if spill_rot > 0 or dlq_rot > 0:
+                        st.caption(
+                            f"🔄 {spill_rot + dlq_rot} rotated backup generation(s)"
+                        )
 
             if hasattr(service, "correlate_alert_history"):
                 try:

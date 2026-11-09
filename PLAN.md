@@ -3,7 +3,29 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.36.0) — shipped (branch `phase/163-remote-write-and-correlation`)
+## Current milestone (0.37.0) — shipped (branch `phase/167-alert-rotation-and-retention`)
+
+Automated Alert Storage Rotation, Retention Pruning, DLQ Exponential Retry, and Disaster Recovery Snapshots.
+The 0.36.0 release introduced push-based telemetry (InfluxDB Line Protocol 2.0 and Prometheus remote-write)
+and directed acyclic alert root-cause correlation graphs.
+This milestone hardens persistent alert storage and recovery operations by providing automatic and manual
+size-capped file rotation for alert spillover and DLQ logs, age-based retention pruning, automated DLQ retry execution
+with exponential backoff and jitter, compressed archive bundle export/restore (`.tar.gz`/`.zip`) for disaster recovery,
+REST API endpoints (`POST /alerts/rotate`, `POST /alerts/dlq/retry`, `GET /alerts/archive`), operator CLI commands
+(`rotate-alerts`, `retry-dlq`, `archive-alerts`), and Streamlit dashboard storage management visibility.
+
+- Phase 167 — Size-capped file rotation, retention pruning, and disaster recovery archive bundles:
+  `AlertLogRotationConfig`, `rotate_storage`, `enforce_retention`, `create_archive_bundle` in `alerting.py` (shipped). ✅
+- Phase 168 — Automated DLQ retry policies with exponential backoff and operator tooling:
+  `DLQRetryPolicy`, `retry_dead_letters`, service & API integration, CLI commands, dashboard indicators, clean CI (shipped). ✅
+
+## Next milestone (0.38.0) — planned
+
+Alert Notification Throttling, Escalation Policies, and Multi-Channel PagerDuty / Opsgenie Gateways.
+- Phase 169 — Tiered notification escalation policies and deduplication windows.
+- Phase 170 — Outbound PagerDuty, Opsgenie, and custom webhook gateway dispatchers.
+
+## Previous milestone (0.36.0) — shipped (branch `phase/163-remote-write-and-correlation`, PR #27)
 
 Push-Based Telemetry Exporter (InfluxDB Line Protocol & Prometheus Remote-Write) and Incident Root-Cause Alert Correlation Graph.
 The 0.35.0 release introduced persistent disk spillover, dead-letter queuing (DLQ), and alert incident replay.
@@ -20,12 +42,6 @@ sidebar root-cause visibility (`GET /alerts/correlation`, `POST /alerts/correlat
   `GET /metrics/influxdb`, `POST /metrics/push`, `GET /alerts/correlation`, and `POST /alerts/correlate` in `api/main.py` (shipped). ✅
 - Phase 166 — CLI tooling, dashboard, and 0.36.0 release:
   CLI commands (`push-metrics`, `alert-correlate`), dashboard indicator, docs, version bump to 0.36.0, clean CI (shipped). ✅
-
-## Next milestone (0.37.0) — planned
-
-Automated Alert Retention, Storage Size Rotation, and Disaster Recovery Snapshots.
-- Phase 167 — Size-capped file rotation and retention scheduler for persistent alert logs.
-- Phase 168 — Automated DLQ retry policies with exponential backoff and export archive bundles.
 
 ## Previous milestone (0.35.0) — shipped (branch `phase/159-alert-dlq-and-replay`, PR #26)
 

@@ -2750,3 +2750,47 @@ def test_alerts_correlation_get_and_post_endpoints() -> None:
 
         res_bad2 = client.post("/alerts/correlate", json={"alerts": "not-a-list"})
         assert res_bad2.status_code == 400
+
+
+def test_alerts_storage_stats_and_rotation_endpoints() -> None:
+    with TestClient(api_main.app) as client:
+        # GET /alerts/storage/stats
+        res_stats = client.get("/alerts/storage/stats")
+        assert res_stats.status_code == 200
+        stats = res_stats.json()
+        assert "spillover_count" in stats
+        assert "dlq_count" in stats
+        assert "spillover_rotations" in stats
+        assert "dlq_rotations" in stats
+
+        # POST /alerts/rotate
+        res_rot = client.post("/alerts/rotate?max_backups=3&max_age_days=10")
+        assert res_rot.status_code == 200
+        data_rot = res_rot.json()
+        assert "status" in data_rot
+        assert "pruned_files" in data_rot
+
+
+def test_alerts_dlq_retry_and_archive_endpoints() -> None:
+    with TestClient(api_main.app) as client:
+        # POST /alerts/dlq/retry with dry_run
+        res_retry = client.post("/alerts/dlq/retry?dry_run=true&max_retries=2")
+        assert res_retry.status_code == 200
+        retry_data = res_retry.json()
+        assert retry_data["dry_run"] is True
+        assert "total_scanned" in retry_data
+
+        # GET /alerts/archive
+        res_arch_tar = client.get("/alerts/archive?format=tar.gz")
+        assert res_arch_tar.status_code == 200
+        assert len(res_arch_tar.content) > 0
+        assert "gzip" in res_arch_tar.headers.get("content-type", "")
+
+        res_arch_zip = client.get("/alerts/archive?format=zip")
+        assert res_arch_zip.status_code == 200
+        assert len(res_arch_zip.content) > 0
+        assert "zip" in res_arch_zip.headers.get("content-type", "")
+
+        # Invalid format
+        res_arch_bad = client.get("/alerts/archive?format=rar")
+        assert res_arch_bad.status_code == 422

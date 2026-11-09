@@ -5,6 +5,24 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.0] - 2026-11-08
+
+### Added
+
+- **Alert Log Rotation, Retention Pruning & Disaster Recovery Archive Bundles (Phase 167):**
+  - Automatic and on-demand size-capped rotation (`rotate_storage`) in `AlertSpilloverStorage` with `.1`, `.2`, etc. generational indexing and configurable max backups.
+  - `AlertLogRotationConfig` dataclass configuring size thresholds, backup counts, retention duration, and auto-rotation toggles.
+  - Age-based retention policy enforcement `enforce_retention()` to automatically prune obsolete rotated backup files.
+  - Disaster recovery archive export `create_archive_bundle()` and restore inspection `restore_archive_bundle()` supporting compressed `.tar.gz` and `.zip` snapshots with manifest metadata.
+  - FastAPI endpoints `POST /alerts/rotate` (trigger rotation and retention pruning) and `GET /alerts/archive` (stream compressed snapshot bundle).
+  - Operator CLI commands `music-recommender rotate-alerts` and `music-recommender archive-alerts`.
+- **Automated DLQ Retry Engine with Exponential Backoff (Phase 168):**
+  - `DLQRetryPolicy`, `DLQRetryResult`, and `DLQRetryReport` supporting truncated exponential backoff retry calculation.
+  - Automated `retry_dead_letters()` execution with HTTP re-dispatch, channel/reason filtering, retry count tracking, and auto-removal of resolved notifications from the DLQ.
+  - FastAPI endpoint `POST /alerts/dlq/retry` with filter options and dry-run simulation.
+  - Operator CLI command `music-recommender retry-dlq` with detailed table and JSON outputs.
+  - Enhanced storage observability via `GET /alerts/storage/stats` and Streamlit dashboard sidebar rotated backup counts.
+
 ## [0.36.0] - 2026-10-31
 
 ### Added

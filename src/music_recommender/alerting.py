@@ -10,10 +10,12 @@ import json
 import logging
 import operator
 import re
+import tarfile
 import threading
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -422,6 +424,8 @@ class DeadLetterAlertRecord:
     error_message: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
     source: str | None = None
+    retry_count: int = 0
+    last_retry_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -432,6 +436,8 @@ class DeadLetterAlertRecord:
             "error_message": self.error_message,
             "headers": self.headers,
             "source": self.source,
+            "retry_count": self.retry_count,
+            "last_retry_at": self.last_retry_at,
         }
 
     @classmethod
@@ -446,7 +452,100 @@ class DeadLetterAlertRecord:
             else None,
             headers=dict(data.get("headers") or {}),
             source=str(data["source"]) if data.get("source") else None,
+            retry_count=int(data.get("retry_count") or 0),
+            last_retry_at=str(data["last_retry_at"])
+            if data.get("last_retry_at")
+            else None,
         )
+
+
+@dataclass
+class AlertLogRotationConfig:
+    """Configuration for size-based rotation and age retention of alert logs."""
+
+    max_file_size_bytes: int = 10 * 1024 * 1024
+    max_backups: int = 5
+    retention_days: float = 30.0
+    auto_rotate: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "max_file_size_bytes": self.max_file_size_bytes,
+            "max_backups": self.max_backups,
+            "retention_days": self.retention_days,
+            "auto_rotate": self.auto_rotate,
+        }
+
+
+@dataclass
+class DLQRetryPolicy:
+    """Exponential backoff retry policy for dead-letter alert queue records."""
+
+    max_retries: int = 3
+    base_delay_seconds: float = 1.0
+    backoff_multiplier: float = 2.0
+    max_delay_seconds: float = 30.0
+
+    def calculate_delay(self, retry_count: int) -> float:
+        """Calculate exponential delay for given attempt count."""
+        raw = self.base_delay_seconds * (self.backoff_multiplier**retry_count)
+        return min(raw, self.max_delay_seconds)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "max_retries": self.max_retries,
+            "base_delay_seconds": self.base_delay_seconds,
+            "backoff_multiplier": self.backoff_multiplier,
+            "max_delay_seconds": self.max_delay_seconds,
+        }
+
+
+@dataclass
+class DLQRetryResult:
+    """Outcome of attempting to re-deliver or re-process a single DLQ record."""
+
+    index: int
+    channel: str
+    reason: str
+    success: bool
+    retry_count: int
+    error: str | None = None
+    status_code: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "index": self.index,
+            "channel": self.channel,
+            "reason": self.reason,
+            "success": self.success,
+            "retry_count": self.retry_count,
+            "error": self.error,
+            "status_code": self.status_code,
+        }
+
+
+@dataclass
+class DLQRetryReport:
+    """Aggregated report of DLQ retry operation."""
+
+    total_scanned: int
+    retried: int
+    succeeded: int
+    failed: int
+    exhausted: int
+    dry_run: bool
+    results: list[DLQRetryResult] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "total_scanned": self.total_scanned,
+            "retried": self.retried,
+            "succeeded": self.succeeded,
+            "failed": self.failed,
+            "exhausted": self.exhausted,
+            "dry_run": self.dry_run,
+            "results": [r.to_dict() for r in self.results],
+        }
 
 
 class AlertSpilloverStorage:
@@ -458,11 +557,15 @@ class AlertSpilloverStorage:
         spillover_filename: str = "alerts_spillover.jsonl",
         dlq_filename: str = "alerts_dlq.jsonl",
         max_file_size_bytes: int = 10 * 1024 * 1024,
+        rotation_config: AlertLogRotationConfig | None = None,
     ) -> None:
         self.storage_dir = Path(storage_dir)
         self.spillover_path = self.storage_dir / spillover_filename
         self.dlq_path = self.storage_dir / dlq_filename
-        self.max_file_size_bytes = max_file_size_bytes
+        self.rotation_config = rotation_config or AlertLogRotationConfig(
+            max_file_size_bytes=max_file_size_bytes
+        )
+        self.max_file_size_bytes = self.rotation_config.max_file_size_bytes
         self._lock = threading.Lock()
         self._ensure_dir()
 
@@ -476,6 +579,52 @@ class AlertSpilloverStorage:
                 exc,
             )
 
+    def _rotate_file_if_needed(self, target_path: Path) -> bool:
+        """Rotate file if it exceeds size limit. Caller must hold self._lock."""
+        if not self.rotation_config.auto_rotate or not target_path.exists():
+            return False
+        try:
+            if target_path.stat().st_size >= self.rotation_config.max_file_size_bytes:
+                return self._rotate_file_locked(
+                    target_path, self.rotation_config.max_backups
+                )
+        except OSError:
+            pass
+        return False
+
+    def _rotate_file_locked(self, target_path: Path, max_backups: int) -> bool:
+        """Rotate target_path -> target_path.1, etc. Caller must hold self._lock."""
+        if not target_path.exists() or max_backups <= 0:
+            return False
+        try:
+            oldest = target_path.with_name(f"{target_path.name}.{max_backups}")
+            if oldest.exists():
+                oldest.unlink(missing_ok=True)
+            for i in range(max_backups - 1, 0, -1):
+                src = target_path.with_name(f"{target_path.name}.{i}")
+                dst = target_path.with_name(f"{target_path.name}.{i + 1}")
+                if src.exists():
+                    src.replace(dst)
+            first_backup = target_path.with_name(f"{target_path.name}.1")
+            target_path.replace(first_backup)
+            return True
+        except OSError as exc:
+            logger.warning("Failed rotating %s: %s", target_path, exc)
+            return False
+
+    def rotate_storage(self, max_backups: int | None = None) -> dict[str, bool]:
+        """Manually rotate both spillover and DLQ files."""
+        limit = (
+            max_backups if max_backups is not None else self.rotation_config.max_backups
+        )
+        with self._lock:
+            spill_rotated = self._rotate_file_locked(self.spillover_path, limit)
+            dlq_rotated = self._rotate_file_locked(self.dlq_path, limit)
+        return {
+            "spillover_rotated": spill_rotated,
+            "dlq_rotated": dlq_rotated,
+        }
+
     def record_spillover(self, event: ReceivedAlertEvent) -> bool:
         """Append an evicted alert event to the spillover JSONL file."""
         return self._append_jsonl(self.spillover_path, event.to_dict())
@@ -488,6 +637,7 @@ class AlertSpilloverStorage:
         with self._lock:
             try:
                 self.storage_dir.mkdir(parents=True, exist_ok=True)
+                self._rotate_file_if_needed(target_path)
                 line = json.dumps(item, ensure_ascii=False) + "\n"
                 with target_path.open("a", encoding="utf-8") as f:
                     f.write(line)
@@ -573,6 +723,179 @@ class AlertSpilloverStorage:
                 logger.warning("Failed purging DLQ at %s: %s", self.dlq_path, exc)
                 return 0
 
+    def retry_dead_letters(
+        self,
+        policy: DLQRetryPolicy | None = None,
+        target_url: str | None = None,
+        channel: str | None = None,
+        reason: str | None = None,
+        dry_run: bool = False,
+    ) -> DLQRetryReport:
+        """Retry delivery or reprocessing of dead-letter alert queue records."""
+        pol = policy or DLQRetryPolicy()
+        with self._lock:
+            if not self.dlq_path.exists():
+                return DLQRetryReport(
+                    total_scanned=0,
+                    retried=0,
+                    succeeded=0,
+                    failed=0,
+                    exhausted=0,
+                    dry_run=dry_run,
+                )
+
+            try:
+                with self.dlq_path.open("r", encoding="utf-8") as f:
+                    raw_lines = f.readlines()
+            except OSError as exc:
+                logger.warning(
+                    "Failed reading DLQ for retry %s: %s", self.dlq_path, exc
+                )
+                return DLQRetryReport(
+                    total_scanned=0,
+                    retried=0,
+                    succeeded=0,
+                    failed=0,
+                    exhausted=0,
+                    dry_run=dry_run,
+                )
+
+            records: list[DeadLetterAlertRecord] = []
+            for line in raw_lines:
+                s = line.strip()
+                if not s:
+                    continue
+                try:
+                    data = json.loads(s)
+                    records.append(DeadLetterAlertRecord.from_dict(data))
+                except Exception:
+                    continue
+
+            results: list[DLQRetryResult] = []
+            retained_records: list[DeadLetterAlertRecord] = []
+            retried = 0
+            succeeded = 0
+            failed = 0
+            exhausted = 0
+
+            for idx, rec in enumerate(records):
+                if channel and rec.channel != channel:
+                    retained_records.append(rec)
+                    continue
+                if reason and rec.reason != reason:
+                    retained_records.append(rec)
+                    continue
+                if rec.retry_count >= pol.max_retries:
+                    exhausted += 1
+                    retained_records.append(rec)
+                    results.append(
+                        DLQRetryResult(
+                            index=idx,
+                            channel=rec.channel,
+                            reason=rec.reason,
+                            success=False,
+                            retry_count=rec.retry_count,
+                            error=f"Max retries ({pol.max_retries}) exhausted",
+                        )
+                    )
+                    continue
+
+                retried += 1
+                if dry_run:
+                    succeeded += 1
+                    results.append(
+                        DLQRetryResult(
+                            index=idx,
+                            channel=rec.channel,
+                            reason=rec.reason,
+                            success=True,
+                            retry_count=rec.retry_count + 1,
+                            status_code=200,
+                        )
+                    )
+                    retained_records.append(rec)
+                else:
+                    url = target_url or "http://localhost:8000/alerts/webhook"
+                    success, code, err = self._dispatch_retry_record(url, rec)
+                    if success:
+                        succeeded += 1
+                        results.append(
+                            DLQRetryResult(
+                                index=idx,
+                                channel=rec.channel,
+                                reason=rec.reason,
+                                success=True,
+                                retry_count=rec.retry_count + 1,
+                                status_code=code,
+                            )
+                        )
+                    else:
+                        failed += 1
+                        rec.retry_count += 1
+                        rec.last_retry_at = datetime.now(UTC).isoformat()
+                        rec.error_message = err
+                        retained_records.append(rec)
+                        results.append(
+                            DLQRetryResult(
+                                index=idx,
+                                channel=rec.channel,
+                                reason=rec.reason,
+                                success=False,
+                                retry_count=rec.retry_count,
+                                status_code=code,
+                                error=err,
+                            )
+                        )
+
+            if not dry_run:
+                try:
+                    with self.dlq_path.open("w", encoding="utf-8") as f:
+                        for r in retained_records:
+                            f.write(json.dumps(r.to_dict(), ensure_ascii=False) + "\n")
+                except OSError as exc:
+                    logger.warning(
+                        "Failed writing updated DLQ %s: %s", self.dlq_path, exc
+                    )
+
+            return DLQRetryReport(
+                total_scanned=len(records),
+                retried=retried,
+                succeeded=succeeded,
+                failed=failed,
+                exhausted=exhausted,
+                dry_run=dry_run,
+                results=results,
+            )
+
+    def _dispatch_retry_record(
+        self, url: str, rec: DeadLetterAlertRecord
+    ) -> tuple[bool, int | None, str | None]:
+        """Dispatch a single dead-letter record to a target webhook URL."""
+        payload_str = rec.raw_payload.strip() if rec.raw_payload else ""
+        if payload_str.startswith("{") or payload_str.startswith("["):
+            payload_bytes = payload_str.encode("utf-8")
+        else:
+            payload_bytes = json.dumps(rec.to_dict()).encode("utf-8")
+
+        req = urllib.request.Request(
+            url,
+            data=payload_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "MusicRecommender-DLQRetry/1.0",
+                **rec.headers,
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                status_code = getattr(resp, "status", 200)
+                return True, int(status_code), None
+        except urllib.error.HTTPError as exc:
+            return False, exc.code, f"HTTP {exc.code}: {exc.reason}"
+        except Exception as exc:
+            return False, None, str(exc)
+
     def purge_spillover(self) -> int:
         """Purge all records in the spillover file, returning count purged."""
         with self._lock:
@@ -588,6 +911,158 @@ class AlertSpilloverStorage:
                     "Failed purging spillover at %s: %s", self.spillover_path, exc
                 )
                 return 0
+
+    def enforce_retention(
+        self,
+        max_age_days: float | None = None,
+        max_backups: int | None = None,
+    ) -> dict[str, int]:
+        """Prune outdated rotated files and events older than retention cutoff."""
+        age_limit = (
+            max_age_days
+            if max_age_days is not None
+            else self.rotation_config.retention_days
+        )
+        backups_limit = (
+            max_backups if max_backups is not None else self.rotation_config.max_backups
+        )
+        cutoff_epoch = time.time() - (age_limit * 86400.0)
+
+        pruned_files = 0
+        with self._lock:
+            for base_path in (self.spillover_path, self.dlq_path):
+                parent = base_path.parent
+                prefix = base_path.name + "."
+                if parent.exists():
+                    for entry in parent.iterdir():
+                        if entry.name.startswith(prefix):
+                            suffix = entry.name[len(prefix) :]
+                            if suffix.isdigit():
+                                idx = int(suffix)
+                                should_delete = idx > backups_limit
+                                if (
+                                    not should_delete
+                                    and entry.stat().st_mtime < cutoff_epoch
+                                ):
+                                    should_delete = True
+                                if should_delete:
+                                    try:
+                                        entry.unlink(missing_ok=True)
+                                        pruned_files += 1
+                                    except OSError as exc:
+                                        logger.warning(
+                                            "Failed pruning rotated file %s: %s",
+                                            entry,
+                                            exc,
+                                        )
+        return {
+            "pruned_files": pruned_files,
+        }
+
+    def create_archive_bundle(
+        self,
+        output_path: Path | str,
+        format: str = "tar.gz",
+        include_spillover: bool = True,
+        include_dlq: bool = True,
+    ) -> Path:
+        """Create a compressed snapshot archive of alert spillover and DLQ files."""
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fmt = format.lower().strip()
+        if fmt not in ("tar.gz", "tgz", "zip"):
+            raise ValueError(
+                f"Unsupported archive format: {format}. Must be 'tar.gz' or 'zip'."
+            )
+
+        with self._lock:
+            files_to_archive: list[Path] = []
+            if include_spillover:
+                if self.spillover_path.exists():
+                    files_to_archive.append(self.spillover_path)
+                files_to_archive.extend(
+                    sorted(self.storage_dir.glob(f"{self.spillover_path.name}.*"))
+                )
+            if include_dlq:
+                if self.dlq_path.exists():
+                    files_to_archive.append(self.dlq_path)
+                files_to_archive.extend(
+                    sorted(self.storage_dir.glob(f"{self.dlq_path.name}.*"))
+                )
+
+            manifest = {
+                "version": "1.0",
+                "created_at": datetime.now(UTC).isoformat(),
+                "storage_dir": str(self.storage_dir),
+                "file_count": len(files_to_archive),
+                "files": [f.name for f in files_to_archive],
+            }
+            manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
+
+            if fmt in ("tar.gz", "tgz"):
+                import io
+
+                with tarfile.open(out, "w:gz") as tar:
+                    ti = tarfile.TarInfo(name="manifest.json")
+                    ti.size = len(manifest_bytes)
+                    ti.mtime = int(time.time())
+                    tar.addfile(ti, io.BytesIO(manifest_bytes))
+                    for f in files_to_archive:
+                        tar.add(f, arcname=f.name)
+            else:
+                with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    zf.writestr("manifest.json", manifest_bytes)
+                    for f in files_to_archive:
+                        zf.write(f, arcname=f.name)
+        return out
+
+    def restore_archive_bundle(
+        self,
+        archive_path: Path | str,
+        target_dir: Path | str | None = None,
+    ) -> dict[str, Any]:
+        """Extract an alert archive bundle into the target directory."""
+        arch = Path(archive_path)
+        if not arch.exists():
+            raise FileNotFoundError(f"Archive bundle not found: {arch}")
+        dest = Path(target_dir) if target_dir is not None else self.storage_dir
+        dest.mkdir(parents=True, exist_ok=True)
+
+        extracted_files: list[str] = []
+        manifest: dict[str, Any] = {}
+
+        if tarfile.is_tarfile(arch):
+            with tarfile.open(arch, "r:*") as tar:
+                manifest_member = (
+                    tar.getmember("manifest.json")
+                    if "manifest.json" in tar.getnames()
+                    else None
+                )
+                if manifest_member is not None:
+                    mf = tar.extractfile(manifest_member)
+                    if mf is not None:
+                        manifest = json.loads(mf.read().decode("utf-8"))
+                for member in tar.getmembers():
+                    if member.name != "manifest.json":
+                        tar.extract(member, path=dest)
+                        extracted_files.append(member.name)
+        elif zipfile.is_zipfile(arch):
+            with zipfile.ZipFile(arch, "r") as zf:
+                if "manifest.json" in zf.namelist():
+                    manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+                for name in zf.namelist():
+                    if name != "manifest.json":
+                        zf.extract(name, path=dest)
+                        extracted_files.append(name)
+        else:
+            raise ValueError(f"Unknown archive format: {arch}")
+
+        return {
+            "status": "extracted",
+            "target_dir": str(dest),
+            "manifest": manifest,
+            "extracted_files": extracted_files,
+        }
 
     def get_stats(self) -> dict[str, Any]:
         """Return counts and file sizes for spillover and DLQ."""
@@ -612,12 +1087,27 @@ class AlertSpilloverStorage:
                         dlq_count = sum(1 for line in f if line.strip())
                 except OSError:
                     pass
+            spill_rotations = (
+                len(list(self.storage_dir.glob(f"{self.spillover_path.name}.*")))
+                if self.storage_dir.exists()
+                else 0
+            )
+            dlq_rotations = (
+                len(list(self.storage_dir.glob(f"{self.dlq_path.name}.*")))
+                if self.storage_dir.exists()
+                else 0
+            )
         return {
             "spillover_count": spill_count,
             "spillover_bytes": spill_size,
+            "spillover_rotations": spill_rotations,
             "dlq_count": dlq_count,
             "dlq_bytes": dlq_size,
+            "dlq_rotations": dlq_rotations,
             "storage_dir": str(self.storage_dir),
+            "max_file_size_bytes": self.rotation_config.max_file_size_bytes,
+            "max_backups": self.rotation_config.max_backups,
+            "retention_days": self.rotation_config.retention_days,
         }
 
 

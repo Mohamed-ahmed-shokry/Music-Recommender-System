@@ -1800,3 +1800,23 @@ def test_dashboard_sidebar_alert_correlation_rendering() -> None:
     assert any("Incident Root Cause" in m.value for m in app.markdown)
     assert any("Root Cause:" in e.value for e in app.error)
     assert any("StreamingQueueHighUtilization" in e.value for e in app.error)
+
+
+def test_dashboard_sidebar_rotation_rendering() -> None:
+    service = FakeDashboardService()
+    service._fake_storage_stats = {
+        "dlq_count": 0,
+        "spillover_count": 0,
+        "spillover_rotations": 2,
+        "dlq_rotations": 1,
+        "storage_dir": "data/alerts",
+    }
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("Storage & Audit" in m.value for m in app.markdown)
+    assert any("rotated backup generation(s)" in c.value for c in app.caption)
