@@ -1186,3 +1186,183 @@ def test_alert_spillover_storage_dlq_retry(
     remaining = storage.read_dead_letters()
     assert len(remaining) == 1
     assert remaining[0]["channel"] == "default"
+
+
+def test_throttler_disabled() -> None:
+    from music_recommender.alerting import (
+        AlertNotificationThrottler,
+        AlertThrottleConfig,
+        AlertTransition,
+        ThrottleDecision,
+    )
+
+    config = AlertThrottleConfig(enabled=False)
+    throttler = AlertNotificationThrottler(config)
+    rule = _rule(name="HighLatency")
+    transition = AlertTransition(
+        rule=rule,
+        event="firing",
+        value=250.0,
+        timestamp="2026-11-09T10:00:00Z",
+    )
+
+    allowed, decision, reason = throttler.should_dispatch(transition, now=100.0)
+    assert allowed is True
+    assert decision == ThrottleDecision.ALLOWED
+    assert "disabled" in reason
+
+
+def test_throttler_deduplication() -> None:
+    from music_recommender.alerting import (
+        AlertNotificationThrottler,
+        AlertThrottleConfig,
+        AlertTransition,
+        ThrottleDecision,
+    )
+
+    config = AlertThrottleConfig(
+        dedup_window_seconds=30.0,
+        repeat_interval_seconds=300.0,
+        max_alerts_per_window=10,
+    )
+    throttler = AlertNotificationThrottler(config)
+    rule = _rule(name="HighLatency")
+    t1 = AlertTransition(
+        rule=rule,
+        event="resolved",
+        value=150.0,
+        timestamp="2026-11-09T10:00:00Z",
+    )
+
+    # First transition allowed
+    allowed, decision, _ = throttler.should_dispatch(t1, now=100.0)
+    assert allowed is True
+    assert decision == ThrottleDecision.ALLOWED
+
+    # Duplicate transition within 30s suppressed
+    allowed, decision, reason = throttler.should_dispatch(t1, now=110.0)
+    assert allowed is False
+    assert decision == ThrottleDecision.SUPPRESSED_DUPLICATE
+    assert "Duplicate transition" in reason
+
+    # After dedup window passes, allowed again
+    allowed, decision, _ = throttler.should_dispatch(t1, now=135.0)
+    assert allowed is True
+    assert decision == ThrottleDecision.ALLOWED
+
+
+def test_throttler_repeat_interval() -> None:
+    from music_recommender.alerting import (
+        AlertNotificationThrottler,
+        AlertThrottleConfig,
+        AlertTransition,
+        ThrottleDecision,
+    )
+
+    config = AlertThrottleConfig(
+        dedup_window_seconds=10.0,
+        repeat_interval_seconds=60.0,
+        max_alerts_per_window=10,
+    )
+    throttler = AlertNotificationThrottler(config)
+    rule = _rule(name="HighLatency")
+    t_firing = AlertTransition(
+        rule=rule,
+        event="firing",
+        value=250.0,
+        timestamp="2026-11-09T10:00:00Z",
+    )
+
+    # Initial firing is allowed
+    allowed, decision, _ = throttler.should_dispatch(t_firing, now=100.0)
+    assert allowed is True
+    assert decision == ThrottleDecision.ALLOWED
+
+    # 15 seconds later: dedup window has passed, but repeat interval hasn't
+    allowed, decision, reason = throttler.should_dispatch(t_firing, now=115.0)
+    assert allowed is False
+    assert decision == ThrottleDecision.REPEAT_SUPPRESSED
+    assert "Ongoing firing alert" in reason
+
+    # 65 seconds later: repeat interval has passed
+    allowed, decision, _ = throttler.should_dispatch(t_firing, now=165.0)
+    assert allowed is True
+    assert decision == ThrottleDecision.ALLOWED
+
+
+def test_throttler_rate_limiting_and_sliding_window() -> None:
+    from music_recommender.alerting import (
+        AlertNotificationThrottler,
+        AlertThrottleConfig,
+        AlertTransition,
+        ThrottleDecision,
+    )
+
+    config = AlertThrottleConfig(
+        dedup_window_seconds=1.0,
+        repeat_interval_seconds=1.0,
+        window_seconds=60.0,
+        max_alerts_per_window=2,
+    )
+    throttler = AlertNotificationThrottler(config)
+    rule = _rule(name="CpuSpike")
+
+    t1 = AlertTransition(rule=rule, event="firing", value=95.0, timestamp="T1")
+    t2 = AlertTransition(rule=rule, event="resolved", value=80.0, timestamp="T2")
+    t3 = AlertTransition(rule=rule, event="firing", value=96.0, timestamp="T3")
+
+    # t1 at ts=10
+    allowed1, d1, _ = throttler.should_dispatch(t1, now=10.0)
+    assert allowed1 is True
+    assert d1 == ThrottleDecision.ALLOWED
+
+    # t2 at ts=20
+    allowed2, d2, _ = throttler.should_dispatch(t2, now=20.0)
+    assert allowed2 is True
+    assert d2 == ThrottleDecision.ALLOWED
+
+    # t3 at ts=30: limit of 2 in 60s window reached!
+    allowed3, d3, reason = throttler.should_dispatch(t3, now=30.0)
+    assert allowed3 is False
+    assert d3 == ThrottleDecision.RATE_LIMITED
+    assert "Rate limit exceeded" in reason
+
+    # at ts=75: t1 at ts=10 is outside the 60s sliding window (75 - 60 = 15 > 10)
+    allowed4, d4, _ = throttler.should_dispatch(t3, now=75.0)
+    assert allowed4 is True
+    assert d4 == ThrottleDecision.ALLOWED
+
+
+def test_throttler_stats_and_reset() -> None:
+    from music_recommender.alerting import (
+        AlertNotificationThrottler,
+        AlertThrottleConfig,
+        AlertTransition,
+    )
+
+    throttler = AlertNotificationThrottler(
+        AlertThrottleConfig(
+            dedup_window_seconds=10.0,
+            repeat_interval_seconds=60.0,
+            max_alerts_per_window=1,
+            window_seconds=60.0,
+        )
+    )
+    rule = _rule(name="ErrorRate")
+    t = AlertTransition(rule=rule, event="firing", value=10.0, timestamp="T")
+
+    throttler.should_dispatch(t, now=10.0)  # allowed
+    throttler.should_dispatch(t, now=12.0)  # duplicate suppressed
+    throttler.should_dispatch(t, now=25.0)  # repeat suppressed / rate limited
+
+    stats = throttler.get_stats()
+    assert stats["total_evaluated"] == 3
+    assert stats["allowed_count"] == 1
+    assert stats["suppressed_duplicate_count"] == 1
+    assert stats["tracked_rules"] == 1
+
+    throttler.reset()
+    clean_stats = throttler.get_stats()
+    assert clean_stats["total_evaluated"] == 0
+    assert clean_stats["allowed_count"] == 0
+    assert clean_stats["tracked_rules"] == 0
