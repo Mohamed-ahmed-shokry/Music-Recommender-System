@@ -3,27 +3,29 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.37.0) — shipped (branch `phase/167-alert-rotation-and-retention`)
+## Current milestone (0.38.0) — in progress (branch `phase/169-alert-throttling-and-gateways`)
 
-Automated Alert Storage Rotation, Retention Pruning, DLQ Exponential Retry, and Disaster Recovery Snapshots.
-The 0.36.0 release introduced push-based telemetry (InfluxDB Line Protocol 2.0 and Prometheus remote-write)
-and directed acyclic alert root-cause correlation graphs.
-This milestone hardens persistent alert storage and recovery operations by providing automatic and manual
-size-capped file rotation for alert spillover and DLQ logs, age-based retention pruning, automated DLQ retry execution
-with exponential backoff and jitter, compressed archive bundle export/restore (`.tar.gz`/`.zip`) for disaster recovery,
-REST API endpoints (`POST /alerts/rotate`, `POST /alerts/dlq/retry`, `GET /alerts/archive`), operator CLI commands
-(`rotate-alerts`, `retry-dlq`, `archive-alerts`), and Streamlit dashboard storage management visibility.
+Alert Notification Throttling, Escalation Policies, and Multi-Channel Incident Gateways.
+The 0.37.0 release hardened persistent alert storage with size-capped log rotation, age retention, DLQ backoff retries, and archive bundles.
+This milestone prevents alert notification storms and adds enterprise incident management integrations:
+sliding-window deduplication and throttling (`AlertNotificationThrottler`), tiered time-based escalation
+(`AlertEscalationPolicy`, `AlertEscalationEngine`), outbound multi-channel dispatchers for PagerDuty Events API v2
+and Opsgenie Alert API v2 (`PagerDutyGateway`, `OpsgenieGateway`, `MultiChannelDispatcher`), API observability
+(`GET /alerts/throttling/stats`, `POST /alerts/gateway/test`), operator CLI tooling (`throttle-stats`, `test-gateway`),
+and Streamlit dashboard visibility.
 
-- Phase 167 — Size-capped file rotation, retention pruning, and disaster recovery archive bundles:
-  `AlertLogRotationConfig`, `rotate_storage`, `enforce_retention`, `create_archive_bundle` in `alerting.py` (shipped). ✅
-- Phase 168 — Automated DLQ retry policies with exponential backoff and operator tooling:
-  `DLQRetryPolicy`, `retry_dead_letters`, service & API integration, CLI commands, dashboard indicators, clean CI (shipped). ✅
+- Phase 169 — Notification throttling, deduplication, and escalation engine:
+  `AlertThrottleConfig`, `AlertNotificationThrottler`, `AlertEscalationPolicy`, `AlertEscalationEngine` in `alerting.py`.
+- Phase 170 — Outbound PagerDuty & Opsgenie gateways, multi-channel dispatcher, and 0.38.0 release:
+  `PagerDutyGateway`, `OpsgenieGateway`, `MultiChannelDispatcher`, service & API integration, CLI commands, dashboard indicators, clean CI.
 
-## Next milestone (0.38.0) — planned
+## Next milestone (0.39.0) — planned
 
-Alert Notification Throttling, Escalation Policies, and Multi-Channel PagerDuty / Opsgenie Gateways.
-- Phase 169 — Tiered notification escalation policies and deduplication windows.
-- Phase 170 — Outbound PagerDuty, Opsgenie, and custom webhook gateway dispatchers.
+Automated Incident Remediation, Circuit Breaking, and Self-Healing Maintenance Triggers.
+- Phase 171 — Automated self-healing action runner for active firing alert remediation.
+- Phase 172 — Outbound webhook circuit breaking and adaptive rate regulation.
+
+## Previous milestone (0.37.0) — shipped (branch `phase/167-alert-rotation-and-retention`, PR #31)
 
 ## Previous milestone (0.36.0) — shipped (branch `phase/163-remote-write-and-correlation`, PR #27)
 

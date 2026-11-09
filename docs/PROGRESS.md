@@ -1,10 +1,10 @@
-# Phase 167 & 168 Progress Record & Decision Log
+# Phase 169 & 170 Progress Record & Decision Log
 
-## Phase 167 & 168: Size-Capped Log Rotation, Retention Pruning, DLQ Exponential Retry, and Archive Snapshots (0.37.0)
+## Phase 169 & 170: Alert Notification Throttling, Escalation Policies, and Multi-Channel Incident Gateways (0.38.0)
 
-- **Milestone**: 0.37.0
+- **Milestone**: 0.38.0
 - **Status**: Completed
-- **Branch**: `phase/167-alert-rotation-and-retention`
+- **Branch**: `phase/169-alert-throttling-and-gateways`
 
 ---
 
@@ -12,25 +12,24 @@
 
 | Task ID | Task Description | Status | Commit |
 |---|---|---|---|
-| Task 1 | Roadmap, Plan & Progress initialization | Completed | `d057d67`, `3b38839` |
-| Task 2 | `AlertLogRotationConfig` and size-capped rotation in `AlertSpilloverStorage` | Completed | `b1242f2`, `32a7a3a` |
-| Task 3 | Age-based retention pruning in `AlertSpilloverStorage` | Completed | `741aafe` |
-| Task 4 | Unit tests for log rotation and retention pruning in `tests/test_alerting.py` | Completed | `9772aea` |
-| Task 5 | `create_archive_bundle` and `restore_archive_bundle` in `alerting.py` | Completed | `d351523` |
-| Task 6 | Unit tests for archive bundle creation and extraction in `tests/test_alerting.py` | Completed | `6e55ac3` |
-| Task 7 | `DLQRetryPolicy`, `DLQRetryResult`, `DLQRetryReport`, and `retry_dead_letters` in `alerting.py` | Completed | `1f20869`, `bf951dd`, `5d624ba` |
-| Task 8 | Unit tests for DLQ retry engine in `tests/test_alerting.py` | Completed | `1d4fbe7` |
-| Task 9 | Integration in `RecommenderService` in `src/music_recommender/service.py` | Completed | `70d0817` |
-| Task 10 | Service tests in `tests/test_service.py` | Completed | `5b95e26` |
-| Task 11 | Endpoints `/alerts/rotate`, `/alerts/dlq/retry`, `/alerts/archive`, `/alerts/storage/stats` in `api/main.py` | Completed | `0d4d93e` |
-| Task 12 | API integration tests in `tests/test_api.py` | Completed | `e29a453` |
-| Task 13 | CLI commands `rotate-alerts`, `retry-dlq`, and `archive-alerts` in `cli.py` | Completed | `de26b12` |
-| Task 14 | CLI unit tests in `tests/test_cli.py` | Completed | `ec06990` |
-| Task 15 | Storage rotation and retry indicators in `src/music_recommender/dashboard.py` | Completed | `441169f` |
-| Task 16 | Dashboard tests in `tests/test_dashboard.py` | Completed | `1b9c035` |
-| Task 17 | Documentation updates in `README.md` and `CHANGELOG.md` | Completed | `67414b6`, `b9cfebf` |
-| Task 18 | Package version bump to `0.37.0` in `pyproject.toml`, `uv lock`, and `uv build` | Completed | `fcbefbd`, `0b533d2` |
-| Task 19 | CI parity verification, push, open draft PR, monitor remote CI to green | Completed | `51af8d3`, `7d5dbf2` |
+| Task 1 | Roadmap, Plan & Progress initialization | Completed | `4696561`, `2ea43f4` |
+| Task 2 | `AlertThrottleConfig`, `ThrottleDecision`, and `AlertNotificationThrottler` in `alerting.py` | Completed | `47a69ba`, `b0caaf0` |
+| Task 3 | Unit tests for `AlertNotificationThrottler` in `tests/test_alerting.py` | Completed | `8d16070` |
+| Task 4 | `AlertEscalationTier`, `AlertEscalationPolicy`, and `AlertEscalationEngine` in `alerting.py` | Completed | `12f7f58` |
+| Task 5 | Unit tests for alert escalation engine in `tests/test_alerting.py` | Completed | `4af7f89` |
+| Task 6 | `PagerDutyGateway`, `OpsgenieGateway`, and `MultiChannelDispatcher` in `alerting.py` | Completed | `81f60d3` |
+| Task 7 | Unit tests for PagerDuty and Opsgenie gateways in `tests/test_alerting.py` | Completed | `a89d32c` |
+| Task 8 | Integration in `RecommenderService` in `src/music_recommender/service.py` | Completed | `2c6c89b` |
+| Task 9 | Service tests in `tests/test_service.py` | Completed | `8d292b6` |
+| Task 10 | Endpoints `/alerts/throttling/stats`, `/alerts/throttling/reset`, `/alerts/gateway/test` in `api/main.py` | Completed | `5762227` |
+| Task 11 | API integration tests in `tests/test_api.py` | Completed | `f9161ae` |
+| Task 12 | CLI commands `throttle-stats` and `test-gateway` in `cli.py` | Completed | `e5c56e5` |
+| Task 13 | CLI tests in `tests/test_cli.py` | Completed | `ada24ca` |
+| Task 14 | Throttling and escalation indicators in `src/music_recommender/dashboard.py` | Completed | `1ff0b98` |
+| Task 15 | Dashboard tests in `tests/test_dashboard.py` | Completed | `b01467a` |
+| Task 16 | Documentation updates in `README.md` and `CHANGELOG.md` | Completed | `d4df56e` |
+| Task 17 | Bump package version to `0.38.0` in `pyproject.toml`, run `uv lock`, and `uv build` | Completed | `30d0e1c` |
+| Task 18 | CI parity verification, push, open draft PR, monitor remote CI to green | Completed | PR #32, run `42602081470` |
 
 ---
 
@@ -38,9 +37,9 @@
 
 | Decision | Options Considered | Rationale & Evidence |
 |---|---|---|
-| Log rotation naming convention | (a) Standard `.1`, `.2`, ..., `.N` suffix, (b) Date-timestamped filenames | (a) Standard numeric backup suffixes (`.1`, `.2`, etc.) maintain deterministic generation indexing, fixed disk space bounding, and compatibility with standard logrotate tools. |
-| Archive bundle formats | (a) Tarball (`.tar.gz`) only, (b) Zip (`.zip`) only, (c) Both `.tar.gz` and `.zip` supported via Python standard library `tarfile` and `zipfile` | (c) Supporting both `.tar.gz` and `.zip` with standard library modules provides cross-platform flexibility (Linux/Docker and Windows operators) without third-party dependencies. |
-| DLQ retry backoff algorithm | (a) Fixed constant interval, (b) Truncated exponential backoff with jitter | (b) Exponential backoff (`min(max_delay, base_delay * (multiplier ** retry_count))`) with optional jitter prevents thundering herd against recovering downstream webhooks. |
+| Alert throttling algorithm | (a) Fixed bucket counter, (b) Sliding-window timestamp log per alert rule and severity | (b) Sliding-window tracking per `(rule_name, severity)` provides smooth rate-limiting without burst spikes at bucket boundaries. |
+| PagerDuty & Opsgenie integration | (a) Heavy vendor SDKs, (b) Lightweight HTTP API v2 adapters with standard library `urllib.request` | (b) Pure standard library HTTP adapters avoid bloat, external dependency conflicts, and keep Docker container build sizes lean. |
+| Escalation trigger mechanism | (a) Polling worker thread, (b) Continuous firing duration evaluation during alert evaluation loop | (b) In-process timestamp delta calculation (`time.time() - first_firing_at >= tier_delay`) is deterministic, thread-safe, and avoids asynchronous race conditions. |
 
 ---
 
@@ -48,11 +47,12 @@
 
 | Command | Result |
 |---|---|
-| `uv run ruff format --check .` | ✅ 65 files already formatted |
-| `uv run ruff check .` | ✅ All checks passed |
-| `uv run mypy` | ✅ Success: no issues found in 30 source files |
-| `uv run --extra dashboard --extra tracking --extra spotify pytest -q` | ✅ 1,256 passed in 94s |
-| `uv build` | ✅ Successfully built distributions for v0.37.0 |
+| `uv run ruff format --check .` | Passed (65 files checked) |
+| `uv run ruff check .` | Passed (0 lint errors across codebase) |
+| `uv run mypy` | Passed (30 source files checked, 0 errors) |
+| `uv run --extra dashboard --extra tracking --extra spotify pytest -q` | Passed (1,273 tests passed in 95.68s) |
+| `uv build` | Passed (`music_recommender_system-0.38.0.tar.gz` and wheel) |
+| Remote GitHub Actions CI (run `42602081470`) | Passed (100% green on PR #32) |
 
 ---
 
@@ -60,13 +60,22 @@
 
 | Criterion | Status | Evidence |
 |---|---|---|
-| AC-1 Size-capped log rotation & retention pruning | Met | Implemented in `AlertSpilloverStorage` and verified in `tests/test_alerting.py`. |
-| AC-2 Disaster recovery archive bundling (`.tar.gz`/`.zip`) | Met | Implemented `create_archive_bundle`/`restore_archive_bundle` and verified in `tests/test_alerting.py`. |
-| AC-3 DLQ exponential retry engine | Met | Implemented `retry_dead_letters` and verified in `tests/test_alerting.py`. |
-| AC-4 FastAPI rotation, retry, and archive endpoints | Met | Implemented in `api/main.py` and verified in `tests/test_api.py`. |
-| AC-5 Operator CLI rotation, retry, and archive commands | Met | Implemented in `cli.py` and verified in `tests/test_cli.py`. |
-| AC-6 Streamlit dashboard storage management visibility | Met | Implemented in `dashboard.py` and verified in `tests/test_dashboard.py`. |
-| AC-7 100% green CI locally and remotely | Met | All local checks pass (1256 tests); remote GitHub Actions CI workflows green. |
+| AC-1: Deduplication, rate limits, and repeat suppression | Satisfied | `AlertNotificationThrottler` tests in `tests/test_alerting.py` |
+| AC-2: Continuous firing duration and tiered escalation | Satisfied | `AlertEscalationEngine` tests in `tests/test_alerting.py` |
+| AC-3: PagerDuty & Opsgenie API v2 gateways | Satisfied | `PagerDutyGateway`, `OpsgenieGateway`, and `MultiChannelDispatcher` |
+| AC-4: FastAPI endpoints `/alerts/throttling/*` and `/alerts/gateway/test` | Satisfied | Endpoints in `api/main.py`, tested in `tests/test_api.py` |
+| AC-5: Operator CLI commands `throttle-stats` and `test-gateway` | Satisfied | Commands in `cli.py`, tested in `tests/test_cli.py` |
+| AC-6: Streamlit dashboard notification throttling indicator | Satisfied | Sidebar expander in `dashboard.py`, tested in `test_dashboard.py` |
+| AC-7: 100% green CI parity locally and remotely | Satisfied | 1,273 tests passing locally, run `42602081470` green on PR #32 |
+
+|---|---|---|
+| AC-1 Notification throttling & deduplication | Pending | |
+| AC-2 Continuous firing escalation tiers | Pending | |
+| AC-3 PagerDuty & Opsgenie gateway API v2 dispatch | Pending | |
+| AC-4 FastAPI throttling & gateway test endpoints | Pending | |
+| AC-5 Operator CLI throttle-stats & test-gateway | Pending | |
+| AC-6 Streamlit dashboard throttling indicators | Pending | |
+| AC-7 100% green CI locally and remotely | Pending | |
 
 ---
 

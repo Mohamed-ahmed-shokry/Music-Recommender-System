@@ -1519,6 +1519,21 @@ def render_dashboard(service: RecommenderService) -> None:
                             f"🔄 {spill_rot + dlq_rot} rotated backup generation(s)"
                         )
 
+            if hasattr(service, "get_alert_throttling_stats"):
+                throttle_stats = service.get_alert_throttling_stats()
+                suppressed = throttle_stats.get("suppressed_duplicate_count", 0)
+                rate_limited = throttle_stats.get("rate_limited_count", 0)
+                repeat_suppressed = throttle_stats.get("repeat_suppressed_count", 0)
+                total_suppressed = suppressed + rate_limited + repeat_suppressed
+                if total_suppressed > 0:
+                    st.divider()
+                    st.markdown("**Notification Throttling**")
+                    st.caption(
+                        f"🛡️ **{total_suppressed} notification(s) throttled** "
+                        f"({suppressed} duplicate, {rate_limited} rate-limited, "
+                        f"{repeat_suppressed} repeat-suppressed)"
+                    )
+
             if hasattr(service, "correlate_alert_history"):
                 try:
                     corr = service.correlate_alert_history(limit=20)

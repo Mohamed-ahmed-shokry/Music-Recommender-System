@@ -239,6 +239,16 @@ class AlertTransition:
     value: float | None
     timestamp: str
 
+    @property
+    def is_firing(self) -> bool:
+        """Return True if this transition represents a firing alert."""
+        return self.event == "firing"
+
+    @property
+    def is_resolved(self) -> bool:
+        """Return True if this transition represents a resolved alert."""
+        return self.event == "resolved"
+
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable notification payload."""
         return {
@@ -456,6 +466,105 @@ class DeadLetterAlertRecord:
             last_retry_at=str(data["last_retry_at"])
             if data.get("last_retry_at")
             else None,
+        )
+
+
+class ThrottleDecision(StrEnum):
+    """Decision made by the alert notification throttler."""
+
+    ALLOWED = "allowed"
+    SUPPRESSED_DUPLICATE = "suppressed_duplicate"
+    RATE_LIMITED = "rate_limited"
+    REPEAT_SUPPRESSED = "repeat_suppressed"
+
+
+@dataclass
+class AlertThrottleConfig:
+    """Configuration for sliding-window rate limiting and deduplication."""
+
+    dedup_window_seconds: float = 300.0
+    max_alerts_per_window: int = 10
+    window_seconds: float = 60.0
+    repeat_interval_seconds: float = 1800.0
+    enabled: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "dedup_window_seconds": self.dedup_window_seconds,
+            "max_alerts_per_window": self.max_alerts_per_window,
+            "window_seconds": self.window_seconds,
+            "repeat_interval_seconds": self.repeat_interval_seconds,
+            "enabled": self.enabled,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AlertThrottleConfig:
+        return cls(
+            dedup_window_seconds=float(data.get("dedup_window_seconds", 300.0)),
+            max_alerts_per_window=int(data.get("max_alerts_per_window", 10)),
+            window_seconds=float(data.get("window_seconds", 60.0)),
+            repeat_interval_seconds=float(data.get("repeat_interval_seconds", 1800.0)),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
+@dataclass
+class AlertEscalationTier:
+    """A single tier within an alert escalation policy."""
+
+    level: int = 1
+    delay_seconds: float = 0.0
+    channels: list[str] = field(default_factory=lambda: ["default"])
+    repeat: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "level": self.level,
+            "delay_seconds": self.delay_seconds,
+            "channels": list(self.channels),
+            "repeat": self.repeat,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AlertEscalationTier:
+        return cls(
+            level=int(data.get("level", 1)),
+            delay_seconds=float(data.get("delay_seconds", 0.0)),
+            channels=list(data.get("channels", ["default"])),
+            repeat=bool(data.get("repeat", False)),
+        )
+
+
+@dataclass
+class AlertEscalationPolicy:
+    """Escalation policy defining ordered tiers for alert notifications."""
+
+    name: str = "default"
+    tiers: list[AlertEscalationTier] = field(default_factory=list)
+    enabled: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.tiers:
+            self.tiers = [
+                AlertEscalationTier(level=1, delay_seconds=0.0, channels=["default"])
+            ]
+        self.tiers.sort(key=lambda t: t.delay_seconds)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "tiers": [t.to_dict() for t in self.tiers],
+            "enabled": self.enabled,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AlertEscalationPolicy:
+        raw_tiers = data.get("tiers", [])
+        tiers = [AlertEscalationTier.from_dict(t) for t in raw_tiers]
+        return cls(
+            name=str(data.get("name", "default")),
+            tiers=tiers,
+            enabled=bool(data.get("enabled", True)),
         )
 
 
@@ -1486,6 +1595,244 @@ class AlertEvaluator:
         return [s for s in self.states() if s["status"] == AlertStatus.FIRING]
 
 
+class AlertNotificationThrottler:
+    """Thread-safe rate-limiter and deduplicator for alert notifications."""
+
+    def __init__(self, config: AlertThrottleConfig | None = None) -> None:
+        self.config = config or AlertThrottleConfig()
+        self._lock = threading.Lock()
+        self._last_transitions: dict[tuple[str, str], float] = {}
+        self._sliding_timestamps: dict[str, list[float]] = {}
+        self._last_firing_dispatch: dict[str, float] = {}
+
+        self._total_evaluated: int = 0
+        self._allowed_count: int = 0
+        self._suppressed_duplicate_count: int = 0
+        self._rate_limited_count: int = 0
+        self._repeat_suppressed_count: int = 0
+
+    def should_dispatch(
+        self,
+        transition: AlertTransition,
+        now: float | None = None,
+    ) -> tuple[bool, ThrottleDecision, str]:
+        """Determine whether an alert transition should be dispatched or throttled."""
+        if not self.config.enabled:
+            return True, ThrottleDecision.ALLOWED, "Throttling disabled"
+
+        ts = now if now is not None else time.time()
+        rule_name = transition.rule.name
+        state_key = (rule_name, transition.event)
+
+        with self._lock:
+            self._total_evaluated += 1
+
+            # 1. Exact duplicate transition check
+            last_ts = self._last_transitions.get(state_key)
+            if (
+                last_ts is not None
+                and (ts - last_ts) < self.config.dedup_window_seconds
+            ):
+                self._suppressed_duplicate_count += 1
+                return (
+                    False,
+                    ThrottleDecision.SUPPRESSED_DUPLICATE,
+                    (
+                        f"Duplicate transition for {rule_name} within "
+                        f"{self.config.dedup_window_seconds}s window"
+                    ),
+                )
+
+            # 2. Ongoing firing repeat interval check
+            if transition.is_firing:
+                last_firing = self._last_firing_dispatch.get(rule_name)
+                if (
+                    last_firing is not None
+                    and (ts - last_firing) < self.config.repeat_interval_seconds
+                ):
+                    self._repeat_suppressed_count += 1
+                    return (
+                        False,
+                        ThrottleDecision.REPEAT_SUPPRESSED,
+                        (
+                            f"Ongoing firing alert {rule_name} suppressed "
+                            f"until {self.config.repeat_interval_seconds}s interval"
+                        ),
+                    )
+
+            # 3. Sliding-window rate limit
+            cutoff = ts - self.config.window_seconds
+            timestamps = self._sliding_timestamps.setdefault(rule_name, [])
+            self._sliding_timestamps[rule_name] = [t for t in timestamps if t >= cutoff]
+            if (
+                len(self._sliding_timestamps[rule_name])
+                >= self.config.max_alerts_per_window
+            ):
+                self._rate_limited_count += 1
+                return (
+                    False,
+                    ThrottleDecision.RATE_LIMITED,
+                    (
+                        f"Rate limit exceeded: {self.config.max_alerts_per_window} "
+                        f"in {self.config.window_seconds}s"
+                    ),
+                )
+
+            # Allowed - record timestamp
+            self._last_transitions[state_key] = ts
+            self._sliding_timestamps[rule_name].append(ts)
+            if transition.is_firing:
+                self._last_firing_dispatch[rule_name] = ts
+            self._allowed_count += 1
+            return True, ThrottleDecision.ALLOWED, "Allowed"
+
+    def get_stats(self) -> dict[str, Any]:
+        """Return throttling and suppression metrics."""
+        with self._lock:
+            return {
+                "total_evaluated": self._total_evaluated,
+                "allowed_count": self._allowed_count,
+                "suppressed_duplicate_count": self._suppressed_duplicate_count,
+                "rate_limited_count": self._rate_limited_count,
+                "repeat_suppressed_count": self._repeat_suppressed_count,
+                "tracked_rules": len(self._sliding_timestamps),
+                "config": self.config.to_dict(),
+            }
+
+    def reset(self) -> None:
+        """Clear all in-memory throttling state."""
+        with self._lock:
+            self._last_transitions.clear()
+            self._sliding_timestamps.clear()
+            self._last_firing_dispatch.clear()
+            self._total_evaluated = 0
+            self._allowed_count = 0
+            self._suppressed_duplicate_count = 0
+            self._rate_limited_count = 0
+            self._repeat_suppressed_count = 0
+
+
+@dataclass(frozen=True)
+class EscalationEvent:
+    """An escalation event triggered when an alert reaches a new tier."""
+
+    rule_name: str
+    tier_level: int
+    delay_seconds: float
+    channels: list[str]
+    elapsed_seconds: float
+    timestamp: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rule_name": self.rule_name,
+            "tier_level": self.tier_level,
+            "delay_seconds": self.delay_seconds,
+            "channels": list(self.channels),
+            "elapsed_seconds": self.elapsed_seconds,
+            "timestamp": self.timestamp,
+        }
+
+
+class AlertEscalationEngine:
+    """Tracks firing duration and triggers escalation tiers across channels."""
+
+    def __init__(
+        self,
+        policies: dict[str, AlertEscalationPolicy] | None = None,
+        default_policy: AlertEscalationPolicy | None = None,
+    ) -> None:
+        self._lock = threading.Lock()
+        self._policies: dict[str, AlertEscalationPolicy] = dict(policies or {})
+        self._default_policy: AlertEscalationPolicy = (
+            default_policy or AlertEscalationPolicy(name="default")
+        )
+        self._firing_start_times: dict[str, float] = {}
+        self._notified_tiers: dict[str, set[int]] = {}
+        self._escalation_history: list[EscalationEvent] = []
+
+    def register_policy(self, rule_name: str, policy: AlertEscalationPolicy) -> None:
+        """Assign an escalation policy to an alert rule name."""
+        with self._lock:
+            self._policies[rule_name] = policy
+
+    def get_policy(self, rule_name: str) -> AlertEscalationPolicy:
+        """Return the escalation policy for a rule, falling back to default."""
+        with self._lock:
+            return self._policies.get(rule_name, self._default_policy)
+
+    def evaluate_transition(
+        self,
+        transition: AlertTransition,
+        now: float | None = None,
+    ) -> list[EscalationEvent]:
+        """Evaluate an alert transition and return newly triggered escalation events."""
+        ts = now if now is not None else time.time()
+        rule_name = transition.rule.name
+        events: list[EscalationEvent] = []
+
+        with self._lock:
+            if transition.is_resolved:
+                self._firing_start_times.pop(rule_name, None)
+                self._notified_tiers.pop(rule_name, None)
+                return events
+
+            if not transition.is_firing:
+                return events
+
+            policy = self._policies.get(rule_name, self._default_policy)
+            if not policy.enabled:
+                return events
+
+            if rule_name not in self._firing_start_times:
+                self._firing_start_times[rule_name] = ts
+                self._notified_tiers[rule_name] = set()
+
+            start_ts = self._firing_start_times[rule_name]
+            elapsed = ts - start_ts
+            notified = self._notified_tiers.setdefault(rule_name, set())
+
+            iso_now = datetime.fromtimestamp(ts, tz=UTC).isoformat()
+            for tier in policy.tiers:
+                if elapsed >= tier.delay_seconds and (
+                    tier.level not in notified or tier.repeat
+                ):
+                    notified.add(tier.level)
+                    ev = EscalationEvent(
+                        rule_name=rule_name,
+                        tier_level=tier.level,
+                        delay_seconds=tier.delay_seconds,
+                        channels=list(tier.channels),
+                        elapsed_seconds=elapsed,
+                        timestamp=iso_now,
+                    )
+                    events.append(ev)
+                    self._escalation_history.append(ev)
+
+            return events
+
+    def get_active_firing_durations(self, now: float | None = None) -> dict[str, float]:
+        """Return rule name -> active firing duration in seconds."""
+        ts = now if now is not None else time.time()
+        with self._lock:
+            return {
+                name: max(0.0, ts - start)
+                for name, start in self._firing_start_times.items()
+            }
+
+    def get_history(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return recent escalation event history."""
+        with self._lock:
+            return [ev.to_dict() for ev in reversed(self._escalation_history[-limit:])]
+
+    def reset(self) -> None:
+        """Clear all active firing state and history."""
+        with self._lock:
+            self._firing_start_times.clear()
+            self._notified_tiers.clear()
+            self._escalation_history.clear()
+
+
 class WebhookDispatcher:
     """Deliver alert transitions to an HTTP(S) webhook as JSON.
 
@@ -1554,6 +1901,250 @@ def _post_json(url: str, body: bytes, timeout: float) -> None:
         status = getattr(response, "status", 200)
         if status >= 400:
             raise OSError(f"webhook responded with HTTP {status}")
+
+
+def _send_http_request(
+    url: str,
+    body: bytes,
+    headers: dict[str, str],
+    timeout: float,
+    method: str = "POST",
+) -> tuple[int, str]:
+    request = urllib.request.Request(  # noqa: S310
+        url,
+        data=body if body else None,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+            status = getattr(response, "status", 200)
+            res_body = response.read().decode("utf-8", errors="replace")
+            return int(status), res_body
+    except urllib.error.HTTPError as exc:
+        err_body = (
+            exc.read().decode("utf-8", errors="replace")
+            if hasattr(exc, "read")
+            else str(exc)
+        )
+        return int(exc.code), err_body
+    except Exception as exc:
+        return 0, str(exc)
+
+
+class PagerDutyGateway:
+    """Delivers alert transitions to PagerDuty Events API v2."""
+
+    def __init__(
+        self,
+        routing_key: str,
+        endpoint_url: str = "https://events.pagerduty.com/v2/enqueue",
+        timeout_seconds: float = 5.0,
+        sender: Callable[[str, bytes, dict[str, str], float, str], tuple[int, str]]
+        | None = None,
+    ) -> None:
+        self.routing_key = routing_key
+        self.endpoint_url = endpoint_url
+        self.timeout_seconds = timeout_seconds
+        self._sender = sender or _send_http_request
+
+    def send(self, transition: AlertTransition) -> tuple[bool, int, str]:
+        """Dispatch an alert transition to PagerDuty."""
+        action = "trigger" if transition.is_firing else "resolve"
+        sev = str(transition.rule.severity).lower()
+        pd_severity = "critical" if sev == "critical" else "warning"
+
+        payload = {
+            "routing_key": self.routing_key,
+            "event_action": action,
+            "dedup_key": f"music-recommender-{transition.rule.name}",
+            "payload": {
+                "summary": (
+                    f"[{sev.upper()}] {transition.rule.name}: {transition.rule.summary}"
+                ),
+                "source": "music-recommender",
+                "severity": pd_severity,
+                "timestamp": transition.timestamp,
+                "custom_details": {
+                    "metric": transition.rule.metric,
+                    "value": transition.value,
+                    "comparator": transition.rule.comparator,
+                    "threshold": transition.rule.threshold,
+                },
+            },
+        }
+        body = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        status, response = self._sender(
+            self.endpoint_url, body, headers, self.timeout_seconds, "POST"
+        )
+        success = 200 <= status < 300
+        return success, status, response
+
+
+class OpsgenieGateway:
+    """Delivers alert transitions to Opsgenie Alert API v2."""
+
+    def __init__(
+        self,
+        api_key: str,
+        endpoint_url: str = "https://api.opsgenie.com/v2/alerts",
+        timeout_seconds: float = 5.0,
+        sender: Callable[[str, bytes, dict[str, str], float, str], tuple[int, str]]
+        | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.endpoint_url = endpoint_url
+        self.timeout_seconds = timeout_seconds
+        self._sender = sender or _send_http_request
+
+    def send(self, transition: AlertTransition) -> tuple[bool, int, str]:
+        """Dispatch an alert transition to Opsgenie."""
+        alias = f"music-recommender-{transition.rule.name}"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"GenieKey {self.api_key}",
+        }
+        if transition.is_firing:
+            sev = str(transition.rule.severity).lower()
+            priority = "P1" if sev == "critical" else "P3"
+            payload = {
+                "message": f"[{sev.upper()}] {transition.rule.name}",
+                "alias": alias,
+                "description": transition.rule.summary,
+                "priority": priority,
+                "details": {
+                    "metric": transition.rule.metric,
+                    "value": str(transition.value),
+                    "comparator": transition.rule.comparator,
+                    "threshold": str(transition.rule.threshold),
+                },
+            }
+            body = json.dumps(payload).encode("utf-8")
+            status, response = self._sender(
+                self.endpoint_url, body, headers, self.timeout_seconds, "POST"
+            )
+        else:
+            close_url = (
+                f"{self.endpoint_url.rstrip('/')}/{alias}/close?identifierType=alias"
+            )
+            body = json.dumps({"note": "Alert condition resolved"}).encode("utf-8")
+            status, response = self._sender(
+                close_url, body, headers, self.timeout_seconds, "POST"
+            )
+        success = 200 <= status < 300
+        return success, status, response
+
+
+class MultiChannelDispatcher:
+    """Coordinates dispatching alert transitions across multiple gateways
+    and channels.
+    """
+
+    def __init__(
+        self,
+        channels: dict[str, Callable[[AlertTransition], tuple[bool, int, str]]]
+        | None = None,
+        throttler: AlertNotificationThrottler | None = None,
+        escalation_engine: AlertEscalationEngine | None = None,
+    ) -> None:
+        self._lock = threading.Lock()
+        self._channels: dict[
+            str, Callable[[AlertTransition], tuple[bool, int, str]]
+        ] = dict(channels or {})
+        self.throttler = throttler or AlertNotificationThrottler()
+        self.escalation_engine = escalation_engine or AlertEscalationEngine()
+        self._dispatch_count: int = 0
+        self._error_count: int = 0
+
+    def register_channel(
+        self,
+        name: str,
+        handler: Callable[[AlertTransition], tuple[bool, int, str]],
+    ) -> None:
+        """Register a notification handler for a channel name."""
+        with self._lock:
+            self._channels[name] = handler
+
+    def dispatch(
+        self,
+        transition: AlertTransition,
+        channels: Sequence[str] | None = None,
+        now: float | None = None,
+    ) -> dict[str, tuple[bool, int, str]]:
+        """Dispatch transition across channels with throttling and escalation checks."""
+        allowed, decision, reason = self.throttler.should_dispatch(transition, now=now)
+        if not allowed:
+            return {
+                "throttled": (
+                    False,
+                    429,
+                    f"Throttled ({decision.value}): {reason}",
+                )
+            }
+
+        escalation_events = self.escalation_engine.evaluate_transition(
+            transition, now=now
+        )
+
+        target_channels: set[str] = set()
+        if channels is not None:
+            target_channels.update(channels)
+        elif escalation_events:
+            for ev in escalation_events:
+                for ch in ev.channels:
+                    if ch == "default":
+                        target_channels.update(self._channels.keys())
+                    else:
+                        target_channels.add(ch)
+        else:
+            target_channels.update(self._channels.keys())
+
+        if not target_channels and self._channels:
+            target_channels = set(self._channels.keys())
+
+        results: dict[str, tuple[bool, int, str]] = {}
+        with self._lock:
+            self._dispatch_count += 1
+
+        for ch in target_channels:
+            handler = self._channels.get(ch)
+            if handler is None:
+                results[ch] = (False, 404, f"Unknown channel '{ch}'")
+                continue
+            try:
+                ok, code, msg = handler(transition)
+                results[ch] = (ok, code, msg)
+                if not ok:
+                    with self._lock:
+                        self._error_count += 1
+            except Exception as exc:
+                with self._lock:
+                    self._error_count += 1
+                results[ch] = (False, 500, str(exc))
+
+        return results
+
+    def get_stats(self) -> dict[str, Any]:
+        """Return multi-channel dispatch metrics."""
+        with self._lock:
+            return {
+                "dispatch_count": self._dispatch_count,
+                "error_count": self._error_count,
+                "registered_channels": sorted(self._channels.keys()),
+                "throttler": self.throttler.get_stats(),
+                "active_firing_durations": (
+                    self.escalation_engine.get_active_firing_durations()
+                ),
+            }
+
+    def reset(self) -> None:
+        """Clear dispatcher counters, throttler, and escalation engine."""
+        with self._lock:
+            self._dispatch_count = 0
+            self._error_count = 0
+            self.throttler.reset()
+            self.escalation_engine.reset()
 
 
 def _format_number(value: float) -> str:

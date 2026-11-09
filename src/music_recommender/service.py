@@ -14,12 +14,16 @@ from typing import Any, Literal, cast
 import numpy as np
 
 from music_recommender.alerting import (
+    AlertEscalationEngine,
     AlertEvaluator,
     AlertHistoryBuffer,
+    AlertNotificationThrottler,
     AlertSpilloverStorage,
+    AlertTransition,
     DeadLetterAlertRecord,
     DLQRetryPolicy,
     DLQRetryReport,
+    MultiChannelDispatcher,
     WebhookDispatcher,
 )
 from music_recommender.artifacts import RecommenderArtifact, load_artifact
@@ -165,6 +169,9 @@ class RecommenderService:
         alert_storage_dir: Path | str | None = None,
         alert_spillover_storage: AlertSpilloverStorage | None = None,
         enable_alert_spillover: bool = True,
+        alert_throttler: AlertNotificationThrottler | None = None,
+        alert_escalation_engine: AlertEscalationEngine | None = None,
+        alert_multichannel_dispatcher: MultiChannelDispatcher | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -459,6 +466,28 @@ class RecommenderService:
             raise ValueError(
                 f"Invalid alert webhook URL (check {ALERT_WEBHOOK_URL_ENV_VAR}): {exc}"
             ) from exc
+
+        self.alert_throttler = alert_throttler or AlertNotificationThrottler()
+        self.alert_escalation_engine = (
+            alert_escalation_engine or AlertEscalationEngine()
+        )
+        if alert_multichannel_dispatcher is not None:
+            self.alert_multichannel_dispatcher = alert_multichannel_dispatcher
+        else:
+            self.alert_multichannel_dispatcher = MultiChannelDispatcher(
+                throttler=self.alert_throttler,
+                escalation_engine=self.alert_escalation_engine,
+            )
+            if self.alert_dispatcher is not None:
+                dispatcher = self.alert_dispatcher
+                self.alert_multichannel_dispatcher.register_channel(
+                    "webhook",
+                    lambda t: (
+                        bool(dispatcher.dispatch([t])),
+                        200,
+                        "Delivered",
+                    ),
+                )
 
     def _on_maintenance_policy_updated(self, new_policy: dict[str, float]) -> None:
         """Callback invoked by maintenance worker when a sweep derives a new policy."""
@@ -955,6 +984,28 @@ class RecommenderService:
             format=format,
             include_spillover=include_spillover,
             include_dlq=include_dlq,
+        )
+
+    def get_alert_throttling_stats(self) -> dict[str, Any]:
+        """Return metrics and state of alert notification throttling."""
+        return self.alert_throttler.get_stats()
+
+    def reset_alert_throttling(self) -> None:
+        """Reset the alert notification throttling state and counters."""
+        self.alert_throttler.reset()
+
+    def get_alert_escalation_history(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return history of triggered escalation tier events."""
+        return self.alert_escalation_engine.get_history(limit=limit)
+
+    def dispatch_multichannel_alerts(
+        self,
+        transition: AlertTransition,
+        channels: Sequence[str] | None = None,
+    ) -> dict[str, tuple[bool, int, str]]:
+        """Dispatch an alert transition across configured notification channels."""
+        return self.alert_multichannel_dispatcher.dispatch(
+            transition, channels=channels
         )
 
     def export_prometheus_metrics(

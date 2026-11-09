@@ -17,12 +17,15 @@ from music_recommender import __version__
 from music_recommender.alerting import (
     AlertCorrelationGraph,
     AlertEvaluator,
+    AlertNotificationThrottler,
     AlertReplayEngine,
     AlertRule,
     AlertSeverity,
     AlertSpilloverStorage,
     AlertTransition,
     DLQRetryPolicy,
+    OpsgenieGateway,
+    PagerDutyGateway,
     WebhookDispatcher,
 )
 from music_recommender.bandit import (
@@ -4749,6 +4752,194 @@ def archive_alerts_cmd(
             f"Failed to create alert archive: {exc}", fg=typer.colors.RED, err=True
         )
         raise typer.Exit(code=1) from exc
+
+
+@app.command("throttle-stats")
+def throttle_stats_cmd(
+    reset: Annotated[
+        bool,
+        typer.Option(
+            "--reset",
+            help="Reset all alert notification throttling counters and state.",
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output throttling stats as JSON."),
+    ] = False,
+) -> None:
+    """Inspect or reset alert notification rate-limiting metrics."""
+    throttler = AlertNotificationThrottler()
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+        if service is not None:
+            throttler = service.alert_throttler
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable for throttle stats: %s", exc)
+
+    if reset:
+        throttler.reset()
+        if json_output:
+            typer.echo(
+                json.dumps({"status": "ok", "message": "Throttling state reset"})
+            )
+        else:
+            typer.secho(
+                "Alert notification throttling state reset.",
+                fg=typer.colors.GREEN,
+            )
+        return
+
+    stats = throttler.get_stats()
+    if json_output:
+        typer.echo(json.dumps(stats, indent=2))
+        return
+
+    typer.secho("=== Alert Notification Throttling Metrics ===", bold=True)
+    typer.echo(f"Total Evaluated:        {stats.get('total_evaluated', 0)}")
+    typer.echo(f"Allowed:                {stats.get('allowed_count', 0)}")
+    typer.echo(f"Suppressed Duplicates:  {stats.get('suppressed_duplicate_count', 0)}")
+    typer.echo(f"Rate Limited:           {stats.get('rate_limited_count', 0)}")
+    typer.echo(f"Repeat Suppressed:      {stats.get('repeat_suppressed_count', 0)}")
+    typer.echo(f"Tracked Rules:          {stats.get('tracked_rules', 0)}")
+
+
+@app.command("test-gateway")
+def test_gateway_cmd(
+    gateway: Annotated[
+        str,
+        typer.Argument(
+            help="Target incident gateway: 'pagerduty', 'opsgenie', or 'webhook'."
+        ),
+    ],
+    routing_key: Annotated[
+        str,
+        typer.Option(
+            "--routing-key",
+            help="PagerDuty routing key (or set PAGERDUTY_ROUTING_KEY).",
+        ),
+    ] = "",
+    api_key: Annotated[
+        str,
+        typer.Option("--api-key", help="Opsgenie API key (or set OPSGENIE_API_KEY)."),
+    ] = "",
+    endpoint_url: Annotated[
+        str,
+        typer.Option("--endpoint-url", help="Custom gateway endpoint URL."),
+    ] = "",
+    alert_name: Annotated[
+        str,
+        typer.Option("--alert-name", help="Synthetic alert rule name."),
+    ] = "TestAlert",
+    severity: Annotated[
+        str,
+        typer.Option("--severity", help="Alert severity: 'warning' or 'critical'."),
+    ] = "warning",
+    event: Annotated[
+        str,
+        typer.Option("--event", help="Alert state: 'firing' or 'resolved'."),
+    ] = "firing",
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output gateway response as JSON."),
+    ] = False,
+) -> None:
+    """Send a synthetic alert notification to an external incident gateway."""
+    norm_gw = gateway.lower().strip()
+    if norm_gw not in ("pagerduty", "opsgenie", "webhook"):
+        typer.secho(
+            f"Unsupported gateway '{gateway}'. "
+            "Must be 'pagerduty', 'opsgenie', or 'webhook'.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    rule = AlertRule(
+        name=alert_name,
+        metric="test_metric",
+        comparator=">",
+        threshold=1.0,
+        severity=severity,
+        summary="Synthetic test alert dispatched from CLI",
+    )
+    transition = AlertTransition(
+        rule=rule,
+        event=event,
+        value=1.5,
+        timestamp=datetime.now(UTC).isoformat(),
+    )
+
+    if norm_gw == "pagerduty":
+        key = routing_key or os.getenv("PAGERDUTY_ROUTING_KEY", "")
+        if not key:
+            typer.secho(
+                "Routing key is required for PagerDuty gateway test "
+                "(--routing-key or PAGERDUTY_ROUTING_KEY).",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        url = endpoint_url or "https://events.pagerduty.com/v2/enqueue"
+        gw = PagerDutyGateway(routing_key=key, endpoint_url=url)
+        ok, code, msg = gw.send(transition)
+    elif norm_gw == "opsgenie":
+        og_key = api_key or os.getenv("OPSGENIE_API_KEY", "")
+        if not og_key:
+            typer.secho(
+                "API key is required for Opsgenie gateway test "
+                "(--api-key or OPSGENIE_API_KEY).",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        url = endpoint_url or "https://api.opsgenie.com/v2/alerts"
+        gw_og = OpsgenieGateway(api_key=og_key, endpoint_url=url)
+        ok, code, msg = gw_og.send(transition)
+    else:
+        url = endpoint_url or os.getenv("ALERT_WEBHOOK_URL", "")
+        if not url:
+            typer.secho(
+                "Endpoint URL is required for webhook gateway test "
+                "(--endpoint-url or ALERT_WEBHOOK_URL).",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        dispatcher = WebhookDispatcher(url)
+        delivered = dispatcher.dispatch([transition])
+        ok, code, msg = (
+            (delivered > 0),
+            (200 if delivered > 0 else 500),
+            f"Delivered: {delivered}",
+        )
+
+    result_data = {
+        "gateway": norm_gw,
+        "success": ok,
+        "status_code": code,
+        "response": msg,
+    }
+
+    if json_output:
+        typer.echo(json.dumps(result_data, indent=2))
+    else:
+        if ok:
+            typer.secho(
+                f"Successfully dispatched test alert to {norm_gw} (HTTP {code}).",
+                fg=typer.colors.GREEN,
+                bold=True,
+            )
+        else:
+            typer.secho(
+                f"Failed to dispatch test alert to {norm_gw} (HTTP {code}): {msg}",
+                fg=typer.colors.RED,
+                err=True,
+            )
+
+    if not ok:
+        raise typer.Exit(code=1)
 
 
 @app.command(name="push-metrics")

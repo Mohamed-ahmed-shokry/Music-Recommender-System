@@ -7,6 +7,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -1186,3 +1187,459 @@ def test_alert_spillover_storage_dlq_retry(
     remaining = storage.read_dead_letters()
     assert len(remaining) == 1
     assert remaining[0]["channel"] == "default"
+
+
+def test_throttler_disabled() -> None:
+    from music_recommender.alerting import (
+        AlertNotificationThrottler,
+        AlertThrottleConfig,
+        AlertTransition,
+        ThrottleDecision,
+    )
+
+    config = AlertThrottleConfig(enabled=False)
+    throttler = AlertNotificationThrottler(config)
+    rule = _rule(name="HighLatency")
+    transition = AlertTransition(
+        rule=rule,
+        event="firing",
+        value=250.0,
+        timestamp="2026-11-09T10:00:00Z",
+    )
+
+    allowed, decision, reason = throttler.should_dispatch(transition, now=100.0)
+    assert allowed is True
+    assert decision == ThrottleDecision.ALLOWED
+    assert "disabled" in reason
+
+
+def test_throttler_deduplication() -> None:
+    from music_recommender.alerting import (
+        AlertNotificationThrottler,
+        AlertThrottleConfig,
+        AlertTransition,
+        ThrottleDecision,
+    )
+
+    config = AlertThrottleConfig(
+        dedup_window_seconds=30.0,
+        repeat_interval_seconds=300.0,
+        max_alerts_per_window=10,
+    )
+    throttler = AlertNotificationThrottler(config)
+    rule = _rule(name="HighLatency")
+    t1 = AlertTransition(
+        rule=rule,
+        event="resolved",
+        value=150.0,
+        timestamp="2026-11-09T10:00:00Z",
+    )
+
+    # First transition allowed
+    allowed, decision, _ = throttler.should_dispatch(t1, now=100.0)
+    assert allowed is True
+    assert decision == ThrottleDecision.ALLOWED
+
+    # Duplicate transition within 30s suppressed
+    allowed, decision, reason = throttler.should_dispatch(t1, now=110.0)
+    assert allowed is False
+    assert decision == ThrottleDecision.SUPPRESSED_DUPLICATE
+    assert "Duplicate transition" in reason
+
+    # After dedup window passes, allowed again
+    allowed, decision, _ = throttler.should_dispatch(t1, now=135.0)
+    assert allowed is True
+    assert decision == ThrottleDecision.ALLOWED
+
+
+def test_throttler_repeat_interval() -> None:
+    from music_recommender.alerting import (
+        AlertNotificationThrottler,
+        AlertThrottleConfig,
+        AlertTransition,
+        ThrottleDecision,
+    )
+
+    config = AlertThrottleConfig(
+        dedup_window_seconds=10.0,
+        repeat_interval_seconds=60.0,
+        max_alerts_per_window=10,
+    )
+    throttler = AlertNotificationThrottler(config)
+    rule = _rule(name="HighLatency")
+    t_firing = AlertTransition(
+        rule=rule,
+        event="firing",
+        value=250.0,
+        timestamp="2026-11-09T10:00:00Z",
+    )
+
+    # Initial firing is allowed
+    allowed, decision, _ = throttler.should_dispatch(t_firing, now=100.0)
+    assert allowed is True
+    assert decision == ThrottleDecision.ALLOWED
+
+    # 15 seconds later: dedup window has passed, but repeat interval hasn't
+    allowed, decision, reason = throttler.should_dispatch(t_firing, now=115.0)
+    assert allowed is False
+    assert decision == ThrottleDecision.REPEAT_SUPPRESSED
+    assert "Ongoing firing alert" in reason
+
+    # 65 seconds later: repeat interval has passed
+    allowed, decision, _ = throttler.should_dispatch(t_firing, now=165.0)
+    assert allowed is True
+    assert decision == ThrottleDecision.ALLOWED
+
+
+def test_throttler_rate_limiting_and_sliding_window() -> None:
+    from music_recommender.alerting import (
+        AlertNotificationThrottler,
+        AlertThrottleConfig,
+        AlertTransition,
+        ThrottleDecision,
+    )
+
+    config = AlertThrottleConfig(
+        dedup_window_seconds=1.0,
+        repeat_interval_seconds=1.0,
+        window_seconds=60.0,
+        max_alerts_per_window=2,
+    )
+    throttler = AlertNotificationThrottler(config)
+    rule = _rule(name="CpuSpike")
+
+    t1 = AlertTransition(rule=rule, event="firing", value=95.0, timestamp="T1")
+    t2 = AlertTransition(rule=rule, event="resolved", value=80.0, timestamp="T2")
+    t3 = AlertTransition(rule=rule, event="firing", value=96.0, timestamp="T3")
+
+    # t1 at ts=10
+    allowed1, d1, _ = throttler.should_dispatch(t1, now=10.0)
+    assert allowed1 is True
+    assert d1 == ThrottleDecision.ALLOWED
+
+    # t2 at ts=20
+    allowed2, d2, _ = throttler.should_dispatch(t2, now=20.0)
+    assert allowed2 is True
+    assert d2 == ThrottleDecision.ALLOWED
+
+    # t3 at ts=30: limit of 2 in 60s window reached!
+    allowed3, d3, reason = throttler.should_dispatch(t3, now=30.0)
+    assert allowed3 is False
+    assert d3 == ThrottleDecision.RATE_LIMITED
+    assert "Rate limit exceeded" in reason
+
+    # at ts=75: t1 at ts=10 is outside the 60s sliding window (75 - 60 = 15 > 10)
+    allowed4, d4, _ = throttler.should_dispatch(t3, now=75.0)
+    assert allowed4 is True
+    assert d4 == ThrottleDecision.ALLOWED
+
+
+def test_throttler_stats_and_reset() -> None:
+    from music_recommender.alerting import (
+        AlertNotificationThrottler,
+        AlertThrottleConfig,
+        AlertTransition,
+    )
+
+    throttler = AlertNotificationThrottler(
+        AlertThrottleConfig(
+            dedup_window_seconds=10.0,
+            repeat_interval_seconds=60.0,
+            max_alerts_per_window=1,
+            window_seconds=60.0,
+        )
+    )
+    rule = _rule(name="ErrorRate")
+    t = AlertTransition(rule=rule, event="firing", value=10.0, timestamp="T")
+
+    throttler.should_dispatch(t, now=10.0)  # allowed
+    throttler.should_dispatch(t, now=12.0)  # duplicate suppressed
+    throttler.should_dispatch(t, now=25.0)  # repeat suppressed / rate limited
+
+    stats = throttler.get_stats()
+    assert stats["total_evaluated"] == 3
+    assert stats["allowed_count"] == 1
+    assert stats["suppressed_duplicate_count"] == 1
+    assert stats["tracked_rules"] == 1
+
+    throttler.reset()
+    clean_stats = throttler.get_stats()
+    assert clean_stats["total_evaluated"] == 0
+    assert clean_stats["allowed_count"] == 0
+    assert clean_stats["tracked_rules"] == 0
+
+
+def test_escalation_tier_and_policy_serialization() -> None:
+    from music_recommender.alerting import (
+        AlertEscalationPolicy,
+        AlertEscalationTier,
+    )
+
+    t1 = AlertEscalationTier(level=1, delay_seconds=0.0, channels=["slack"])
+    t2 = AlertEscalationTier(
+        level=2, delay_seconds=300.0, channels=["pagerduty", "email"], repeat=True
+    )
+    policy = AlertEscalationPolicy(name="database_p1", tiers=[t2, t1], enabled=True)
+
+    # Post init sorts tiers by delay
+    assert policy.tiers[0].level == 1
+    assert policy.tiers[1].level == 2
+
+    p_dict = policy.to_dict()
+    assert p_dict["name"] == "database_p1"
+    assert len(p_dict["tiers"]) == 2
+    assert p_dict["tiers"][0]["channels"] == ["slack"]
+
+    restored = AlertEscalationPolicy.from_dict(p_dict)
+    assert restored.name == policy.name
+    assert len(restored.tiers) == 2
+    assert restored.tiers[1].repeat is True
+
+
+def test_escalation_multi_tier_lifecycle() -> None:
+    from music_recommender.alerting import (
+        AlertEscalationEngine,
+        AlertEscalationPolicy,
+        AlertEscalationTier,
+        AlertTransition,
+    )
+
+    policy = AlertEscalationPolicy(
+        name="api_critical",
+        tiers=[
+            AlertEscalationTier(level=1, delay_seconds=0.0, channels=["slack"]),
+            AlertEscalationTier(level=2, delay_seconds=60.0, channels=["pagerduty"]),
+            AlertEscalationTier(
+                level=3, delay_seconds=180.0, channels=["opsgenie"], repeat=True
+            ),
+        ],
+    )
+    engine = AlertEscalationEngine()
+    engine.register_policy("ServiceDown", policy)
+
+    rule = _rule(name="ServiceDown")
+    firing_t = AlertTransition(rule=rule, event="firing", value=1.0, timestamp="T0")
+
+    # 1. At t=1000: Tier 1 triggers immediately
+    events = engine.evaluate_transition(firing_t, now=1000.0)
+    assert len(events) == 1
+    assert events[0].tier_level == 1
+    assert events[0].channels == ["slack"]
+
+    # 2. At t=1030 (30s elapsed): neither tier 2 (60s) nor tier 3 (180s) has triggered
+    events_30s = engine.evaluate_transition(firing_t, now=1030.0)
+    assert len(events_30s) == 0
+
+    # Active duration is 30s
+    durations = engine.get_active_firing_durations(now=1030.0)
+    assert durations["ServiceDown"] == 30.0
+
+    # 3. At t=1065 (65s elapsed): Tier 2 triggers
+    events_65s = engine.evaluate_transition(firing_t, now=1065.0)
+    assert len(events_65s) == 1
+    assert events_65s[0].tier_level == 2
+    assert events_65s[0].channels == ["pagerduty"]
+
+    # 4. At t=1080: Tier 2 already triggered, no new tier reached
+    assert len(engine.evaluate_transition(firing_t, now=1080.0)) == 0
+
+    # 5. At t=1200 (200s elapsed): Tier 3 triggers
+    events_200s = engine.evaluate_transition(firing_t, now=1200.0)
+    assert len(events_200s) == 1
+    assert events_200s[0].tier_level == 3
+    assert events_200s[0].channels == ["opsgenie"]
+
+    # Tier 3 has repeat=True: at t=1250, Tier 3 triggers again
+    events_repeat = engine.evaluate_transition(firing_t, now=1250.0)
+    assert len(events_repeat) == 1
+    assert events_repeat[0].tier_level == 3
+
+    # Escalation history records events
+    history = engine.get_history(limit=10)
+    assert len(history) == 4
+
+    # 6. Alert resolves
+    resolved_t = AlertTransition(
+        rule=rule, event="resolved", value=0.0, timestamp="T_res"
+    )
+    res_events = engine.evaluate_transition(resolved_t, now=1300.0)
+    assert len(res_events) == 0
+    assert engine.get_active_firing_durations(now=1300.0) == {}
+
+
+def test_escalation_disabled_and_reset() -> None:
+    from music_recommender.alerting import (
+        AlertEscalationEngine,
+        AlertEscalationPolicy,
+        AlertTransition,
+    )
+
+    policy = AlertEscalationPolicy(name="disabled_p", enabled=False)
+    engine = AlertEscalationEngine()
+    engine.register_policy("IgnoredRule", policy)
+
+    rule = _rule(name="IgnoredRule")
+    t = AlertTransition(rule=rule, event="firing", value=1.0, timestamp="T")
+    assert len(engine.evaluate_transition(t, now=100.0)) == 0
+
+    # Reset clears policies and history
+    engine.reset()
+    assert len(engine.get_history()) == 0
+    assert engine.get_active_firing_durations() == {}
+
+
+def test_pagerduty_gateway_firing_and_resolve() -> None:
+    from music_recommender.alerting import AlertTransition, PagerDutyGateway
+
+    sent_requests: list[dict[str, Any]] = []
+
+    def mock_sender(
+        url: str,
+        body: bytes,
+        headers: dict[str, str],
+        timeout: float,
+        method: str,
+    ) -> tuple[int, str]:
+        sent_requests.append(
+            {
+                "url": url,
+                "body": json.loads(body.decode("utf-8")),
+                "headers": headers,
+                "method": method,
+            }
+        )
+        return 202, '{"status": "success", "message": "Event processed"}'
+
+    gateway = PagerDutyGateway(
+        routing_key="test-key-123",
+        endpoint_url="https://events.pagerduty.com/v2/enqueue",
+        sender=mock_sender,
+    )
+
+    rule = _rule(name="HighErrorRate", severity="critical")
+    t_firing = AlertTransition(
+        rule=rule, event="firing", value=15.0, timestamp="2026-11-09T10:00:00Z"
+    )
+
+    ok, status, resp = gateway.send(t_firing)
+    assert ok is True
+    assert status == 202
+    assert len(sent_requests) == 1
+    req = sent_requests[0]
+    assert req["body"]["event_action"] == "trigger"
+    assert req["body"]["routing_key"] == "test-key-123"
+    assert req["body"]["payload"]["severity"] == "critical"
+
+    # Now test resolve
+    t_resolved = AlertTransition(
+        rule=rule, event="resolved", value=0.0, timestamp="2026-11-09T10:05:00Z"
+    )
+    ok_res, status_res, _ = gateway.send(t_resolved)
+    assert ok_res is True
+    assert status_res == 202
+    assert sent_requests[1]["body"]["event_action"] == "resolve"
+
+
+def test_opsgenie_gateway_firing_and_close() -> None:
+    from music_recommender.alerting import AlertTransition, OpsgenieGateway
+
+    sent_requests: list[dict[str, Any]] = []
+
+    def mock_sender(
+        url: str,
+        body: bytes,
+        headers: dict[str, str],
+        timeout: float,
+        method: str,
+    ) -> tuple[int, str]:
+        sent_requests.append(
+            {
+                "url": url,
+                "body": json.loads(body.decode("utf-8")),
+                "headers": headers,
+                "method": method,
+            }
+        )
+        return 202, '{"result": "Request Will Be Processed"}'
+
+    gateway = OpsgenieGateway(
+        api_key="opsgenie-secret-key",
+        endpoint_url="https://api.opsgenie.com/v2/alerts",
+        sender=mock_sender,
+    )
+
+    rule = _rule(name="HighMemoryUsage", severity="critical")
+    t_firing = AlertTransition(
+        rule=rule, event="firing", value=92.5, timestamp="2026-11-09T10:00:00Z"
+    )
+
+    ok, status, _ = gateway.send(t_firing)
+    assert ok is True
+    assert status == 202
+    assert len(sent_requests) == 1
+    assert (
+        sent_requests[0]["headers"]["Authorization"] == "GenieKey opsgenie-secret-key"
+    )
+    assert sent_requests[0]["body"]["priority"] == "P1"
+
+    # Resolved transition sends close request
+    t_resolved = AlertTransition(
+        rule=rule, event="resolved", value=50.0, timestamp="2026-11-09T10:10:00Z"
+    )
+    ok_close, status_close, _ = gateway.send(t_resolved)
+    assert ok_close is True
+    assert status_close == 202
+    assert "close?identifierType=alias" in sent_requests[1]["url"]
+
+
+def test_multichannel_dispatcher_routing_and_throttling() -> None:
+    from music_recommender.alerting import (
+        AlertNotificationThrottler,
+        AlertThrottleConfig,
+        AlertTransition,
+        MultiChannelDispatcher,
+    )
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_channel(name: str) -> Any:
+        return lambda t: (calls.append((name, t.event)) or True, 200, "OK")
+
+    throttler = AlertNotificationThrottler(
+        AlertThrottleConfig(dedup_window_seconds=10.0, repeat_interval_seconds=15.0)
+    )
+    dispatcher = MultiChannelDispatcher(throttler=throttler)
+    dispatcher.register_channel("slack", fake_channel("slack"))
+    dispatcher.register_channel("pagerduty", fake_channel("pagerduty"))
+
+    rule = _rule(name="DiskFull")
+    t = AlertTransition(
+        rule=rule, event="firing", value=99.0, timestamp="2026-11-09T10:00:00Z"
+    )
+
+    # 1. Initial dispatch to all registered channels
+    res1 = dispatcher.dispatch(t, now=100.0)
+    assert res1["slack"][0] is True
+    assert res1["pagerduty"][0] is True
+    assert len(calls) == 2
+
+    # 2. Duplicate dispatch within dedup window is throttled
+    res2 = dispatcher.dispatch(t, now=105.0)
+    assert "throttled" in res2
+    assert res2["throttled"][0] is False
+    assert len(calls) == 2  # No extra calls made
+
+    # 3. Explicit channel targeting
+    calls.clear()
+    res3 = dispatcher.dispatch(t, channels=["slack"], now=120.0)
+    assert "slack" in res3
+    assert "pagerduty" not in res3
+    assert len(calls) == 1
+
+    # 4. Stats and reset
+    stats = dispatcher.get_stats()
+    assert stats["dispatch_count"] == 2
+    assert "slack" in stats["registered_channels"]
+
+    dispatcher.reset()
+    assert dispatcher.get_stats()["dispatch_count"] == 0

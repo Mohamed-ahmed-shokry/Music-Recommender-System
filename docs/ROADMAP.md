@@ -1,3 +1,88 @@
+# Milestone 0.38.0 Roadmap — Phase 169 & 170
+
+## Phase 169 & 170: Alert Notification Throttling, Escalation Policies, and Multi-Channel Incident Gateways (0.38.0)
+
+### 1. Objective
+Enhance operational alerting resilience and prevent notification storms by implementing a thread-safe notification throttler and deduplication engine (`AlertNotificationThrottler`), tiered time-based escalation policies (`AlertEscalationPolicy`, `AlertEscalationEngine`), outbound multi-channel incident gateway integrations for PagerDuty Events API v2 and Opsgenie Alert API v2 (`PagerDutyGateway`, `OpsgenieGateway`, `MultiChannelDispatcher`), REST API observability endpoints (`GET /alerts/throttling/stats`, `POST /alerts/gateway/test`), operator CLI tooling (`throttle-stats`, `test-gateway`), and Streamlit dashboard alerting controls, releasing Milestone 0.38.0 with 100% green CI.
+
+### 2. Scope
+1. **Notification Throttling & Deduplication Engine (`src/music_recommender/alerting.py`)**:
+   - `AlertThrottleConfig`: dataclass configuring deduplication window (`dedup_window_seconds`), rate limits (`max_alerts_per_window`, `window_seconds`), and repeat interval (`repeat_interval_seconds`).
+   - `ThrottleDecision`: enum indicating `ALLOWED`, `SUPPRESSED_DUPLICATE`, `RATE_LIMITED`, `REPEAT_SUPPRESSED`.
+   - `AlertNotificationThrottler`: thread-safe in-memory sliding-window throttler/deduplicator that filters alert transitions.
+2. **Tiered Incident Escalation Engine (`src/music_recommender/alerting.py`)**:
+   - `AlertEscalationTier`: dataclass defining continuous firing duration thresholds and assigned destination channels.
+   - `AlertEscalationPolicy`: policy mapping alert rules and severities to escalation tiers.
+   - `AlertEscalationEngine`: tracks ongoing firing duration and transitions alerts to higher-tier channels when escalation intervals elapse.
+3. **Outbound Multi-Channel Incident Gateways (`src/music_recommender/alerting.py`)**:
+   - `PagerDutyGateway`: formats alert transitions into PagerDuty Events API v2 payloads (`trigger`, `acknowledge`, `resolve`) with standard severity mapping and custom details, dispatching via standard library HTTP client.
+   - `OpsgenieGateway`: formats alert transitions into Opsgenie Alert API v2 payloads with priority mapping (P1..P5), alias, tags, and description.
+   - `MultiChannelDispatcher`: orchestrates dispatch across multiple gateways with `MultiChannelDispatchReport`.
+4. **Service Integration (`src/music_recommender/service.py`)**:
+   - Attach `AlertNotificationThrottler` and `MultiChannelDispatcher` to `RecommenderService`.
+   - Methods: `get_alert_throttling_stats()`, `reset_alert_throttling()`, `dispatch_multichannel_alerts()`.
+5. **FastAPI Endpoints (`api/main.py`)**:
+   - `GET /alerts/throttling/stats`: returns current throttling, deduplication, and suppression statistics.
+   - `POST /alerts/throttling/reset`: resets the active throttler state.
+   - `POST /alerts/gateway/test`: tests outbound gateway formatting and dispatch (PagerDuty, Opsgenie, Webhook) with dry-run support.
+6. **Operator CLI Tooling (`src/music_recommender/cli.py`)**:
+   - `music-recommender throttle-stats`: displays throttler metrics and suppressed alert counts in table or JSON format.
+   - `music-recommender test-gateway`: dispatches synthetic test alert to a target gateway (PagerDuty, Opsgenie, Webhook) with `--channel`, `--dry-run`, `--severity`.
+7. **Dashboard Visibility (`src/music_recommender/dashboard.py`)**:
+   - Surface active notification throttling and suppressed alerts in sidebar alerting expander.
+8. **Comprehensive Tests**:
+   - Unit tests in `tests/test_alerting.py` for throttling, escalation, PagerDuty gateway, Opsgenie gateway, and multi-channel dispatcher.
+   - Integration tests in `tests/test_service.py` for service multi-channel dispatch and throttler management.
+   - API integration tests in `tests/test_api.py` for `/alerts/throttling/stats`, `/alerts/throttling/reset`, `/alerts/gateway/test`.
+   - CLI tests in `tests/test_cli.py` for `throttle-stats` and `test-gateway`.
+   - Dashboard tests in `tests/test_dashboard.py`.
+9. **Documentation & Release 0.38.0**:
+   - Update `README.md`, `CHANGELOG.md`, `PLAN.md`, `docs/PROGRESS.md`.
+   - Bump version to `0.38.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+
+### 3. Acceptance Criteria
+- [x] AC-1: `AlertNotificationThrottler` enforces deduplication windows, rate limits, and repeat intervals with `ThrottleDecision` tracking.
+- [x] AC-2: `AlertEscalationEngine` computes ongoing firing duration and resolves tiered channel escalation.
+- [x] AC-3: `PagerDutyGateway` and `OpsgenieGateway` serialize and dispatch compliant API v2 payloads with dry-run and mock support.
+- [x] AC-4: FastAPI endpoints `GET /alerts/throttling/stats`, `POST /alerts/throttling/reset`, and `POST /alerts/gateway/test` respond with valid schemas.
+- [x] AC-5: Operator CLI commands `throttle-stats` and `test-gateway` operate cleanly in table and JSON formats.
+- [x] AC-6: Streamlit dashboard sidebar surfaces notification throttling indicators.
+- [x] AC-7: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Validation & CI Plan
+- `uv run ruff format --check .`
+- `uv run ruff check .`
+- `uv run mypy`
+- `uv run --extra dashboard --extra tracking --extra spotify pytest -q`
+- `uv build`
+- Remote GitHub Actions CI on PR branch 100% green.
+
+### 5. Exclusions
+- Third-party SDK client packages (e.g. `pdpyras` or `opsgenie-sdk`) are excluded in favor of standard library `urllib.request` integrations to maintain zero additional runtime dependencies.
+
+### 6. Micro-Task Breakdown
+- [x] Task 1: Define Phase 169 & 170 roadmap, update plan, and initialize progress record.
+- [x] Task 2: Implement `AlertThrottleConfig`, `ThrottleDecision`, and `AlertNotificationThrottler` in `src/music_recommender/alerting.py`.
+- [x] Task 3: Add unit tests for `AlertNotificationThrottler` in `tests/test_alerting.py`.
+- [x] Task 4: Implement `AlertEscalationTier`, `AlertEscalationPolicy`, and `AlertEscalationEngine` in `src/music_recommender/alerting.py`.
+- [x] Task 5: Add unit tests for alert escalation engine in `tests/test_alerting.py`.
+- [x] Task 6: Implement `PagerDutyGateway`, `OpsgenieGateway`, and `MultiChannelDispatcher` in `src/music_recommender/alerting.py`.
+- [x] Task 7: Add unit tests for PagerDuty and Opsgenie gateways in `tests/test_alerting.py`.
+- [x] Task 8: Integrate throttler and multi-channel dispatcher in `RecommenderService` in `src/music_recommender/service.py`.
+- [x] Task 9: Add service tests for throttling and gateway dispatch in `tests/test_service.py`.
+- [x] Task 10: Implement `/alerts/throttling/stats`, `/alerts/throttling/reset`, and `/alerts/gateway/test` in `api/main.py`.
+- [x] Task 11: Add API integration tests in `tests/test_api.py`.
+- [x] Task 12: Implement `throttle-stats` and `test-gateway` CLI commands in `src/music_recommender/cli.py`.
+- [x] Task 13: Add CLI tests in `tests/test_cli.py`.
+- [x] Task 14: Add throttling indicators to sidebar in `src/music_recommender/dashboard.py`.
+- [x] Task 15: Add dashboard tests in `tests/test_dashboard.py`.
+- [x] Task 16: Update `README.md` and `CHANGELOG.md` with 0.38.0 documentation.
+- [x] Task 17: Bump package version to `0.38.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [x] Task 18: Verify local CI parity, push to remote, monitor CI to 100% green.
+- [ ] Task 18: CI parity verification, push, open draft PR, monitor remote CI to green.
+
+---
+
 # Milestone 0.37.0 Roadmap — Phase 167 & 168
 
 ## Phase 167 & 168: Size-Capped Log Rotation, Retention Pruning, DLQ Exponential Retry, and Archive Snapshots (0.37.0)

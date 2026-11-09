@@ -562,6 +562,19 @@ class FakeDashboardService:
             {"dlq_count": 0, "spillover_count": 0, "storage_dir": None},
         )
 
+    def get_alert_throttling_stats(self) -> dict[str, Any]:
+        return getattr(
+            self,
+            "_fake_throttling_stats",
+            {
+                "total_evaluated": 0,
+                "allowed_count": 0,
+                "suppressed_duplicate_count": 0,
+                "rate_limited_count": 0,
+                "repeat_suppressed_count": 0,
+            },
+        )
+
     def correlate_alert_history(self, **kwargs: Any) -> Any:
         from music_recommender.alerting import AlertCorrelationReport
 
@@ -1820,3 +1833,24 @@ def test_dashboard_sidebar_rotation_rendering() -> None:
     assert not app.exception
     assert any("Storage & Audit" in m.value for m in app.markdown)
     assert any("rotated backup generation(s)" in c.value for c in app.caption)
+
+
+def test_dashboard_sidebar_throttling_rendering() -> None:
+    service = FakeDashboardService()
+    service._fake_throttling_stats = {
+        "total_evaluated": 10,
+        "allowed_count": 4,
+        "suppressed_duplicate_count": 3,
+        "rate_limited_count": 2,
+        "repeat_suppressed_count": 1,
+    }
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("Notification Throttling" in m.value for m in app.markdown)
+    assert any("notification(s) throttled" in c.value for c in app.caption)
+    assert any("3 duplicate" in c.value for c in app.caption)

@@ -2357,3 +2357,45 @@ def test_service_alert_storage_retry_and_archive(tmp_path: Path) -> None:
     res = service.archive_alert_storage(archive_path, format="tar.gz")
     assert res.exists()
     assert res.stat().st_size > 0
+
+
+def test_service_alert_throttling_and_multichannel(tmp_path: Path) -> None:
+    from music_recommender.alerting import AlertRule, AlertTransition
+
+    service = create_service(tmp_path)
+    stats = service.get_alert_throttling_stats()
+    assert stats["total_evaluated"] == 0
+    assert stats["allowed_count"] == 0
+
+    rule = AlertRule(
+        name="ServiceHighLatency",
+        metric="latency_p95",
+        comparator=">",
+        threshold=200.0,
+        severity="critical",
+        summary="Latency is above 200ms",
+    )
+    t = AlertTransition(
+        rule=rule,
+        event="firing",
+        value=250.0,
+        timestamp="2026-11-09T10:00:00Z",
+    )
+
+    received: list[str] = []
+    service.alert_multichannel_dispatcher.register_channel(
+        "slack_ops",
+        lambda tr: (received.append(tr.rule.name) or True, 200, "Delivered"),
+    )
+
+    results = service.dispatch_multichannel_alerts(t, channels=["slack_ops"])
+    assert "slack_ops" in results
+    assert results["slack_ops"][0] is True
+    assert received == ["ServiceHighLatency"]
+
+    stats_after = service.get_alert_throttling_stats()
+    assert stats_after["total_evaluated"] == 1
+    assert stats_after["allowed_count"] == 1
+
+    service.reset_alert_throttling()
+    assert service.get_alert_throttling_stats()["total_evaluated"] == 0

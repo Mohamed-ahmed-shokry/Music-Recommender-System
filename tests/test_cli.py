@@ -4049,3 +4049,82 @@ def test_archive_alerts_cli(tmp_path: Path) -> None:
         ["archive-alerts", str(bad_out), "--format", "rar"],
     )
     assert res_bad.exit_code == 2
+
+
+def test_cli_throttle_stats_command() -> None:
+    runner = CliRunner()
+    res = runner.invoke(cli.app, ["throttle-stats"])
+    assert res.exit_code == 0
+    assert "Alert Notification Throttling Metrics" in res.output
+
+    res_json = runner.invoke(cli.app, ["throttle-stats", "--json"])
+    assert res_json.exit_code == 0
+    data = json.loads(res_json.output)
+    assert "total_evaluated" in data
+    assert "allowed_count" in data
+
+    res_reset = runner.invoke(cli.app, ["throttle-stats", "--reset"])
+    assert res_reset.exit_code == 0
+    assert "reset" in res_reset.output.lower()
+
+
+def test_cli_test_gateway_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    from music_recommender import alerting
+
+    # Mock sender to avoid real network calls
+    def mock_send(
+        url: str,
+        body: bytes,
+        headers: dict[str, str],
+        timeout: float,
+        method: str = "POST",
+    ) -> tuple[int, str]:
+        return 202, '{"status": "success"}'
+
+    monkeypatch.setattr(alerting, "_send_http_request", mock_send)
+
+    runner = CliRunner()
+    # Invalid gateway
+    res_invalid = runner.invoke(cli.app, ["test-gateway", "unsupported_gw"])
+    assert res_invalid.exit_code == 2
+
+    # PagerDuty without routing key
+    res_pd_nokey = runner.invoke(cli.app, ["test-gateway", "pagerduty"])
+    assert res_pd_nokey.exit_code == 2
+
+    # PagerDuty with routing key
+    res_pd = runner.invoke(
+        cli.app,
+        [
+            "test-gateway",
+            "pagerduty",
+            "--routing-key",
+            "mock-routing-key",
+            "--alert-name",
+            "HighLatency",
+            "--severity",
+            "critical",
+        ],
+    )
+    assert res_pd.exit_code == 0
+    assert "Successfully dispatched test alert to pagerduty" in res_pd.output
+
+    # Opsgenie without api key
+    res_og_nokey = runner.invoke(cli.app, ["test-gateway", "opsgenie"])
+    assert res_og_nokey.exit_code == 2
+
+    # Opsgenie with api key and json output
+    res_og = runner.invoke(
+        cli.app,
+        [
+            "test-gateway",
+            "opsgenie",
+            "--api-key",
+            "mock-api-key",
+            "--json",
+        ],
+    )
+    assert res_og.exit_code == 0
+    data_og = json.loads(res_og.output)
+    assert data_og["gateway"] == "opsgenie"
+    assert data_og["success"] is True

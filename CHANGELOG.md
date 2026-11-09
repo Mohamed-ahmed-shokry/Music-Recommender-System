@@ -5,6 +5,26 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.38.0] - 2026-11-09
+
+### Added
+
+- **Alert Notification Throttling & Deduplication (Phase 169):**
+  - Sliding-window rate-limiter and deduplicator `AlertNotificationThrottler` with `AlertThrottleConfig` and `ThrottleDecision`.
+  - Configurable deduplication window (`dedup_window_seconds`), sliding rate limit window (`max_alerts_per_window` / `window_seconds`), and firing repeat interval suppression (`repeat_interval_seconds`).
+  - Thread-safe metric tracking for total evaluated, allowed, suppressed duplicates, rate limited, and repeat suppressed alerts.
+  - FastAPI endpoints `GET /alerts/throttling/stats` and `POST /alerts/throttling/reset`.
+  - Operator CLI command `music-recommender throttle-stats` with `--reset` and `--json` support.
+  - Streamlit dashboard sidebar throttling indicator displaying active suppression totals and breakdown.
+
+- **Escalation Policies & Multi-Channel Incident Gateways (Phase 170):**
+  - Ordered multi-tier escalation policies `AlertEscalationPolicy`, `AlertEscalationTier`, and `AlertEscalationEngine` tracking alert firing duration and triggering graduated channel notifications with repeat capabilities.
+  - Native standard-library incident gateways `PagerDutyGateway` (Events API v2 trigger/resolve) and `OpsgenieGateway` (Alert API v2 create/close) with rich Prometheus metadata.
+  - Unified `MultiChannelDispatcher` coordinating channel routing, throttling checks, and tiered escalation execution.
+  - `RecommenderService` integration methods: `get_alert_throttling_stats`, `reset_alert_throttling`, `get_alert_escalation_history`, and `dispatch_multichannel_alerts`.
+  - FastAPI endpoint `POST /alerts/gateway/test` supporting synthetic test dispatches to PagerDuty, Opsgenie, and Webhook.
+  - Operator CLI command `music-recommender test-gateway` for verifying gateway connectivity and credential validity.
+
 ## [0.37.0] - 2026-11-08
 
 ### Added

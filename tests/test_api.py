@@ -2794,3 +2794,84 @@ def test_alerts_dlq_retry_and_archive_endpoints() -> None:
         # Invalid format
         res_arch_bad = client.get("/alerts/archive?format=rar")
         assert res_arch_bad.status_code == 422
+
+
+def test_alerts_throttling_stats_and_reset_endpoints() -> None:
+    with TestClient(api_main.app) as client:
+        res_stats = client.get("/alerts/throttling/stats")
+        assert res_stats.status_code == 200
+        stats = res_stats.json()
+        assert "total_evaluated" in stats
+        assert "allowed_count" in stats
+        assert "config" in stats
+
+        res_reset = client.post("/alerts/throttling/reset")
+        assert res_reset.status_code == 200
+        assert res_reset.json()["status"] == "ok"
+
+
+def test_alerts_gateway_test_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    from music_recommender import alerting
+
+    # Mock _send_http_request
+    def mock_send(
+        url: str,
+        body: bytes,
+        headers: dict[str, str],
+        timeout: float,
+        method: str = "POST",
+    ) -> tuple[int, str]:
+        return 202, '{"status": "success"}'
+
+    monkeypatch.setattr(alerting, "_send_http_request", mock_send)
+
+    with TestClient(api_main.app) as client:
+        # Invalid gateway
+        res_invalid = client.post(
+            "/alerts/gateway/test",
+            json={"gateway": "invalid_gw"},
+        )
+        assert res_invalid.status_code == 400
+
+        # PagerDuty without routing key
+        res_pd_nokey = client.post(
+            "/alerts/gateway/test",
+            json={"gateway": "pagerduty"},
+        )
+        assert res_pd_nokey.status_code == 400
+
+        # PagerDuty with routing key
+        res_pd = client.post(
+            "/alerts/gateway/test",
+            json={
+                "gateway": "pagerduty",
+                "routing_key": "pd-test-key",
+                "alertname": "TestHighLatency",
+                "severity": "critical",
+            },
+        )
+        assert res_pd.status_code == 200
+        data_pd = res_pd.json()
+        assert data_pd["gateway"] == "pagerduty"
+        assert data_pd["success"] is True
+
+        # Opsgenie without api key
+        res_og_nokey = client.post(
+            "/alerts/gateway/test",
+            json={"gateway": "opsgenie"},
+        )
+        assert res_og_nokey.status_code == 400
+
+        # Opsgenie with api key
+        res_og = client.post(
+            "/alerts/gateway/test",
+            json={
+                "gateway": "opsgenie",
+                "api_key": "genie-key-123",
+                "alertname": "TestCpuSpike",
+            },
+        )
+        assert res_og.status_code == 200
+        data_og = res_og.json()
+        assert data_og["gateway"] == "opsgenie"
+        assert data_og["success"] is True
