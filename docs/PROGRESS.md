@@ -19,8 +19,8 @@
 | Task 5 | Unit tests for alert escalation engine in `tests/test_alerting.py` | Completed | `4af7f89` |
 | Task 6 | `PagerDutyGateway`, `OpsgenieGateway`, and `MultiChannelDispatcher` in `alerting.py` | Completed | `81f60d3` |
 | Task 7 | Unit tests for PagerDuty and Opsgenie gateways in `tests/test_alerting.py` | Completed | `a89d32c` |
-| Task 8 | Integration in `RecommenderService` in `src/music_recommender/service.py` | Pending | |
-| Task 9 | Service tests in `tests/test_service.py` | Pending | |
+| Task 8 | Integration in `RecommenderService` in `src/music_recommender/service.py` | Completed | `2c6c89b` |
+| Task 9 | Service tests in `tests/test_service.py` | Completed | `8d292b6` |
 | Task 10 | Endpoints `/alerts/throttling/stats`, `/alerts/throttling/reset`, `/alerts/gateway/test` in `api/main.py` | Pending | |
 | Task 11 | API integration tests in `tests/test_api.py` | Pending | |
 | Task 12 | CLI commands `throttle-stats` and `test-gateway` in `cli.py` | Pending | |
