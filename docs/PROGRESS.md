@@ -21,8 +21,8 @@
 | Task 7 | Unit tests for PagerDuty and Opsgenie gateways in `tests/test_alerting.py` | Completed | `a89d32c` |
 | Task 8 | Integration in `RecommenderService` in `src/music_recommender/service.py` | Completed | `2c6c89b` |
 | Task 9 | Service tests in `tests/test_service.py` | Completed | `8d292b6` |
-| Task 10 | Endpoints `/alerts/throttling/stats`, `/alerts/throttling/reset`, `/alerts/gateway/test` in `api/main.py` | Pending | |
-| Task 11 | API integration tests in `tests/test_api.py` | Pending | |
+| Task 10 | Endpoints `/alerts/throttling/stats`, `/alerts/throttling/reset`, `/alerts/gateway/test` in `api/main.py` | Completed | `5762227` |
+| Task 11 | API integration tests in `tests/test_api.py` | Completed | `f9161ae` |
 | Task 12 | CLI commands `throttle-stats` and `test-gateway` in `cli.py` | Pending | |
 | Task 13 | CLI tests in `tests/test_cli.py` | Pending | |
 | Task 14 | Throttling and escalation indicators in `src/music_recommender/dashboard.py` | Pending | |
