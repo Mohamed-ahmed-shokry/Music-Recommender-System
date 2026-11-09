@@ -41,12 +41,12 @@ Enhance operational alerting resilience and prevent notification storms by imple
    - Bump version to `0.38.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
 
 ### 3. Acceptance Criteria
-- [ ] AC-1: `AlertNotificationThrottler` enforces deduplication windows, rate limits, and repeat intervals with `ThrottleDecision` tracking.
-- [ ] AC-2: `AlertEscalationEngine` computes ongoing firing duration and resolves tiered channel escalation.
-- [ ] AC-3: `PagerDutyGateway` and `OpsgenieGateway` serialize and dispatch compliant API v2 payloads with dry-run and mock support.
-- [ ] AC-4: FastAPI endpoints `GET /alerts/throttling/stats`, `POST /alerts/throttling/reset`, and `POST /alerts/gateway/test` respond with valid schemas.
-- [ ] AC-5: Operator CLI commands `throttle-stats` and `test-gateway` operate cleanly in table and JSON formats.
-- [ ] AC-6: Streamlit dashboard sidebar surfaces notification throttling indicators.
+- [x] AC-1: `AlertNotificationThrottler` enforces deduplication windows, rate limits, and repeat intervals with `ThrottleDecision` tracking.
+- [x] AC-2: `AlertEscalationEngine` computes ongoing firing duration and resolves tiered channel escalation.
+- [x] AC-3: `PagerDutyGateway` and `OpsgenieGateway` serialize and dispatch compliant API v2 payloads with dry-run and mock support.
+- [x] AC-4: FastAPI endpoints `GET /alerts/throttling/stats`, `POST /alerts/throttling/reset`, and `POST /alerts/gateway/test` respond with valid schemas.
+- [x] AC-5: Operator CLI commands `throttle-stats` and `test-gateway` operate cleanly in table and JSON formats.
+- [x] AC-6: Streamlit dashboard sidebar surfaces notification throttling indicators.
 - [ ] AC-7: All local CI-parity checks and remote CI workflow runs pass 100%.
 
 ### 4. Validation & CI Plan
@@ -61,23 +61,24 @@ Enhance operational alerting resilience and prevent notification storms by imple
 - Third-party SDK client packages (e.g. `pdpyras` or `opsgenie-sdk`) are excluded in favor of standard library `urllib.request` integrations to maintain zero additional runtime dependencies.
 
 ### 6. Micro-Task Breakdown
-- [ ] Task 1: Define Phase 169 & 170 roadmap, update plan, and initialize progress record.
-- [ ] Task 2: Implement `AlertThrottleConfig`, `ThrottleDecision`, and `AlertNotificationThrottler` in `src/music_recommender/alerting.py`.
-- [ ] Task 3: Add unit tests for `AlertNotificationThrottler` in `tests/test_alerting.py`.
-- [ ] Task 4: Implement `AlertEscalationTier`, `AlertEscalationPolicy`, and `AlertEscalationEngine` in `src/music_recommender/alerting.py`.
-- [ ] Task 5: Add unit tests for alert escalation engine in `tests/test_alerting.py`.
-- [ ] Task 6: Implement `PagerDutyGateway`, `OpsgenieGateway`, and `MultiChannelDispatcher` in `src/music_recommender/alerting.py`.
-- [ ] Task 7: Add unit tests for PagerDuty and Opsgenie gateways in `tests/test_alerting.py`.
-- [ ] Task 8: Integrate throttler and multi-channel dispatcher in `RecommenderService` in `src/music_recommender/service.py`.
-- [ ] Task 9: Add service tests for throttling and gateway dispatch in `tests/test_service.py`.
-- [ ] Task 10: Implement `/alerts/throttling/stats`, `/alerts/throttling/reset`, and `/alerts/gateway/test` in `api/main.py`.
-- [ ] Task 11: Add API integration tests in `tests/test_api.py`.
-- [ ] Task 12: Implement `throttle-stats` and `test-gateway` CLI commands in `src/music_recommender/cli.py`.
-- [ ] Task 13: Add CLI tests in `tests/test_cli.py`.
-- [ ] Task 14: Add throttling indicators to sidebar in `src/music_recommender/dashboard.py`.
-- [ ] Task 15: Add dashboard tests in `tests/test_dashboard.py`.
-- [ ] Task 16: Update `README.md` and `CHANGELOG.md` with 0.38.0 documentation.
-- [ ] Task 17: Bump package version to `0.38.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [x] Task 1: Define Phase 169 & 170 roadmap, update plan, and initialize progress record.
+- [x] Task 2: Implement `AlertThrottleConfig`, `ThrottleDecision`, and `AlertNotificationThrottler` in `src/music_recommender/alerting.py`.
+- [x] Task 3: Add unit tests for `AlertNotificationThrottler` in `tests/test_alerting.py`.
+- [x] Task 4: Implement `AlertEscalationTier`, `AlertEscalationPolicy`, and `AlertEscalationEngine` in `src/music_recommender/alerting.py`.
+- [x] Task 5: Add unit tests for alert escalation engine in `tests/test_alerting.py`.
+- [x] Task 6: Implement `PagerDutyGateway`, `OpsgenieGateway`, and `MultiChannelDispatcher` in `src/music_recommender/alerting.py`.
+- [x] Task 7: Add unit tests for PagerDuty and Opsgenie gateways in `tests/test_alerting.py`.
+- [x] Task 8: Integrate throttler and multi-channel dispatcher in `RecommenderService` in `src/music_recommender/service.py`.
+- [x] Task 9: Add service tests for throttling and gateway dispatch in `tests/test_service.py`.
+- [x] Task 10: Implement `/alerts/throttling/stats`, `/alerts/throttling/reset`, and `/alerts/gateway/test` in `api/main.py`.
+- [x] Task 11: Add API integration tests in `tests/test_api.py`.
+- [x] Task 12: Implement `throttle-stats` and `test-gateway` CLI commands in `src/music_recommender/cli.py`.
+- [x] Task 13: Add CLI tests in `tests/test_cli.py`.
+- [x] Task 14: Add throttling indicators to sidebar in `src/music_recommender/dashboard.py`.
+- [x] Task 15: Add dashboard tests in `tests/test_dashboard.py`.
+- [x] Task 16: Update `README.md` and `CHANGELOG.md` with 0.38.0 documentation.
+- [x] Task 17: Bump package version to `0.38.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [ ] Task 18: Verify local CI parity, push to remote, monitor CI to 100% green.
 - [ ] Task 18: CI parity verification, push, open draft PR, monitor remote CI to green.
 
 ---

@@ -27,9 +27,9 @@
 | Task 13 | CLI tests in `tests/test_cli.py` | Completed | `ada24ca` |
 | Task 14 | Throttling and escalation indicators in `src/music_recommender/dashboard.py` | Completed | `1ff0b98` |
 | Task 15 | Dashboard tests in `tests/test_dashboard.py` | Completed | `b01467a` |
-| Task 16 | Documentation updates in `README.md` and `CHANGELOG.md` | Pending | |
-| Task 17 | Bump package version to `0.38.0` in `pyproject.toml`, run `uv lock`, and `uv build` | Pending | |
-| Task 18 | CI parity verification, push, open draft PR, monitor remote CI to green | Pending | |
+| Task 16 | Documentation updates in `README.md` and `CHANGELOG.md` | Completed | `d4df56e` |
+| Task 17 | Bump package version to `0.38.0` in `pyproject.toml`, run `uv lock`, and `uv build` | Completed | `30d0e1c` |
+| Task 18 | CI parity verification, push, open draft PR, monitor remote CI to green | In Progress | |
 
 ---
 
