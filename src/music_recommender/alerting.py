@@ -239,6 +239,16 @@ class AlertTransition:
     value: float | None
     timestamp: str
 
+    @property
+    def is_firing(self) -> bool:
+        """Return True if this transition represents a firing alert."""
+        return self.event == "firing"
+
+    @property
+    def is_resolved(self) -> bool:
+        """Return True if this transition represents a resolved alert."""
+        return self.event == "resolved"
+
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable notification payload."""
         return {
@@ -1513,6 +1523,123 @@ class AlertEvaluator:
     def firing(self) -> list[dict[str, Any]]:
         """Return only the states currently firing."""
         return [s for s in self.states() if s["status"] == AlertStatus.FIRING]
+
+
+class AlertNotificationThrottler:
+    """Thread-safe rate-limiter and deduplicator for alert notifications."""
+
+    def __init__(self, config: AlertThrottleConfig | None = None) -> None:
+        self.config = config or AlertThrottleConfig()
+        self._lock = threading.Lock()
+        self._last_transitions: dict[tuple[str, str], float] = {}
+        self._sliding_timestamps: dict[str, list[float]] = {}
+        self._last_firing_dispatch: dict[str, float] = {}
+
+        self._total_evaluated: int = 0
+        self._allowed_count: int = 0
+        self._suppressed_duplicate_count: int = 0
+        self._rate_limited_count: int = 0
+        self._repeat_suppressed_count: int = 0
+
+    def should_dispatch(
+        self,
+        transition: AlertTransition,
+        now: float | None = None,
+    ) -> tuple[bool, ThrottleDecision, str]:
+        """Determine whether an alert transition should be dispatched or throttled."""
+        if not self.config.enabled:
+            return True, ThrottleDecision.ALLOWED, "Throttling disabled"
+
+        ts = now if now is not None else time.time()
+        rule_name = transition.rule.name
+        state_key = (rule_name, transition.event)
+
+        with self._lock:
+            self._total_evaluated += 1
+
+            # 1. Exact duplicate transition check
+            last_ts = self._last_transitions.get(state_key)
+            if (
+                last_ts is not None
+                and (ts - last_ts) < self.config.dedup_window_seconds
+            ):
+                self._suppressed_duplicate_count += 1
+                return (
+                    False,
+                    ThrottleDecision.SUPPRESSED_DUPLICATE,
+                    (
+                        f"Duplicate transition for {rule_name} within "
+                        f"{self.config.dedup_window_seconds}s window"
+                    ),
+                )
+
+            # 2. Ongoing firing repeat interval check
+            if transition.is_firing:
+                last_firing = self._last_firing_dispatch.get(rule_name)
+                if (
+                    last_firing is not None
+                    and (ts - last_firing) < self.config.repeat_interval_seconds
+                ):
+                    self._repeat_suppressed_count += 1
+                    return (
+                        False,
+                        ThrottleDecision.REPEAT_SUPPRESSED,
+                        (
+                            f"Ongoing firing alert {rule_name} suppressed "
+                            f"until {self.config.repeat_interval_seconds}s interval"
+                        ),
+                    )
+
+            # 3. Sliding-window rate limit
+            cutoff = ts - self.config.window_seconds
+            timestamps = self._sliding_timestamps.setdefault(rule_name, [])
+            self._sliding_timestamps[rule_name] = [t for t in timestamps if t >= cutoff]
+            if (
+                len(self._sliding_timestamps[rule_name])
+                >= self.config.max_alerts_per_window
+            ):
+                self._rate_limited_count += 1
+                return (
+                    False,
+                    ThrottleDecision.RATE_LIMITED,
+                    (
+                        f"Rate limit exceeded: {self.config.max_alerts_per_window} "
+                        f"in {self.config.window_seconds}s"
+                    ),
+                )
+
+            # Allowed - record timestamp
+            self._last_transitions[state_key] = ts
+            self._sliding_timestamps[rule_name].append(ts)
+            if transition.is_firing:
+                self._last_firing_dispatch[rule_name] = ts
+            self._allowed_count += 1
+            return True, ThrottleDecision.ALLOWED, "Allowed"
+
+    def get_stats(self) -> dict[str, Any]:
+        """Return throttling and suppression metrics."""
+        with self._lock:
+            return {
+                "total_evaluated": self._total_evaluated,
+                "allowed_count": self._allowed_count,
+                "suppressed_duplicate_count": self._suppressed_duplicate_count,
+                "rate_limited_count": self._rate_limited_count,
+                "repeat_suppressed_count": self._repeat_suppressed_count,
+                "tracked_rules": len(self._sliding_timestamps),
+                "config": self.config.to_dict(),
+            }
+
+    def reset(self) -> None:
+        """Clear all in-memory throttling state."""
+        with self._lock:
+            self._last_transitions.clear()
+            self._sliding_timestamps.clear()
+            self._last_firing_dispatch.clear()
+            self._total_evaluated = 0
+            self._allowed_count = 0
+            self._suppressed_duplicate_count = 0
+            self._rate_limited_count = 0
+            self._repeat_suppressed_count = 0
 
 
 class WebhookDispatcher:
