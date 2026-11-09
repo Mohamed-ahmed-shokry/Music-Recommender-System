@@ -1903,6 +1903,246 @@ def _post_json(url: str, body: bytes, timeout: float) -> None:
             raise OSError(f"webhook responded with HTTP {status}")
 
 
+def _send_http_request(
+    url: str,
+    body: bytes,
+    headers: dict[str, str],
+    timeout: float,
+    method: str = "POST",
+) -> tuple[int, str]:
+    request = urllib.request.Request(  # noqa: S310
+        url,
+        data=body if body else None,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+            status = getattr(response, "status", 200)
+            res_body = response.read().decode("utf-8", errors="replace")
+            return int(status), res_body
+    except urllib.error.HTTPError as exc:
+        err_body = (
+            exc.read().decode("utf-8", errors="replace")
+            if hasattr(exc, "read")
+            else str(exc)
+        )
+        return int(exc.code), err_body
+    except Exception as exc:
+        return 0, str(exc)
+
+
+class PagerDutyGateway:
+    """Delivers alert transitions to PagerDuty Events API v2."""
+
+    def __init__(
+        self,
+        routing_key: str,
+        endpoint_url: str = "https://events.pagerduty.com/v2/enqueue",
+        timeout_seconds: float = 5.0,
+        sender: Callable[[str, bytes, dict[str, str], float, str], tuple[int, str]]
+        | None = None,
+    ) -> None:
+        self.routing_key = routing_key
+        self.endpoint_url = endpoint_url
+        self.timeout_seconds = timeout_seconds
+        self._sender = sender or _send_http_request
+
+    def send(self, transition: AlertTransition) -> tuple[bool, int, str]:
+        """Dispatch an alert transition to PagerDuty."""
+        action = "trigger" if transition.is_firing else "resolve"
+        sev = str(transition.rule.severity).lower()
+        pd_severity = "critical" if sev == "critical" else "warning"
+
+        payload = {
+            "routing_key": self.routing_key,
+            "event_action": action,
+            "dedup_key": f"music-recommender-{transition.rule.name}",
+            "payload": {
+                "summary": (
+                    f"[{sev.upper()}] {transition.rule.name}: {transition.rule.summary}"
+                ),
+                "source": "music-recommender",
+                "severity": pd_severity,
+                "timestamp": transition.timestamp,
+                "custom_details": {
+                    "metric": transition.rule.metric,
+                    "value": transition.value,
+                    "comparator": transition.rule.comparator,
+                    "threshold": transition.rule.threshold,
+                },
+            },
+        }
+        body = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        status, response = self._sender(
+            self.endpoint_url, body, headers, self.timeout_seconds, "POST"
+        )
+        success = 200 <= status < 300
+        return success, status, response
+
+
+class OpsgenieGateway:
+    """Delivers alert transitions to Opsgenie Alert API v2."""
+
+    def __init__(
+        self,
+        api_key: str,
+        endpoint_url: str = "https://api.opsgenie.com/v2/alerts",
+        timeout_seconds: float = 5.0,
+        sender: Callable[[str, bytes, dict[str, str], float, str], tuple[int, str]]
+        | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.endpoint_url = endpoint_url
+        self.timeout_seconds = timeout_seconds
+        self._sender = sender or _send_http_request
+
+    def send(self, transition: AlertTransition) -> tuple[bool, int, str]:
+        """Dispatch an alert transition to Opsgenie."""
+        alias = f"music-recommender-{transition.rule.name}"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"GenieKey {self.api_key}",
+        }
+        if transition.is_firing:
+            sev = str(transition.rule.severity).lower()
+            priority = "P1" if sev == "critical" else "P3"
+            payload = {
+                "message": f"[{sev.upper()}] {transition.rule.name}",
+                "alias": alias,
+                "description": transition.rule.summary,
+                "priority": priority,
+                "details": {
+                    "metric": transition.rule.metric,
+                    "value": str(transition.value),
+                    "comparator": transition.rule.comparator,
+                    "threshold": str(transition.rule.threshold),
+                },
+            }
+            body = json.dumps(payload).encode("utf-8")
+            status, response = self._sender(
+                self.endpoint_url, body, headers, self.timeout_seconds, "POST"
+            )
+        else:
+            close_url = (
+                f"{self.endpoint_url.rstrip('/')}/{alias}/close?identifierType=alias"
+            )
+            body = json.dumps({"note": "Alert condition resolved"}).encode("utf-8")
+            status, response = self._sender(
+                close_url, body, headers, self.timeout_seconds, "POST"
+            )
+        success = 200 <= status < 300
+        return success, status, response
+
+
+class MultiChannelDispatcher:
+    """Coordinates dispatching alert transitions across multiple gateways
+    and channels.
+    """
+
+    def __init__(
+        self,
+        channels: dict[str, Callable[[AlertTransition], tuple[bool, int, str]]]
+        | None = None,
+        throttler: AlertNotificationThrottler | None = None,
+        escalation_engine: AlertEscalationEngine | None = None,
+    ) -> None:
+        self._lock = threading.Lock()
+        self._channels: dict[
+            str, Callable[[AlertTransition], tuple[bool, int, str]]
+        ] = dict(channels or {})
+        self.throttler = throttler or AlertNotificationThrottler()
+        self.escalation_engine = escalation_engine or AlertEscalationEngine()
+        self._dispatch_count: int = 0
+        self._error_count: int = 0
+
+    def register_channel(
+        self,
+        name: str,
+        handler: Callable[[AlertTransition], tuple[bool, int, str]],
+    ) -> None:
+        """Register a notification handler for a channel name."""
+        with self._lock:
+            self._channels[name] = handler
+
+    def dispatch(
+        self,
+        transition: AlertTransition,
+        channels: Sequence[str] | None = None,
+        now: float | None = None,
+    ) -> dict[str, tuple[bool, int, str]]:
+        """Dispatch transition across channels with throttling and escalation checks."""
+        allowed, decision, reason = self.throttler.should_dispatch(transition, now=now)
+        if not allowed:
+            return {
+                "throttled": (
+                    False,
+                    429,
+                    f"Throttled ({decision.value}): {reason}",
+                )
+            }
+
+        escalation_events = self.escalation_engine.evaluate_transition(
+            transition, now=now
+        )
+
+        target_channels: set[str] = set()
+        if channels is not None:
+            target_channels.update(channels)
+        elif escalation_events:
+            for ev in escalation_events:
+                target_channels.update(ev.channels)
+        else:
+            target_channels.update(self._channels.keys())
+
+        if not target_channels and self._channels:
+            target_channels = set(self._channels.keys())
+
+        results: dict[str, tuple[bool, int, str]] = {}
+        with self._lock:
+            self._dispatch_count += 1
+
+        for ch in target_channels:
+            handler = self._channels.get(ch)
+            if handler is None:
+                results[ch] = (False, 404, f"Unknown channel '{ch}'")
+                continue
+            try:
+                ok, code, msg = handler(transition)
+                results[ch] = (ok, code, msg)
+                if not ok:
+                    with self._lock:
+                        self._error_count += 1
+            except Exception as exc:
+                with self._lock:
+                    self._error_count += 1
+                results[ch] = (False, 500, str(exc))
+
+        return results
+
+    def get_stats(self) -> dict[str, Any]:
+        """Return multi-channel dispatch metrics."""
+        with self._lock:
+            return {
+                "dispatch_count": self._dispatch_count,
+                "error_count": self._error_count,
+                "registered_channels": sorted(self._channels.keys()),
+                "throttler": self.throttler.get_stats(),
+                "active_firing_durations": (
+                    self.escalation_engine.get_active_firing_durations()
+                ),
+            }
+
+    def reset(self) -> None:
+        """Clear dispatcher counters, throttler, and escalation engine."""
+        with self._lock:
+            self._dispatch_count = 0
+            self._error_count = 0
+            self.throttler.reset()
+            self.escalation_engine.reset()
+
+
 def _format_number(value: float) -> str:
     return str(int(value)) if float(value).is_integer() else repr(float(value))
 
