@@ -459,6 +459,35 @@ class DeadLetterAlertRecord:
         )
 
 
+class ThrottleDecision(StrEnum):
+    """Decision made by the alert notification throttler."""
+
+    ALLOWED = "allowed"
+    SUPPRESSED_DUPLICATE = "suppressed_duplicate"
+    RATE_LIMITED = "rate_limited"
+    REPEAT_SUPPRESSED = "repeat_suppressed"
+
+
+@dataclass
+class AlertThrottleConfig:
+    """Configuration for sliding-window rate limiting and deduplication."""
+
+    dedup_window_seconds: float = 300.0
+    max_alerts_per_window: int = 10
+    window_seconds: float = 60.0
+    repeat_interval_seconds: float = 1800.0
+    enabled: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "dedup_window_seconds": self.dedup_window_seconds,
+            "max_alerts_per_window": self.max_alerts_per_window,
+            "window_seconds": self.window_seconds,
+            "repeat_interval_seconds": self.repeat_interval_seconds,
+            "enabled": self.enabled,
+        }
+
+
 @dataclass
 class AlertLogRotationConfig:
     """Configuration for size-based rotation and age retention of alert logs."""
