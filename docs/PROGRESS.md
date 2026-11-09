@@ -13,8 +13,8 @@
 | Task ID | Task Description | Status | Commit |
 |---|---|---|---|
 | Task 1 | Roadmap, Plan & Progress initialization | Completed | `4696561`, `2ea43f4` |
-| Task 2 | `AlertThrottleConfig`, `ThrottleDecision`, and `AlertNotificationThrottler` in `alerting.py` | In Progress | |
-| Task 3 | Unit tests for `AlertNotificationThrottler` in `tests/test_alerting.py` | Pending | |
+| Task 2 | `AlertThrottleConfig`, `ThrottleDecision`, and `AlertNotificationThrottler` in `alerting.py` | Completed | `47a69ba`, `b0caaf0` |
+| Task 3 | Unit tests for `AlertNotificationThrottler` in `tests/test_alerting.py` | Completed | `8d16070` |
 | Task 4 | `AlertEscalationTier`, `AlertEscalationPolicy`, and `AlertEscalationEngine` in `alerting.py` | Pending | |
 | Task 5 | Unit tests for alert escalation engine in `tests/test_alerting.py` | Pending | |
 | Task 6 | `PagerDutyGateway`, `OpsgenieGateway`, and `MultiChannelDispatcher` in `alerting.py` | Pending | |
