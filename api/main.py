@@ -18,9 +18,15 @@ from music_recommender import __version__
 from music_recommender.alerting import (
     AlertEvaluator,
     AlertHistoryBuffer,
+    AlertNotificationThrottler,
+    AlertRule,
     AlertSpilloverStorage,
+    AlertTransition,
     DeadLetterAlertRecord,
     DLQRetryPolicy,
+    MultiChannelDispatcher,
+    OpsgenieGateway,
+    PagerDutyGateway,
     ReceivedAlertEvent,
     parse_alert_payload,
 )
@@ -57,6 +63,10 @@ _fallback_storage: AlertSpilloverStorage | None = AlertSpilloverStorage(
     storage_dir=Path("data/alerts")
 )
 _fallback_alert_history = AlertHistoryBuffer(spillover_storage=_fallback_storage)
+_fallback_alert_throttler = AlertNotificationThrottler()
+_fallback_alert_multichannel_dispatcher = MultiChannelDispatcher(
+    throttler=_fallback_alert_throttler
+)
 
 
 def _get_alert_storage() -> AlertSpilloverStorage | None:
@@ -561,6 +571,137 @@ def alerts_archive(
         media_type=media_type,
         filename=archive_file.name,
     )
+
+
+class GatewayTestRequest(BaseModel):
+    """Payload to test alert dispatch to an external incident gateway."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    gateway: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] = (
+        Field(..., description="Target gateway: pagerduty, opsgenie, or webhook")
+    )
+    routing_key: str | None = Field(
+        default=None, description="Routing key for PagerDuty"
+    )
+    api_key: str | None = Field(default=None, description="API key for Opsgenie")
+    endpoint_url: str | None = Field(default=None, description="Custom endpoint URL")
+    alertname: str = Field(default="TestAlert", description="Alert rule name")
+    severity: str = Field(
+        default="warning", description="Severity: warning or critical"
+    )
+    summary: str = Field(default="Synthetic test alert", description="Alert summary")
+    event: str = Field(default="firing", description="Event type: firing or resolved")
+
+
+@app.get("/alerts/throttling/stats")
+def alert_throttling_stats() -> dict[str, object]:
+    """Return metrics and state of alert notification rate-limiting."""
+    if service is not None:
+        return cast(dict[str, object], service.get_alert_throttling_stats())
+    return cast(dict[str, object], _fallback_alert_throttler.get_stats())
+
+
+@app.post("/alerts/throttling/reset")
+def alert_throttling_reset() -> dict[str, object]:
+    """Reset the alert notification throttling counters and state."""
+    if service is not None:
+        service.reset_alert_throttling()
+    else:
+        _fallback_alert_throttler.reset()
+    return {"status": "ok", "message": "Alert notification throttling state reset"}
+
+
+@app.post("/alerts/gateway/test")
+def alert_gateway_test(payload: GatewayTestRequest) -> dict[str, object]:
+    """Test dispatching a synthetic alert notification to a gateway."""
+    gateway_type = payload.gateway.lower()
+    if gateway_type not in ("pagerduty", "opsgenie", "webhook"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Unsupported gateway type '{payload.gateway}'. "
+                "Must be 'pagerduty', 'opsgenie', or 'webhook'."
+            ),
+        )
+
+    rule = AlertRule(
+        name=payload.alertname,
+        metric="test_metric",
+        comparator=">",
+        threshold=1.0,
+        severity=payload.severity,
+        summary=payload.summary,
+    )
+    transition = AlertTransition(
+        rule=rule,
+        event=payload.event,
+        value=1.5,
+        timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    )
+
+    if gateway_type == "pagerduty":
+        routing_key = payload.routing_key or os.getenv("PAGERDUTY_ROUTING_KEY", "")
+        if not routing_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Routing key is required for PagerDuty gateway test.",
+            )
+        gw = PagerDutyGateway(
+            routing_key=routing_key,
+            endpoint_url=payload.endpoint_url
+            or "https://events.pagerduty.com/v2/enqueue",
+        )
+        ok, code, msg = gw.send(transition)
+        return {
+            "gateway": "pagerduty",
+            "success": ok,
+            "status_code": code,
+            "response": msg,
+        }
+
+    if gateway_type == "opsgenie":
+        api_key = payload.api_key or os.getenv("OPSGENIE_API_KEY", "")
+        if not api_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="API key is required for Opsgenie gateway test.",
+            )
+        gw_og = OpsgenieGateway(
+            api_key=api_key,
+            endpoint_url=payload.endpoint_url or "https://api.opsgenie.com/v2/alerts",
+        )
+        ok, code, msg = gw_og.send(transition)
+        return {
+            "gateway": "opsgenie",
+            "success": ok,
+            "status_code": code,
+            "response": msg,
+        }
+
+    # webhook
+    url = payload.endpoint_url or os.getenv("ALERT_WEBHOOK_URL", "")
+    if not url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="endpoint_url is required for webhook gateway test.",
+        )
+    from music_recommender.alerting import WebhookDispatcher
+
+    try:
+        dispatcher = WebhookDispatcher(url)
+        delivered = dispatcher.dispatch([transition])
+        return {
+            "gateway": "webhook",
+            "success": delivered > 0,
+            "status_code": 200 if delivered > 0 else 500,
+            "delivered": delivered,
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Webhook delivery failed: {exc}",
+        ) from exc
 
 
 @app.post("/alerts/replay")
