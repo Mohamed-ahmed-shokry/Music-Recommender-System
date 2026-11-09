@@ -23,8 +23,8 @@
 | Task 9 | Service tests in `tests/test_service.py` | Completed | `8d292b6` |
 | Task 10 | Endpoints `/alerts/throttling/stats`, `/alerts/throttling/reset`, `/alerts/gateway/test` in `api/main.py` | Completed | `5762227` |
 | Task 11 | API integration tests in `tests/test_api.py` | Completed | `f9161ae` |
-| Task 12 | CLI commands `throttle-stats` and `test-gateway` in `cli.py` | Pending | |
-| Task 13 | CLI tests in `tests/test_cli.py` | Pending | |
+| Task 12 | CLI commands `throttle-stats` and `test-gateway` in `cli.py` | Completed | `e5c56e5` |
+| Task 13 | CLI tests in `tests/test_cli.py` | Completed | `ada24ca` |
 | Task 14 | Throttling and escalation indicators in `src/music_recommender/dashboard.py` | Pending | |
 | Task 15 | Dashboard tests in `tests/test_dashboard.py` | Pending | |
 | Task 16 | Documentation updates in `README.md` and `CHANGELOG.md` | Pending | |
