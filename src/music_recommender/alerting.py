@@ -497,6 +497,76 @@ class AlertThrottleConfig:
             "enabled": self.enabled,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AlertThrottleConfig:
+        return cls(
+            dedup_window_seconds=float(data.get("dedup_window_seconds", 300.0)),
+            max_alerts_per_window=int(data.get("max_alerts_per_window", 10)),
+            window_seconds=float(data.get("window_seconds", 60.0)),
+            repeat_interval_seconds=float(data.get("repeat_interval_seconds", 1800.0)),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
+@dataclass
+class AlertEscalationTier:
+    """A single tier within an alert escalation policy."""
+
+    level: int = 1
+    delay_seconds: float = 0.0
+    channels: list[str] = field(default_factory=lambda: ["default"])
+    repeat: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "level": self.level,
+            "delay_seconds": self.delay_seconds,
+            "channels": list(self.channels),
+            "repeat": self.repeat,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AlertEscalationTier:
+        return cls(
+            level=int(data.get("level", 1)),
+            delay_seconds=float(data.get("delay_seconds", 0.0)),
+            channels=list(data.get("channels", ["default"])),
+            repeat=bool(data.get("repeat", False)),
+        )
+
+
+@dataclass
+class AlertEscalationPolicy:
+    """Escalation policy defining ordered tiers for alert notifications."""
+
+    name: str = "default"
+    tiers: list[AlertEscalationTier] = field(default_factory=list)
+    enabled: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.tiers:
+            self.tiers = [
+                AlertEscalationTier(level=1, delay_seconds=0.0, channels=["default"])
+            ]
+        self.tiers.sort(key=lambda t: t.delay_seconds)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "tiers": [t.to_dict() for t in self.tiers],
+            "enabled": self.enabled,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AlertEscalationPolicy:
+        raw_tiers = data.get("tiers", [])
+        tiers = [AlertEscalationTier.from_dict(t) for t in raw_tiers]
+        return cls(
+            name=str(data.get("name", "default")),
+            tiers=tiers,
+            enabled=bool(data.get("enabled", True)),
+        )
+
 
 @dataclass
 class AlertLogRotationConfig:
@@ -1640,6 +1710,127 @@ class AlertNotificationThrottler:
             self._suppressed_duplicate_count = 0
             self._rate_limited_count = 0
             self._repeat_suppressed_count = 0
+
+
+@dataclass(frozen=True)
+class EscalationEvent:
+    """An escalation event triggered when an alert reaches a new tier."""
+
+    rule_name: str
+    tier_level: int
+    delay_seconds: float
+    channels: list[str]
+    elapsed_seconds: float
+    timestamp: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rule_name": self.rule_name,
+            "tier_level": self.tier_level,
+            "delay_seconds": self.delay_seconds,
+            "channels": list(self.channels),
+            "elapsed_seconds": self.elapsed_seconds,
+            "timestamp": self.timestamp,
+        }
+
+
+class AlertEscalationEngine:
+    """Tracks firing duration and triggers escalation tiers across channels."""
+
+    def __init__(
+        self,
+        policies: dict[str, AlertEscalationPolicy] | None = None,
+        default_policy: AlertEscalationPolicy | None = None,
+    ) -> None:
+        self._lock = threading.Lock()
+        self._policies: dict[str, AlertEscalationPolicy] = dict(policies or {})
+        self._default_policy: AlertEscalationPolicy = (
+            default_policy or AlertEscalationPolicy(name="default")
+        )
+        self._firing_start_times: dict[str, float] = {}
+        self._notified_tiers: dict[str, set[int]] = {}
+        self._escalation_history: list[EscalationEvent] = []
+
+    def register_policy(self, rule_name: str, policy: AlertEscalationPolicy) -> None:
+        """Assign an escalation policy to an alert rule name."""
+        with self._lock:
+            self._policies[rule_name] = policy
+
+    def get_policy(self, rule_name: str) -> AlertEscalationPolicy:
+        """Return the escalation policy for a rule, falling back to default."""
+        with self._lock:
+            return self._policies.get(rule_name, self._default_policy)
+
+    def evaluate_transition(
+        self,
+        transition: AlertTransition,
+        now: float | None = None,
+    ) -> list[EscalationEvent]:
+        """Evaluate an alert transition and return newly triggered escalation events."""
+        ts = now if now is not None else time.time()
+        rule_name = transition.rule.name
+        events: list[EscalationEvent] = []
+
+        with self._lock:
+            if transition.is_resolved:
+                self._firing_start_times.pop(rule_name, None)
+                self._notified_tiers.pop(rule_name, None)
+                return events
+
+            if not transition.is_firing:
+                return events
+
+            policy = self._policies.get(rule_name, self._default_policy)
+            if not policy.enabled:
+                return events
+
+            if rule_name not in self._firing_start_times:
+                self._firing_start_times[rule_name] = ts
+                self._notified_tiers[rule_name] = set()
+
+            start_ts = self._firing_start_times[rule_name]
+            elapsed = ts - start_ts
+            notified = self._notified_tiers.setdefault(rule_name, set())
+
+            iso_now = datetime.fromtimestamp(ts, tz=UTC).isoformat()
+            for tier in policy.tiers:
+                if elapsed >= tier.delay_seconds and (
+                    tier.level not in notified or tier.repeat
+                ):
+                    notified.add(tier.level)
+                    ev = EscalationEvent(
+                        rule_name=rule_name,
+                        tier_level=tier.level,
+                        delay_seconds=tier.delay_seconds,
+                        channels=list(tier.channels),
+                        elapsed_seconds=elapsed,
+                        timestamp=iso_now,
+                    )
+                    events.append(ev)
+                    self._escalation_history.append(ev)
+
+            return events
+
+    def get_active_firing_durations(self, now: float | None = None) -> dict[str, float]:
+        """Return rule name -> active firing duration in seconds."""
+        ts = now if now is not None else time.time()
+        with self._lock:
+            return {
+                name: max(0.0, ts - start)
+                for name, start in self._firing_start_times.items()
+            }
+
+    def get_history(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return recent escalation event history."""
+        with self._lock:
+            return [ev.to_dict() for ev in reversed(self._escalation_history[-limit:])]
+
+    def reset(self) -> None:
+        """Clear all active firing state and history."""
+        with self._lock:
+            self._firing_start_times.clear()
+            self._notified_tiers.clear()
+            self._escalation_history.clear()
 
 
 class WebhookDispatcher:
