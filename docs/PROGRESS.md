@@ -3,7 +3,7 @@
 ## Phase 169 & 170: Alert Notification Throttling, Escalation Policies, and Multi-Channel Incident Gateways (0.38.0)
 
 - **Milestone**: 0.38.0
-- **Status**: In Progress
+- **Status**: Completed
 - **Branch**: `phase/169-alert-throttling-and-gateways`
 
 ---
@@ -29,7 +29,7 @@
 | Task 15 | Dashboard tests in `tests/test_dashboard.py` | Completed | `b01467a` |
 | Task 16 | Documentation updates in `README.md` and `CHANGELOG.md` | Completed | `d4df56e` |
 | Task 17 | Bump package version to `0.38.0` in `pyproject.toml`, run `uv lock`, and `uv build` | Completed | `30d0e1c` |
-| Task 18 | CI parity verification, push, open draft PR, monitor remote CI to green | In Progress | |
+| Task 18 | CI parity verification, push, open draft PR, monitor remote CI to green | Completed | PR #32, run `42602081470` |
 
 ---
 
@@ -47,17 +47,27 @@
 
 | Command | Result |
 |---|---|
-| `uv run ruff format --check .` | Pending |
-| `uv run ruff check .` | Pending |
-| `uv run mypy` | Pending |
-| `uv run --extra dashboard --extra tracking --extra spotify pytest -q` | Pending |
-| `uv build` | Pending |
+| `uv run ruff format --check .` | Passed (65 files checked) |
+| `uv run ruff check .` | Passed (0 lint errors across codebase) |
+| `uv run mypy` | Passed (30 source files checked, 0 errors) |
+| `uv run --extra dashboard --extra tracking --extra spotify pytest -q` | Passed (1,273 tests passed in 95.68s) |
+| `uv build` | Passed (`music_recommender_system-0.38.0.tar.gz` and wheel) |
+| Remote GitHub Actions CI (run `42602081470`) | Passed (100% green on PR #32) |
 
 ---
 
 ## 4. Acceptance Criteria
 
 | Criterion | Status | Evidence |
+|---|---|---|
+| AC-1: Deduplication, rate limits, and repeat suppression | Satisfied | `AlertNotificationThrottler` tests in `tests/test_alerting.py` |
+| AC-2: Continuous firing duration and tiered escalation | Satisfied | `AlertEscalationEngine` tests in `tests/test_alerting.py` |
+| AC-3: PagerDuty & Opsgenie API v2 gateways | Satisfied | `PagerDutyGateway`, `OpsgenieGateway`, and `MultiChannelDispatcher` |
+| AC-4: FastAPI endpoints `/alerts/throttling/*` and `/alerts/gateway/test` | Satisfied | Endpoints in `api/main.py`, tested in `tests/test_api.py` |
+| AC-5: Operator CLI commands `throttle-stats` and `test-gateway` | Satisfied | Commands in `cli.py`, tested in `tests/test_cli.py` |
+| AC-6: Streamlit dashboard notification throttling indicator | Satisfied | Sidebar expander in `dashboard.py`, tested in `test_dashboard.py` |
+| AC-7: 100% green CI parity locally and remotely | Satisfied | 1,273 tests passing locally, run `42602081470` green on PR #32 |
+
 |---|---|---|
 | AC-1 Notification throttling & deduplication | Pending | |
 | AC-2 Continuous firing escalation tiers | Pending | |

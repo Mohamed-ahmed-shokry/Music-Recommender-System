@@ -47,7 +47,7 @@ Enhance operational alerting resilience and prevent notification storms by imple
 - [x] AC-4: FastAPI endpoints `GET /alerts/throttling/stats`, `POST /alerts/throttling/reset`, and `POST /alerts/gateway/test` respond with valid schemas.
 - [x] AC-5: Operator CLI commands `throttle-stats` and `test-gateway` operate cleanly in table and JSON formats.
 - [x] AC-6: Streamlit dashboard sidebar surfaces notification throttling indicators.
-- [ ] AC-7: All local CI-parity checks and remote CI workflow runs pass 100%.
+- [x] AC-7: All local CI-parity checks and remote CI workflow runs pass 100%.
 
 ### 4. Validation & CI Plan
 - `uv run ruff format --check .`
@@ -78,7 +78,7 @@ Enhance operational alerting resilience and prevent notification storms by imple
 - [x] Task 15: Add dashboard tests in `tests/test_dashboard.py`.
 - [x] Task 16: Update `README.md` and `CHANGELOG.md` with 0.38.0 documentation.
 - [x] Task 17: Bump package version to `0.38.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
-- [ ] Task 18: Verify local CI parity, push to remote, monitor CI to 100% green.
+- [x] Task 18: Verify local CI parity, push to remote, monitor CI to 100% green.
 - [ ] Task 18: CI parity verification, push, open draft PR, monitor remote CI to green.
 
 ---
