@@ -2092,7 +2092,11 @@ class MultiChannelDispatcher:
             target_channels.update(channels)
         elif escalation_events:
             for ev in escalation_events:
-                target_channels.update(ev.channels)
+                for ch in ev.channels:
+                    if ch == "default":
+                        target_channels.update(self._channels.keys())
+                    else:
+                        target_channels.add(ch)
         else:
             target_channels.update(self._channels.keys())
 

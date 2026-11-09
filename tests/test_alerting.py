@@ -7,6 +7,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -1485,3 +1486,160 @@ def test_escalation_disabled_and_reset() -> None:
     engine.reset()
     assert len(engine.get_history()) == 0
     assert engine.get_active_firing_durations() == {}
+
+
+def test_pagerduty_gateway_firing_and_resolve() -> None:
+    from music_recommender.alerting import AlertTransition, PagerDutyGateway
+
+    sent_requests: list[dict[str, Any]] = []
+
+    def mock_sender(
+        url: str,
+        body: bytes,
+        headers: dict[str, str],
+        timeout: float,
+        method: str,
+    ) -> tuple[int, str]:
+        sent_requests.append(
+            {
+                "url": url,
+                "body": json.loads(body.decode("utf-8")),
+                "headers": headers,
+                "method": method,
+            }
+        )
+        return 202, '{"status": "success", "message": "Event processed"}'
+
+    gateway = PagerDutyGateway(
+        routing_key="test-key-123",
+        endpoint_url="https://events.pagerduty.com/v2/enqueue",
+        sender=mock_sender,
+    )
+
+    rule = _rule(name="HighErrorRate", severity="critical")
+    t_firing = AlertTransition(
+        rule=rule, event="firing", value=15.0, timestamp="2026-11-09T10:00:00Z"
+    )
+
+    ok, status, resp = gateway.send(t_firing)
+    assert ok is True
+    assert status == 202
+    assert len(sent_requests) == 1
+    req = sent_requests[0]
+    assert req["body"]["event_action"] == "trigger"
+    assert req["body"]["routing_key"] == "test-key-123"
+    assert req["body"]["payload"]["severity"] == "critical"
+
+    # Now test resolve
+    t_resolved = AlertTransition(
+        rule=rule, event="resolved", value=0.0, timestamp="2026-11-09T10:05:00Z"
+    )
+    ok_res, status_res, _ = gateway.send(t_resolved)
+    assert ok_res is True
+    assert status_res == 202
+    assert sent_requests[1]["body"]["event_action"] == "resolve"
+
+
+def test_opsgenie_gateway_firing_and_close() -> None:
+    from music_recommender.alerting import AlertTransition, OpsgenieGateway
+
+    sent_requests: list[dict[str, Any]] = []
+
+    def mock_sender(
+        url: str,
+        body: bytes,
+        headers: dict[str, str],
+        timeout: float,
+        method: str,
+    ) -> tuple[int, str]:
+        sent_requests.append(
+            {
+                "url": url,
+                "body": json.loads(body.decode("utf-8")),
+                "headers": headers,
+                "method": method,
+            }
+        )
+        return 202, '{"result": "Request Will Be Processed"}'
+
+    gateway = OpsgenieGateway(
+        api_key="opsgenie-secret-key",
+        endpoint_url="https://api.opsgenie.com/v2/alerts",
+        sender=mock_sender,
+    )
+
+    rule = _rule(name="HighMemoryUsage", severity="critical")
+    t_firing = AlertTransition(
+        rule=rule, event="firing", value=92.5, timestamp="2026-11-09T10:00:00Z"
+    )
+
+    ok, status, _ = gateway.send(t_firing)
+    assert ok is True
+    assert status == 202
+    assert len(sent_requests) == 1
+    assert (
+        sent_requests[0]["headers"]["Authorization"] == "GenieKey opsgenie-secret-key"
+    )
+    assert sent_requests[0]["body"]["priority"] == "P1"
+
+    # Resolved transition sends close request
+    t_resolved = AlertTransition(
+        rule=rule, event="resolved", value=50.0, timestamp="2026-11-09T10:10:00Z"
+    )
+    ok_close, status_close, _ = gateway.send(t_resolved)
+    assert ok_close is True
+    assert status_close == 202
+    assert "close?identifierType=alias" in sent_requests[1]["url"]
+
+
+def test_multichannel_dispatcher_routing_and_throttling() -> None:
+    from music_recommender.alerting import (
+        AlertNotificationThrottler,
+        AlertThrottleConfig,
+        AlertTransition,
+        MultiChannelDispatcher,
+    )
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_channel(name: str) -> Any:
+        return lambda t: (calls.append((name, t.event)) or True, 200, "OK")
+
+    throttler = AlertNotificationThrottler(
+        AlertThrottleConfig(dedup_window_seconds=10.0, repeat_interval_seconds=15.0)
+    )
+    dispatcher = MultiChannelDispatcher(throttler=throttler)
+    dispatcher.register_channel("slack", fake_channel("slack"))
+    dispatcher.register_channel("pagerduty", fake_channel("pagerduty"))
+
+    rule = _rule(name="DiskFull")
+    t = AlertTransition(
+        rule=rule, event="firing", value=99.0, timestamp="2026-11-09T10:00:00Z"
+    )
+
+    # 1. Initial dispatch to all registered channels
+    res1 = dispatcher.dispatch(t, now=100.0)
+    assert res1["slack"][0] is True
+    assert res1["pagerduty"][0] is True
+    assert len(calls) == 2
+
+    # 2. Duplicate dispatch within dedup window is throttled
+    res2 = dispatcher.dispatch(t, now=105.0)
+    assert "throttled" in res2
+    assert res2["throttled"][0] is False
+    assert len(calls) == 2  # No extra calls made
+
+    # 3. Explicit channel targeting
+    calls.clear()
+    res3 = dispatcher.dispatch(t, channels=["slack"], now=120.0)
+    assert "slack" in res3
+    assert "pagerduty" not in res3
+    assert len(calls) == 1
+
+    # 4. Stats and reset
+    stats = dispatcher.get_stats()
+    assert stats["dispatch_count"] == 2
+    assert "slack" in stats["registered_channels"]
+
+    dispatcher.reset()
+    assert dispatcher.get_stats()["dispatch_count"] == 0
