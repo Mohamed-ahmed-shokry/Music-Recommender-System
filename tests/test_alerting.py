@@ -1366,3 +1366,122 @@ def test_throttler_stats_and_reset() -> None:
     assert clean_stats["total_evaluated"] == 0
     assert clean_stats["allowed_count"] == 0
     assert clean_stats["tracked_rules"] == 0
+
+
+def test_escalation_tier_and_policy_serialization() -> None:
+    from music_recommender.alerting import (
+        AlertEscalationPolicy,
+        AlertEscalationTier,
+    )
+
+    t1 = AlertEscalationTier(level=1, delay_seconds=0.0, channels=["slack"])
+    t2 = AlertEscalationTier(
+        level=2, delay_seconds=300.0, channels=["pagerduty", "email"], repeat=True
+    )
+    policy = AlertEscalationPolicy(name="database_p1", tiers=[t2, t1], enabled=True)
+
+    # Post init sorts tiers by delay
+    assert policy.tiers[0].level == 1
+    assert policy.tiers[1].level == 2
+
+    p_dict = policy.to_dict()
+    assert p_dict["name"] == "database_p1"
+    assert len(p_dict["tiers"]) == 2
+    assert p_dict["tiers"][0]["channels"] == ["slack"]
+
+    restored = AlertEscalationPolicy.from_dict(p_dict)
+    assert restored.name == policy.name
+    assert len(restored.tiers) == 2
+    assert restored.tiers[1].repeat is True
+
+
+def test_escalation_multi_tier_lifecycle() -> None:
+    from music_recommender.alerting import (
+        AlertEscalationEngine,
+        AlertEscalationPolicy,
+        AlertEscalationTier,
+        AlertTransition,
+    )
+
+    policy = AlertEscalationPolicy(
+        name="api_critical",
+        tiers=[
+            AlertEscalationTier(level=1, delay_seconds=0.0, channels=["slack"]),
+            AlertEscalationTier(level=2, delay_seconds=60.0, channels=["pagerduty"]),
+            AlertEscalationTier(
+                level=3, delay_seconds=180.0, channels=["opsgenie"], repeat=True
+            ),
+        ],
+    )
+    engine = AlertEscalationEngine()
+    engine.register_policy("ServiceDown", policy)
+
+    rule = _rule(name="ServiceDown")
+    firing_t = AlertTransition(rule=rule, event="firing", value=1.0, timestamp="T0")
+
+    # 1. At t=1000: Tier 1 triggers immediately
+    events = engine.evaluate_transition(firing_t, now=1000.0)
+    assert len(events) == 1
+    assert events[0].tier_level == 1
+    assert events[0].channels == ["slack"]
+
+    # 2. At t=1030 (30s elapsed): neither tier 2 (60s) nor tier 3 (180s) has triggered
+    events_30s = engine.evaluate_transition(firing_t, now=1030.0)
+    assert len(events_30s) == 0
+
+    # Active duration is 30s
+    durations = engine.get_active_firing_durations(now=1030.0)
+    assert durations["ServiceDown"] == 30.0
+
+    # 3. At t=1065 (65s elapsed): Tier 2 triggers
+    events_65s = engine.evaluate_transition(firing_t, now=1065.0)
+    assert len(events_65s) == 1
+    assert events_65s[0].tier_level == 2
+    assert events_65s[0].channels == ["pagerduty"]
+
+    # 4. At t=1080: Tier 2 already triggered, no new tier reached
+    assert len(engine.evaluate_transition(firing_t, now=1080.0)) == 0
+
+    # 5. At t=1200 (200s elapsed): Tier 3 triggers
+    events_200s = engine.evaluate_transition(firing_t, now=1200.0)
+    assert len(events_200s) == 1
+    assert events_200s[0].tier_level == 3
+    assert events_200s[0].channels == ["opsgenie"]
+
+    # Tier 3 has repeat=True: at t=1250, Tier 3 triggers again
+    events_repeat = engine.evaluate_transition(firing_t, now=1250.0)
+    assert len(events_repeat) == 1
+    assert events_repeat[0].tier_level == 3
+
+    # Escalation history records events
+    history = engine.get_history(limit=10)
+    assert len(history) == 4
+
+    # 6. Alert resolves
+    resolved_t = AlertTransition(
+        rule=rule, event="resolved", value=0.0, timestamp="T_res"
+    )
+    res_events = engine.evaluate_transition(resolved_t, now=1300.0)
+    assert len(res_events) == 0
+    assert engine.get_active_firing_durations(now=1300.0) == {}
+
+
+def test_escalation_disabled_and_reset() -> None:
+    from music_recommender.alerting import (
+        AlertEscalationEngine,
+        AlertEscalationPolicy,
+        AlertTransition,
+    )
+
+    policy = AlertEscalationPolicy(name="disabled_p", enabled=False)
+    engine = AlertEscalationEngine()
+    engine.register_policy("IgnoredRule", policy)
+
+    rule = _rule(name="IgnoredRule")
+    t = AlertTransition(rule=rule, event="firing", value=1.0, timestamp="T")
+    assert len(engine.evaluate_transition(t, now=100.0)) == 0
+
+    # Reset clears policies and history
+    engine.reset()
+    assert len(engine.get_history()) == 0
+    assert engine.get_active_firing_durations() == {}
