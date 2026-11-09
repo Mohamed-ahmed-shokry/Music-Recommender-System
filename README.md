@@ -1104,6 +1104,10 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
     uv run music-recommender rotate-alerts --max-backups 5 --max-age-days 30 # rotate logs & prune
     uv run music-recommender retry-dlq --dry-run        # simulate DLQ retry with backoff
     uv run music-recommender archive-alerts backup.tar.gz --format tar.gz    # export archive bundle
+    uv run music-recommender throttle-stats             # inspect notification rate-limiting & suppression
+    uv run music-recommender throttle-stats --reset     # reset alert throttling state
+    uv run music-recommender test-gateway pagerduty --routing-key $KEY # test PagerDuty integration
+    uv run music-recommender test-gateway opsgenie --api-key $KEY     # test Opsgenie integration
     ```
 
 5. **Alertmanager webhook ingestion & history buffer** — The API provides a webhook receiver at `POST /alerts/webhook` that parses standard Prometheus/Alertmanager v4 webhook payloads as well as internal transitions, recording them in a thread-safe in-memory ring buffer (default capacity 500 events). Query recent events at `GET /alerts/history` or inspect them in the Streamlit dashboard sidebar.
@@ -1111,6 +1115,8 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
 6. **Dead-Letter Queue (DLQ) & alert replay engine** — Malformed or unparseable alert webhook payloads are captured automatically into persistent dead-letter queue files (`alerts_dlq.jsonl`) with error context and headers, queryable via `GET /alerts/dlq` and `music-recommender alert-dlq`. Evicted alerts spill to `alerts_spillover.jsonl` without dropping incident history. Historical alert sequences can be replayed against local or staging endpoints via `POST /alerts/replay` or the `music-recommender replay-alerts` CLI command.
 
 7. **Storage size rotation, retention pruning & archive bundles** — Persistent spillover and DLQ files support automatic and on-demand size-capped rotation (`.1`, `.2`, etc.) and age-based retention pruning (`rotate-alerts`, `POST /alerts/rotate`). Failed notifications in the DLQ can be retried with exponential backoff (`retry-dlq`, `POST /alerts/dlq/retry`), and complete storage snapshots can be exported as compressed `.tar.gz` or `.zip` archive bundles (`archive-alerts`, `GET /alerts/archive`).
+
+8. **Notification throttling, escalation policies & incident gateways** — Sliding-window deduplication and rate limiting prevent notification storms during catastrophic failure cascades (`throttle-stats`, `GET /alerts/throttling/stats`, `POST /alerts/throttling/reset`). Multi-tier escalation policies route persistent unacknowledged alerts to elevated responder channels based on firing duration. Native PagerDuty Events API v2 and Opsgenie Alert API v2 gateways deliver rich incident context without vendor SDK dependencies (`test-gateway`, `POST /alerts/gateway/test`).
 
 ## API Reference
 
@@ -1143,6 +1149,9 @@ uv run uvicorn api.main:app --reload
 | `POST` | `/alerts/rotate?max_backups=5&max_age_days=30` | Trigger size-capped rotation and retention pruning |
 | `POST` | `/alerts/dlq/retry?max_retries=3&dry_run=false` | Retry dead-letter queue records with exponential backoff |
 | `GET` | `/alerts/archive?format=tar.gz` | Download compressed snapshot archive bundle of alert storage |
+| `GET` | `/alerts/throttling/stats` | Return notification rate-limiting and deduplication metrics |
+| `POST` | `/alerts/throttling/reset` | Reset in-memory alert throttling state and suppression counters |
+| `POST` | `/alerts/gateway/test` | Test dispatching synthetic alert to PagerDuty, Opsgenie, or Webhook |
 | `POST` | `/alerts/replay?dry_run=false` | Replay serialized alert notification sequence into the service |
 | `GET` | `/alerts/correlation?limit=50&window_seconds=300` | Incident root-cause correlation analysis of active alert notifications |
 | `POST` | `/alerts/correlate` | Analyze an arbitrary batch of alert events and attribute root causes and symptoms |
