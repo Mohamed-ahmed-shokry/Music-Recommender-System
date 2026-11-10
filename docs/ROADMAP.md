@@ -1,3 +1,92 @@
+# Milestone 0.39.0 Roadmap — Phase 171 & 172
+
+## Phase 171 & 172: Automated Incident Remediation and Outbound Webhook Circuit Breaking (0.39.0)
+
+### 1. Objective
+Harden production operations with autonomous self-healing and fault-tolerant notification dispatch:
+1. An **Automated Incident Remediation Runner** (`IncidentRemediationRunner`, `RemediationRule`, `RemediationActionType`) that executes targeted self-healing operations (flushing queues, restarting workers, rotating logs, triggering bandit folds) when specific alert conditions fire, bounded by configurable cooldown windows and execution limits.
+2. An **Outbound Webhook Circuit Breaker** (`CircuitBreaker`, `CircuitBreakerConfig`, `CircuitBreakerState`) integrated into `WebhookDispatcher` and `MultiChannelDispatcher` to fail fast and shed traffic during downstream gateway outages, automatically probing and recovering when endpoints return to health.
+3. Full service integration in `RecommenderService`, REST endpoints (`/alerts/remediation/*`, `/alerts/circuit-breaker/stats`), operator CLI commands (`remediation-history`, `trigger-action`, `circuit-stats`), and Streamlit dashboard status indicators, releasing Milestone 0.39.0 with 100% green CI.
+
+### 2. Scope
+1. **Automated Incident Remediation Runner (`src/music_recommender/alerting.py`)**:
+   - `RemediationActionType`: enum defining supported self-healing actions (`FLUSH_FEEDBACK_QUEUE`, `RESTART_MAINTENANCE_WORKER`, `ROTATE_ALERT_STORAGE`, `PURGE_DLQ`, `TRIGGER_ONLINE_FOLD`, `CUSTOM_CALLBACK`).
+   - `RemediationRule`: rule configuration mapping alert rule name to remediation actions with `cooldown_seconds`, `max_attempts`, and `enabled` toggles.
+   - `RemediationActionResult`: record tracking execution status (`EXECUTED`, `COOLDOWN_SUPPRESSED`, `MAX_ATTEMPTS_EXCEEDED`, `FAILED`, `DRY_RUN`), output summary, error details, and timestamp.
+   - `IncidentRemediationRunner`: thread-safe runner maintaining rule registrations, action handlers, execution history, and cooldown state.
+2. **Outbound Webhook Circuit Breaker (`src/music_recommender/alerting.py`)**:
+   - `CircuitBreakerState`: enum (`CLOSED`, `OPEN`, `HALF_OPEN`).
+   - `CircuitBreakerConfig`: failure threshold, recovery timeout seconds, and half-open probe success threshold.
+   - `CircuitBreaker`: thread-safe state machine monitoring delivery outcomes, opening to fail fast upon threshold breaches, and transitioning through half-open back to closed.
+3. **Dispatcher Circuit Protection (`src/music_recommender/alerting.py`)**:
+   - Integrate circuit breaker into `WebhookDispatcher` and `MultiChannelDispatcher` to prevent thread pool exhaustion and cascading network latency.
+4. **Service Integration (`src/music_recommender/service.py`)**:
+   - Attach `IncidentRemediationRunner` with service handlers to `RecommenderService`.
+   - Provide `get_remediation_stats()`, `get_remediation_history()`, `trigger_remediation_action()`, and `get_circuit_breaker_stats()`.
+5. **FastAPI Endpoints (`api/main.py`)**:
+   - `GET /alerts/remediation/rules`: query active remediation rules.
+   - `GET /alerts/remediation/history`: inspect self-healing execution audit trail.
+   - `POST /alerts/remediation/trigger`: manually trigger an action with dry-run support.
+   - `GET /alerts/circuit-breaker/stats`: inspect circuit breaker status per channel.
+6. **Operator CLI Tooling (`src/music_recommender/cli.py`)**:
+   - `music-recommender remediation-history`: view automated remediation actions and results.
+   - `music-recommender trigger-action`: invoke a remediation action on demand.
+   - `music-recommender circuit-stats`: inspect circuit breaker health and trips.
+7. **Dashboard Visibility (`src/music_recommender/dashboard.py`)**:
+   - Surface self-healing remediation activity and circuit breaker indicators in sidebar.
+8. **Comprehensive Tests**:
+   - Unit tests in `tests/test_alerting.py` for remediation runner, action cooldowns, circuit breaker transitions, and protected dispatch.
+   - Integration tests in `tests/test_service.py` for service self-healing handlers.
+   - API integration tests in `tests/test_api.py`.
+   - CLI tests in `tests/test_cli.py`.
+   - Dashboard tests in `tests/test_dashboard.py`.
+9. **Documentation & Release 0.39.0**:
+   - Update `README.md`, `CHANGELOG.md`, `PLAN.md`, `docs/PROGRESS.md`.
+   - Bump version to `0.39.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+
+### 3. Acceptance Criteria
+- [ ] AC-1: `IncidentRemediationRunner` executes bound self-healing actions on alert firing, enforcing cooldowns and execution limits.
+- [ ] AC-2: `CircuitBreaker` correctly transitions across CLOSED, OPEN, and HALF_OPEN states based on delivery failures and recovery timeouts.
+- [ ] AC-3: `WebhookDispatcher` and `MultiChannelDispatcher` reject traffic immediately when circuit is OPEN without invoking network layer.
+- [ ] AC-4: `RecommenderService` binds core operational healing handlers (queue flush, worker restart, storage rotation, online fold).
+- [ ] AC-5: FastAPI endpoints `/alerts/remediation/*` and `/alerts/circuit-breaker/stats` return valid schema responses.
+- [ ] AC-6: Operator CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` operate cleanly in table and JSON formats.
+- [ ] AC-7: Streamlit dashboard sidebar surfaces self-healing activity and circuit breaker status.
+- [ ] AC-8: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Validation & CI Plan
+- `uv run ruff format --check .`
+- `uv run ruff check .`
+- `uv run mypy`
+- `uv run --extra dashboard --extra tracking --extra spotify pytest -q`
+- `uv build`
+- Remote GitHub Actions CI on PR branch 100% green.
+
+### 5. Exclusions
+- Arbitrary shell script execution from remediation rules is excluded for security reasons; only statically registered typed Python handlers are permitted.
+
+### 6. Micro-Task Breakdown
+- [ ] Task 1: Define Phase 171 & 172 roadmap, update plan, and initialize progress record.
+- [ ] Task 2: Implement `RemediationActionType`, `RemediationRule`, `RemediationActionResult`, and `IncidentRemediationRunner` in `src/music_recommender/alerting.py`.
+- [ ] Task 3: Add unit tests for `IncidentRemediationRunner` in `tests/test_alerting.py`.
+- [ ] Task 4: Implement `CircuitBreakerState`, `CircuitBreakerConfig`, and `CircuitBreaker` in `src/music_recommender/alerting.py`.
+- [ ] Task 5: Add unit tests for `CircuitBreaker` in `tests/test_alerting.py`.
+- [ ] Task 6: Integrate circuit breaking into `WebhookDispatcher` and `MultiChannelDispatcher` in `src/music_recommender/alerting.py`.
+- [ ] Task 7: Add unit tests for circuit-breaker protected dispatching in `tests/test_alerting.py`.
+- [ ] Task 8: Integrate `IncidentRemediationRunner` into `RecommenderService` in `src/music_recommender/service.py`.
+- [ ] Task 9: Add service integration tests in `tests/test_service.py`.
+- [ ] Task 10: Implement endpoints `/alerts/remediation/rules`, `/alerts/remediation/history`, `/alerts/remediation/trigger`, `/alerts/circuit-breaker/stats` in `api/main.py`.
+- [ ] Task 11: Add API integration tests in `tests/test_api.py`.
+- [ ] Task 12: Implement CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` in `src/music_recommender/cli.py`.
+- [ ] Task 13: Add CLI tests in `tests/test_cli.py`.
+- [ ] Task 14: Add self-healing remediation and circuit-breaker status indicators to Streamlit sidebar in `src/music_recommender/dashboard.py`.
+- [ ] Task 15: Add dashboard tests in `tests/test_dashboard.py`.
+- [ ] Task 16: Update `README.md` and `CHANGELOG.md` with 0.39.0 documentation.
+- [ ] Task 17: Bump package version to `0.39.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [ ] Task 18: Verify local CI parity, push to remote, open draft PR, monitor remote CI to 100% green.
+
+---
+
 # Milestone 0.38.0 Roadmap — Phase 169 & 170
 
 ## Phase 169 & 170: Alert Notification Throttling, Escalation Policies, and Multi-Channel Incident Gateways (0.38.0)
