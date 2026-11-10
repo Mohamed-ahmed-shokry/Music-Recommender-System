@@ -1643,3 +1643,168 @@ def test_multichannel_dispatcher_routing_and_throttling() -> None:
 
     dispatcher.reset()
     assert dispatcher.get_stats()["dispatch_count"] == 0
+
+
+def test_remediation_rule_serialization() -> None:
+    from music_recommender.alerting import (
+        RemediationActionType,
+        RemediationRule,
+    )
+
+    rule = RemediationRule(
+        rule_name="StreamingQueueHighUtilization",
+        action_type=RemediationActionType.FLUSH_FEEDBACK_QUEUE,
+        cooldown_seconds=120.0,
+        max_attempts=2,
+        trigger_on_severity="critical",
+        parameters={"force": True},
+    )
+
+    data = rule.to_dict()
+    assert data["rule_name"] == "StreamingQueueHighUtilization"
+    assert data["action_type"] == "flush_feedback_queue"
+    assert data["cooldown_seconds"] == 120.0
+    assert data["trigger_on_severity"] == "critical"
+    assert data["parameters"] == {"force": True}
+
+    restored = RemediationRule.from_dict(data)
+    assert restored.rule_name == rule.rule_name
+    assert restored.action_type == rule.action_type
+    assert restored.cooldown_seconds == 120.0
+    assert restored.max_attempts == 2
+    assert restored.parameters == {"force": True}
+
+
+def test_remediation_runner_lifecycle_and_cooldown() -> None:
+    from music_recommender.alerting import (
+        AlertTransition,
+        IncidentRemediationRunner,
+        RemediationActionType,
+        RemediationExecutionStatus,
+        RemediationRule,
+    )
+
+    executed_calls: list[str] = []
+
+    def mock_flush(
+        transition: AlertTransition | None,
+        params: dict[str, Any],
+    ) -> tuple[bool, str, dict[str, Any]]:
+        name = transition.rule.name if transition else "manual"
+        executed_calls.append(name)
+        return True, "Queue flushed successfully", {"flushed_records": 42}
+
+    runner = IncidentRemediationRunner()
+    runner.register_handler(RemediationActionType.FLUSH_FEEDBACK_QUEUE, mock_flush)
+
+    rule = RemediationRule(
+        rule_name="StreamingQueueFull",
+        action_type=RemediationActionType.FLUSH_FEEDBACK_QUEUE,
+        cooldown_seconds=60.0,
+        max_attempts=2,
+    )
+    runner.register_rule(rule)
+
+    alert_rule = _rule(name="StreamingQueueFull", severity="critical")
+    t_firing = AlertTransition(
+        rule=alert_rule,
+        event="firing",
+        value=98.0,
+        timestamp="2026-11-10T10:00:00Z",
+    )
+
+    # 1. First trigger at t=100 -> executes successfully
+    results_1 = runner.handle_transition(t_firing, now=100.0)
+    assert len(results_1) == 1
+    assert results_1[0].status == RemediationExecutionStatus.EXECUTED
+    assert results_1[0].details["flushed_records"] == 42
+    assert len(executed_calls) == 1
+
+    # 2. Immediate second trigger at t=120 (< 60s cooldown) -> suppressed
+    results_2 = runner.handle_transition(t_firing, now=120.0)
+    assert len(results_2) == 1
+    assert results_2[0].status == RemediationExecutionStatus.COOLDOWN_SUPPRESSED
+    assert len(executed_calls) == 1  # No extra handler call
+
+    # 3. Third trigger at t=170 (> 60s cooldown) -> executes second time
+    results_3 = runner.handle_transition(t_firing, now=170.0)
+    assert len(results_3) == 1
+    assert results_3[0].status == RemediationExecutionStatus.EXECUTED
+    assert len(executed_calls) == 2
+
+    # 4. Fourth trigger at t=240 (> 60s cooldown, but max_attempts=2 exceeded)
+    results_4 = runner.handle_transition(t_firing, now=240.0)
+    assert len(results_4) == 1
+    assert results_4[0].status == RemediationExecutionStatus.MAX_ATTEMPTS_EXCEEDED
+    assert len(executed_calls) == 2
+
+    # 5. Alert resolves -> resets attempt counters for this rule
+    t_resolved = AlertTransition(
+        rule=alert_rule,
+        event="resolved",
+        value=10.0,
+        timestamp="2026-11-10T10:05:00Z",
+    )
+    res_resolved = runner.handle_transition(t_resolved, now=300.0)
+    assert len(res_resolved) == 0
+
+    # 6. Alert fires again at t=370 (> cooldown and attempts reset) -> executes
+    results_5 = runner.handle_transition(t_firing, now=370.0)
+    assert len(results_5) == 1
+    assert results_5[0].status == RemediationExecutionStatus.EXECUTED
+    assert len(executed_calls) == 3
+
+
+def test_remediation_runner_dry_run_and_manual_execute() -> None:
+    from music_recommender.alerting import (
+        AlertTransition,
+        IncidentRemediationRunner,
+        RemediationActionType,
+        RemediationExecutionStatus,
+        RemediationRule,
+    )
+
+    runner = IncidentRemediationRunner()
+    rule = RemediationRule(
+        rule_name="ServiceRestartReq",
+        action_type=RemediationActionType.RESTART_MAINTENANCE_WORKER,
+        cooldown_seconds=10.0,
+    )
+    runner.register_rule(rule)
+
+    alert_rule = _rule(name="ServiceRestartReq")
+    t = AlertTransition(rule=alert_rule, event="firing", value=1.0, timestamp="T")
+
+    # Missing handler -> FAILED
+    fail_res = runner.handle_transition(t, now=10.0)
+    assert fail_res[0].status == RemediationExecutionStatus.FAILED
+
+    # Register handler
+    called = []
+    runner.register_handler(
+        RemediationActionType.RESTART_MAINTENANCE_WORKER,
+        lambda tr, p: (called.append(p) or True, "Restarted", {"worker_id": 1}),
+    )
+
+    # Dry-run
+    dry_res = runner.handle_transition(t, now=25.0, dry_run=True)
+    assert dry_res[0].status == RemediationExecutionStatus.DRY_RUN
+    assert len(called) == 0
+
+    # Manual execute
+    man_res = runner.execute_action(
+        "ServiceRestartReq",
+        RemediationActionType.RESTART_MAINTENANCE_WORKER,
+        parameters={"worker": "test"},
+    )
+    assert man_res.status == RemediationExecutionStatus.EXECUTED
+    assert len(called) == 1
+
+    # Check stats and history
+    stats = runner.get_stats()
+    assert stats["total_runs"] == 3
+    assert stats["executed_count"] == 1
+    assert len(runner.get_rules()) == 1
+
+    runner.reset()
+    assert runner.get_stats()["total_runs"] == 0
