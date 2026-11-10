@@ -48,11 +48,11 @@
 
 | Command | Result |
 |---|---|
-| `uv run ruff format --check .` | Pending |
-| `uv run ruff check .` | Pending |
-| `uv run mypy` | Pending |
-| `uv run --extra dashboard --extra tracking --extra spotify pytest -q` | Pending |
-| `uv build` | Pending |
+| `uv run ruff format --check .` | Passed (65 files formatted) |
+| `uv run ruff check .` | Passed (All checks passed) |
+| `uv run mypy` | Passed (30 source files checked) |
+| `uv run --extra dashboard --extra tracking --extra spotify pytest -q` | Passed (1289 passed) |
+| `uv build` | Passed (built sdist and wheel) |
 
 ---
 

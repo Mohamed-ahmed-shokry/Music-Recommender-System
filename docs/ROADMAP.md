@@ -45,13 +45,13 @@ Harden production operations with autonomous self-healing and fault-tolerant not
    - Bump version to `0.39.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
 
 ### 3. Acceptance Criteria
-- [ ] AC-1: `IncidentRemediationRunner` executes bound self-healing actions on alert firing, enforcing cooldowns and execution limits.
-- [ ] AC-2: `CircuitBreaker` correctly transitions across CLOSED, OPEN, and HALF_OPEN states based on delivery failures and recovery timeouts.
-- [ ] AC-3: `WebhookDispatcher` and `MultiChannelDispatcher` reject traffic immediately when circuit is OPEN without invoking network layer.
-- [ ] AC-4: `RecommenderService` binds core operational healing handlers (queue flush, worker restart, storage rotation, online fold).
-- [ ] AC-5: FastAPI endpoints `/alerts/remediation/*` and `/alerts/circuit-breaker/stats` return valid schema responses.
-- [ ] AC-6: Operator CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` operate cleanly in table and JSON formats.
-- [ ] AC-7: Streamlit dashboard sidebar surfaces self-healing activity and circuit breaker status.
+- [x] AC-1: `IncidentRemediationRunner` executes bound self-healing actions on alert firing, enforcing cooldowns and execution limits.
+- [x] AC-2: `CircuitBreaker` correctly transitions across CLOSED, OPEN, and HALF_OPEN states based on delivery failures and recovery timeouts.
+- [x] AC-3: `WebhookDispatcher` and `MultiChannelDispatcher` reject traffic immediately when circuit is OPEN without invoking network layer.
+- [x] AC-4: `RecommenderService` binds core operational healing handlers (queue flush, worker restart, storage rotation, online fold).
+- [x] AC-5: FastAPI endpoints `/alerts/remediation/*` and `/alerts/circuit-breaker/stats` return valid schema responses.
+- [x] AC-6: Operator CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` operate cleanly in table and JSON formats.
+- [x] AC-7: Streamlit dashboard sidebar surfaces self-healing activity and circuit breaker status.
 - [ ] AC-8: All local CI-parity checks and remote CI workflow runs pass 100%.
 
 ### 4. Validation & CI Plan
@@ -66,23 +66,23 @@ Harden production operations with autonomous self-healing and fault-tolerant not
 - Arbitrary shell script execution from remediation rules is excluded for security reasons; only statically registered typed Python handlers are permitted.
 
 ### 6. Micro-Task Breakdown
-- [ ] Task 1: Define Phase 171 & 172 roadmap, update plan, and initialize progress record.
-- [ ] Task 2: Implement `RemediationActionType`, `RemediationRule`, `RemediationActionResult`, and `IncidentRemediationRunner` in `src/music_recommender/alerting.py`.
-- [ ] Task 3: Add unit tests for `IncidentRemediationRunner` in `tests/test_alerting.py`.
-- [ ] Task 4: Implement `CircuitBreakerState`, `CircuitBreakerConfig`, and `CircuitBreaker` in `src/music_recommender/alerting.py`.
-- [ ] Task 5: Add unit tests for `CircuitBreaker` in `tests/test_alerting.py`.
-- [ ] Task 6: Integrate circuit breaking into `WebhookDispatcher` and `MultiChannelDispatcher` in `src/music_recommender/alerting.py`.
-- [ ] Task 7: Add unit tests for circuit-breaker protected dispatching in `tests/test_alerting.py`.
-- [ ] Task 8: Integrate `IncidentRemediationRunner` into `RecommenderService` in `src/music_recommender/service.py`.
-- [ ] Task 9: Add service integration tests in `tests/test_service.py`.
-- [ ] Task 10: Implement endpoints `/alerts/remediation/rules`, `/alerts/remediation/history`, `/alerts/remediation/trigger`, `/alerts/circuit-breaker/stats` in `api/main.py`.
-- [ ] Task 11: Add API integration tests in `tests/test_api.py`.
-- [ ] Task 12: Implement CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` in `src/music_recommender/cli.py`.
-- [ ] Task 13: Add CLI tests in `tests/test_cli.py`.
-- [ ] Task 14: Add self-healing remediation and circuit-breaker status indicators to Streamlit sidebar in `src/music_recommender/dashboard.py`.
-- [ ] Task 15: Add dashboard tests in `tests/test_dashboard.py`.
-- [ ] Task 16: Update `README.md` and `CHANGELOG.md` with 0.39.0 documentation.
-- [ ] Task 17: Bump package version to `0.39.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [x] Task 1: Define Phase 171 & 172 roadmap, update plan, and initialize progress record.
+- [x] Task 2: Implement `RemediationActionType`, `RemediationRule`, `RemediationActionResult`, and `IncidentRemediationRunner` in `src/music_recommender/alerting.py`.
+- [x] Task 3: Add unit tests for `IncidentRemediationRunner` in `tests/test_alerting.py`.
+- [x] Task 4: Implement `CircuitBreakerState`, `CircuitBreakerConfig`, and `CircuitBreaker` in `src/music_recommender/alerting.py`.
+- [x] Task 5: Add unit tests for `CircuitBreaker` in `tests/test_alerting.py`.
+- [x] Task 6: Integrate circuit breaking into `WebhookDispatcher` and `MultiChannelDispatcher` in `src/music_recommender/alerting.py`.
+- [x] Task 7: Add unit tests for circuit-breaker protected dispatching in `tests/test_alerting.py`.
+- [x] Task 8: Integrate `IncidentRemediationRunner` into `RecommenderService` in `src/music_recommender/service.py`.
+- [x] Task 9: Add service integration tests in `tests/test_service.py`.
+- [x] Task 10: Implement endpoints `/alerts/remediation/rules`, `/alerts/remediation/history`, `/alerts/remediation/trigger`, `/alerts/circuit-breaker/stats` in `api/main.py`.
+- [x] Task 11: Add API integration tests in `tests/test_api.py`.
+- [x] Task 12: Implement CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` in `src/music_recommender/cli.py`.
+- [x] Task 13: Add CLI tests in `tests/test_cli.py`.
+- [x] Task 14: Add self-healing remediation and circuit-breaker status indicators to Streamlit sidebar in `src/music_recommender/dashboard.py`.
+- [x] Task 15: Add dashboard tests in `tests/test_dashboard.py`.
+- [x] Task 16: Update `README.md` and `CHANGELOG.md` with 0.39.0 documentation.
+- [x] Task 17: Bump package version to `0.39.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
 - [ ] Task 18: Verify local CI parity, push to remote, open draft PR, monitor remote CI to 100% green.
 
 ---
