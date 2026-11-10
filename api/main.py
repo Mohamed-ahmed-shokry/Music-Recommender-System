@@ -6,7 +6,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,10 +24,13 @@ from music_recommender.alerting import (
     AlertTransition,
     DeadLetterAlertRecord,
     DLQRetryPolicy,
+    IncidentRemediationRunner,
     MultiChannelDispatcher,
     OpsgenieGateway,
     PagerDutyGateway,
     ReceivedAlertEvent,
+    RemediationActionType,
+    RemediationRule,
     parse_alert_payload,
 )
 from music_recommender.bandit import (
@@ -66,6 +69,64 @@ _fallback_alert_history = AlertHistoryBuffer(spillover_storage=_fallback_storage
 _fallback_alert_throttler = AlertNotificationThrottler()
 _fallback_alert_multichannel_dispatcher = MultiChannelDispatcher(
     throttler=_fallback_alert_throttler
+)
+_fallback_remediation_runner = IncidentRemediationRunner()
+_fallback_remediation_runner.register_rule(
+    RemediationRule(
+        rule_name="StreamingQueueHighUtilization",
+        action_type=RemediationActionType.FLUSH_FEEDBACK_QUEUE,
+        cooldown_seconds=60.0,
+    )
+)
+_fallback_remediation_runner.register_rule(
+    RemediationRule(
+        rule_name="StreamingHealthDegraded",
+        action_type=RemediationActionType.RESTART_MAINTENANCE_WORKER,
+        cooldown_seconds=120.0,
+    )
+)
+_fallback_remediation_runner.register_rule(
+    RemediationRule(
+        rule_name="DeadLetterSpilloverHigh",
+        action_type=RemediationActionType.ROTATE_ALERT_STORAGE,
+        cooldown_seconds=300.0,
+    )
+)
+_fallback_remediation_runner.register_rule(
+    RemediationRule(
+        rule_name="AlertDeliveryFailureRateHigh",
+        action_type=RemediationActionType.TRIP_CIRCUIT_BREAKER,
+        cooldown_seconds=120.0,
+        parameters={"channel": "webhook"},
+    )
+)
+_fallback_remediation_runner.register_handler(
+    RemediationActionType.FLUSH_FEEDBACK_QUEUE,
+    lambda tr, params: (
+        True,
+        "Fallback flush feedback queue no-op",
+        {"flushed": False},
+    ),
+)
+_fallback_remediation_runner.register_handler(
+    RemediationActionType.RESTART_MAINTENANCE_WORKER,
+    lambda tr, params: (True, "Fallback restart worker no-op", {"restarted": False}),
+)
+_fallback_remediation_runner.register_handler(
+    RemediationActionType.ROTATE_ALERT_STORAGE,
+    lambda tr, params: (True, "Fallback rotate storage no-op", {"rotated": False}),
+)
+_fallback_remediation_runner.register_handler(
+    RemediationActionType.TRIGGER_ONLINE_FOLD,
+    lambda tr, params: (True, "Fallback online fold no-op", {"folded": False}),
+)
+_fallback_remediation_runner.register_handler(
+    RemediationActionType.TRIP_CIRCUIT_BREAKER,
+    lambda tr, params: (
+        True,
+        f"Fallback trip circuit breaker for {params.get('channel', 'webhook')}",
+        {"channel": params.get("channel", "webhook")},
+    ),
 )
 
 
@@ -702,6 +763,93 @@ def alert_gateway_test(payload: GatewayTestRequest) -> dict[str, object]:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Webhook delivery failed: {exc}",
         ) from exc
+
+
+class RemediationTriggerRequest(BaseModel):
+    """Payload to trigger an automated self-healing remediation action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rule_name: str = Field(
+        default="manual", description="Alert rule or trigger identifier"
+    )
+    action_type: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1)
+    ] = Field(..., description="Remediation action type")
+    parameters: dict[str, Any] = Field(
+        default_factory=dict, description="Action parameters"
+    )
+    dry_run: bool = Field(
+        default=False, description="Simulate action without side effects"
+    )
+
+
+@app.get("/alerts/remediation/rules")
+def alerts_remediation_rules() -> dict[str, object]:
+    """Return configured automated incident remediation rules."""
+    rules = (
+        service.get_remediation_rules()
+        if service is not None
+        else _fallback_remediation_runner.get_rules()
+    )
+    return {"rules": rules, "count": len(rules)}
+
+
+@app.get("/alerts/remediation/history")
+def alerts_remediation_history(
+    limit: Annotated[int, Query(ge=1, le=1000)] = 50,
+) -> dict[str, object]:
+    """Return execution history of self-healing remediation actions."""
+    history = (
+        service.get_remediation_history(limit=limit)
+        if service is not None
+        else _fallback_remediation_runner.get_history(limit=limit)
+    )
+    return {"history": history, "count": len(history)}
+
+
+@app.post("/alerts/remediation/trigger")
+def alerts_remediation_trigger(payload: RemediationTriggerRequest) -> dict[str, object]:
+    """Manually trigger a self-healing remediation action on demand."""
+    if service is not None:
+        result = service.trigger_remediation_action(
+            rule_name=payload.rule_name,
+            action_type=payload.action_type,
+            parameters=payload.parameters,
+            dry_run=payload.dry_run,
+        )
+    else:
+        res = _fallback_remediation_runner.execute_action(
+            rule_name=payload.rule_name,
+            action_type=payload.action_type,
+            parameters=payload.parameters,
+            dry_run=payload.dry_run,
+        )
+        result = res.to_dict()
+    return {"status": "ok", "result": result}
+
+
+@app.get("/alerts/circuit-breaker/stats")
+def alert_circuit_breaker_stats() -> dict[str, object]:
+    """Return health states and trip counters for outbound circuit breakers."""
+    cbs = (
+        service.get_circuit_breaker_stats()
+        if service is not None
+        else _fallback_alert_multichannel_dispatcher.get_stats().get(
+            "circuit_breakers", {}
+        )
+    )
+    return {"circuit_breakers": cbs}
+
+
+@app.post("/alerts/circuit-breaker/reset")
+def alert_circuit_breaker_reset() -> dict[str, object]:
+    """Reset all outbound circuit breakers back to CLOSED."""
+    if service is not None:
+        service.reset_circuit_breakers()
+    else:
+        _fallback_alert_multichannel_dispatcher.reset()
+    return {"status": "ok", "message": "Circuit breakers reset to CLOSED"}
 
 
 @app.post("/alerts/replay")
