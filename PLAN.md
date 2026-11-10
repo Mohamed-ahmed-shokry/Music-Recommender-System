@@ -3,7 +3,30 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.38.0) — in progress (branch `phase/169-alert-throttling-and-gateways`)
+## Current milestone (0.39.0) — in progress (branch `phase/171-remediation-and-circuit-breaker`)
+
+Automated Incident Remediation, Circuit Breaking, and Self-Healing Maintenance Triggers.
+The 0.38.0 release delivered sliding-window notification throttling, tiered escalation policies, and PagerDuty/Opsgenie gateways.
+This milestone introduces automated self-healing actions and outbound fault isolation:
+an automated incident remediation action runner (`IncidentRemediationRunner`, `RemediationRule`) that executes
+targeted healing operations (queue flushes, worker restarts, storage rotation, online folds) upon alert firing
+with cooldown protection and attempt budgets; an outbound webhook circuit breaker (`CircuitBreaker`, `CircuitBreakerConfig`)
+that protects external notification gateways during outages by shedding traffic and auto-recovering;
+FastAPI endpoints (`/alerts/remediation/*`, `/alerts/circuit-breaker/stats`), operator CLI commands (`remediation-history`,
+`trigger-action`, `circuit-stats`), and Streamlit dashboard visibility.
+
+- Phase 171 — Automated self-healing action runner for active firing alert remediation:
+  `RemediationActionType`, `RemediationRule`, `RemediationActionResult`, and `IncidentRemediationRunner` in `alerting.py`.
+- Phase 172 — Outbound webhook circuit breaking, adaptive rate regulation, and 0.39.0 release:
+  `CircuitBreakerState`, `CircuitBreakerConfig`, `CircuitBreaker`, dispatcher integration, service integration, API endpoints, CLI commands, dashboard indicators, clean CI.
+
+## Next milestone (0.40.0) — planned
+
+Alert Silencing, Maintenance Window Schedules, and Slack/Teams Webhook Adapters.
+- Phase 173 — Dynamic alert silencing rules and scheduled maintenance window suppression.
+- Phase 174 — Slack and Microsoft Teams rich card notification adapters.
+
+## Previous milestone (0.38.0) — shipped (branch `phase/169-alert-throttling-and-gateways`, PR #32)
 
 Alert Notification Throttling, Escalation Policies, and Multi-Channel Incident Gateways.
 The 0.37.0 release hardened persistent alert storage with size-capped log rotation, age retention, DLQ backoff retries, and archive bundles.
@@ -15,15 +38,9 @@ and Opsgenie Alert API v2 (`PagerDutyGateway`, `OpsgenieGateway`, `MultiChannelD
 and Streamlit dashboard visibility.
 
 - Phase 169 — Notification throttling, deduplication, and escalation engine:
-  `AlertThrottleConfig`, `AlertNotificationThrottler`, `AlertEscalationPolicy`, `AlertEscalationEngine` in `alerting.py`.
+  `AlertThrottleConfig`, `AlertNotificationThrottler`, `AlertEscalationPolicy`, `AlertEscalationEngine` in `alerting.py` (shipped). ✅
 - Phase 170 — Outbound PagerDuty & Opsgenie gateways, multi-channel dispatcher, and 0.38.0 release:
-  `PagerDutyGateway`, `OpsgenieGateway`, `MultiChannelDispatcher`, service & API integration, CLI commands, dashboard indicators, clean CI.
-
-## Next milestone (0.39.0) — planned
-
-Automated Incident Remediation, Circuit Breaking, and Self-Healing Maintenance Triggers.
-- Phase 171 — Automated self-healing action runner for active firing alert remediation.
-- Phase 172 — Outbound webhook circuit breaking and adaptive rate regulation.
+  `PagerDutyGateway`, `OpsgenieGateway`, `MultiChannelDispatcher`, service & API integration, CLI commands, dashboard indicators, clean CI (shipped). ✅
 
 ## Previous milestone (0.37.0) — shipped (branch `phase/167-alert-rotation-and-retention`, PR #31)
 

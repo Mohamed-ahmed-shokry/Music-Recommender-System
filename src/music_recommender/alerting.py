@@ -568,6 +568,90 @@ class AlertEscalationPolicy:
         )
 
 
+class RemediationActionType(StrEnum):
+    """Supported automated self-healing action types."""
+
+    FLUSH_FEEDBACK_QUEUE = "flush_feedback_queue"
+    RESTART_MAINTENANCE_WORKER = "restart_maintenance_worker"
+    ROTATE_ALERT_STORAGE = "rotate_alert_storage"
+    PURGE_DLQ = "purge_dlq"
+    TRIGGER_ONLINE_FOLD = "trigger_online_fold"
+    CUSTOM_CALLBACK = "custom_callback"
+
+
+class RemediationExecutionStatus(StrEnum):
+    """Result status of a remediation execution attempt."""
+
+    EXECUTED = "executed"
+    COOLDOWN_SUPPRESSED = "cooldown_suppressed"
+    MAX_ATTEMPTS_EXCEEDED = "max_attempts_exceeded"
+    FAILED = "failed"
+    DRY_RUN = "dry_run"
+
+
+@dataclass
+class RemediationRule:
+    """Configuration mapping an alert rule to an automated remediation action."""
+
+    rule_name: str
+    action_type: RemediationActionType | str
+    cooldown_seconds: float = 300.0
+    max_attempts: int = 3
+    enabled: bool = True
+    trigger_on_severity: AlertSeverity | str | None = None
+    parameters: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rule_name": self.rule_name,
+            "action_type": str(self.action_type),
+            "cooldown_seconds": self.cooldown_seconds,
+            "max_attempts": self.max_attempts,
+            "enabled": self.enabled,
+            "trigger_on_severity": (
+                str(self.trigger_on_severity) if self.trigger_on_severity else None
+            ),
+            "parameters": dict(self.parameters),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RemediationRule:
+        action = data.get("action_type", RemediationActionType.CUSTOM_CALLBACK)
+        return cls(
+            rule_name=str(data["rule_name"]),
+            action_type=str(action),
+            cooldown_seconds=float(data.get("cooldown_seconds", 300.0)),
+            max_attempts=int(data.get("max_attempts", 3)),
+            enabled=bool(data.get("enabled", True)),
+            trigger_on_severity=data.get("trigger_on_severity"),
+            parameters=dict(data.get("parameters", {})),
+        )
+
+
+@dataclass(frozen=True)
+class RemediationActionResult:
+    """Record of a single remediation execution attempt."""
+
+    rule_name: str
+    action_type: str
+    status: RemediationExecutionStatus
+    message: str
+    timestamp: str
+    duration_ms: float = 0.0
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rule_name": self.rule_name,
+            "action_type": self.action_type,
+            "status": str(self.status),
+            "message": self.message,
+            "timestamp": self.timestamp,
+            "duration_ms": self.duration_ms,
+            "details": dict(self.details),
+        }
+
+
 @dataclass
 class AlertLogRotationConfig:
     """Configuration for size-based rotation and age retention of alert logs."""
@@ -1831,6 +1915,292 @@ class AlertEscalationEngine:
             self._firing_start_times.clear()
             self._notified_tiers.clear()
             self._escalation_history.clear()
+
+
+RemediationHandler = Callable[
+    [AlertTransition | None, dict[str, Any]],
+    tuple[bool, str, dict[str, Any]],
+]
+
+
+class IncidentRemediationRunner:
+    """Automated self-healing runner executing targeted actions on alert triggers."""
+
+    def __init__(
+        self,
+        rules: list[RemediationRule] | None = None,
+        handlers: dict[str, RemediationHandler] | None = None,
+    ) -> None:
+        self._lock = threading.Lock()
+        self._rules: dict[str, list[RemediationRule]] = {}
+        for r in rules or []:
+            self.register_rule(r)
+        self._handlers: dict[str, RemediationHandler] = dict(handlers or {})
+        self._last_executed: dict[tuple[str, str], float] = {}
+        self._attempt_counts: dict[tuple[str, str], int] = {}
+        self._history: list[RemediationActionResult] = []
+
+    def register_rule(self, rule: RemediationRule) -> None:
+        """Register a remediation rule for an alert rule name."""
+        with self._lock:
+            self._rules.setdefault(rule.rule_name, []).append(rule)
+
+    def register_handler(
+        self,
+        action_type: RemediationActionType | str,
+        handler: RemediationHandler,
+    ) -> None:
+        """Register an execution callback handler for an action type."""
+        with self._lock:
+            self._handlers[str(action_type)] = handler
+
+    def handle_transition(
+        self,
+        transition: AlertTransition,
+        now: float | None = None,
+        dry_run: bool = False,
+    ) -> list[RemediationActionResult]:
+        """Evaluate an alert transition and execute any matching remediation rules."""
+        ts = now if now is not None else time.time()
+        rule_name = transition.rule.name
+        results: list[RemediationActionResult] = []
+
+        with self._lock:
+            if transition.is_resolved:
+                for key in list(self._attempt_counts.keys()):
+                    if key[0] == rule_name:
+                        self._attempt_counts[key] = 0
+                return results
+
+            if not transition.is_firing:
+                return results
+
+            matching_rules = self._rules.get(rule_name, [])
+            for rule in matching_rules:
+                if not rule.enabled:
+                    continue
+                if (
+                    rule.trigger_on_severity
+                    and str(rule.trigger_on_severity).lower()
+                    != str(transition.rule.severity).lower()
+                ):
+                    continue
+
+                act_type = str(rule.action_type)
+                key = (rule_name, act_type)
+                last_run = self._last_executed.get(key)
+                if last_run is not None and (ts - last_run) < rule.cooldown_seconds:
+                    res = RemediationActionResult(
+                        rule_name=rule_name,
+                        action_type=act_type,
+                        status=RemediationExecutionStatus.COOLDOWN_SUPPRESSED,
+                        message=(
+                            f"Action '{act_type}' suppressed by cooldown "
+                            f"({rule.cooldown_seconds}s)"
+                        ),
+                        timestamp=datetime.fromtimestamp(ts, tz=UTC).isoformat(),
+                    )
+                    results.append(res)
+                    self._history.append(res)
+                    continue
+
+                attempts = self._attempt_counts.get(key, 0)
+                if attempts >= rule.max_attempts:
+                    res = RemediationActionResult(
+                        rule_name=rule_name,
+                        action_type=act_type,
+                        status=RemediationExecutionStatus.MAX_ATTEMPTS_EXCEEDED,
+                        message=(
+                            f"Action '{act_type}' exceeded max attempts "
+                            f"({rule.max_attempts})"
+                        ),
+                        timestamp=datetime.fromtimestamp(ts, tz=UTC).isoformat(),
+                    )
+                    results.append(res)
+                    self._history.append(res)
+                    continue
+
+                handler = self._handlers.get(act_type)
+                if handler is None:
+                    res = RemediationActionResult(
+                        rule_name=rule_name,
+                        action_type=act_type,
+                        status=RemediationExecutionStatus.FAILED,
+                        message=f"No handler registered for action '{act_type}'",
+                        timestamp=datetime.fromtimestamp(ts, tz=UTC).isoformat(),
+                    )
+                    results.append(res)
+                    self._history.append(res)
+                    continue
+
+                if dry_run:
+                    res = RemediationActionResult(
+                        rule_name=rule_name,
+                        action_type=act_type,
+                        status=RemediationExecutionStatus.DRY_RUN,
+                        message=(f"Dry run: action '{act_type}' would be executed"),
+                        timestamp=datetime.fromtimestamp(ts, tz=UTC).isoformat(),
+                        details=dict(rule.parameters),
+                    )
+                    results.append(res)
+                    self._history.append(res)
+                    continue
+
+                t0 = time.perf_counter()
+                try:
+                    success, msg, details = handler(transition, rule.parameters)
+                    dur_ms = (time.perf_counter() - t0) * 1000.0
+                    status = (
+                        RemediationExecutionStatus.EXECUTED
+                        if success
+                        else RemediationExecutionStatus.FAILED
+                    )
+                    res = RemediationActionResult(
+                        rule_name=rule_name,
+                        action_type=act_type,
+                        status=status,
+                        message=msg,
+                        timestamp=datetime.fromtimestamp(ts, tz=UTC).isoformat(),
+                        duration_ms=dur_ms,
+                        details=details,
+                    )
+                except Exception as exc:
+                    dur_ms = (time.perf_counter() - t0) * 1000.0
+                    res = RemediationActionResult(
+                        rule_name=rule_name,
+                        action_type=act_type,
+                        status=RemediationExecutionStatus.FAILED,
+                        message=f"Handler exception: {exc}",
+                        timestamp=datetime.fromtimestamp(ts, tz=UTC).isoformat(),
+                        duration_ms=dur_ms,
+                    )
+
+                self._last_executed[key] = ts
+                self._attempt_counts[key] = attempts + 1
+                results.append(res)
+                self._history.append(res)
+
+        return results
+
+    def execute_action(
+        self,
+        rule_name: str,
+        action_type: str,
+        parameters: dict[str, Any] | None = None,
+        dry_run: bool = False,
+    ) -> RemediationActionResult:
+        """Trigger a remediation action manually on demand."""
+        ts = time.time()
+        iso_ts = datetime.fromtimestamp(ts, tz=UTC).isoformat()
+        params = parameters or {}
+
+        with self._lock:
+            handler = self._handlers.get(action_type)
+            if handler is None:
+                res = RemediationActionResult(
+                    rule_name=rule_name,
+                    action_type=action_type,
+                    status=RemediationExecutionStatus.FAILED,
+                    message=f"No handler registered for action '{action_type}'",
+                    timestamp=iso_ts,
+                )
+                self._history.append(res)
+                return res
+
+            if dry_run:
+                res = RemediationActionResult(
+                    rule_name=rule_name,
+                    action_type=action_type,
+                    status=RemediationExecutionStatus.DRY_RUN,
+                    message=f"Dry run: action '{action_type}' would be executed",
+                    timestamp=iso_ts,
+                    details=params,
+                )
+                self._history.append(res)
+                return res
+
+            t0 = time.perf_counter()
+            try:
+                success, msg, details = handler(None, params)
+                dur_ms = (time.perf_counter() - t0) * 1000.0
+                status = (
+                    RemediationExecutionStatus.EXECUTED
+                    if success
+                    else RemediationExecutionStatus.FAILED
+                )
+                res = RemediationActionResult(
+                    rule_name=rule_name,
+                    action_type=action_type,
+                    status=status,
+                    message=msg,
+                    timestamp=iso_ts,
+                    duration_ms=dur_ms,
+                    details=details,
+                )
+            except Exception as exc:
+                dur_ms = (time.perf_counter() - t0) * 1000.0
+                res = RemediationActionResult(
+                    rule_name=rule_name,
+                    action_type=action_type,
+                    status=RemediationExecutionStatus.FAILED,
+                    message=f"Handler exception: {exc}",
+                    timestamp=iso_ts,
+                    duration_ms=dur_ms,
+                )
+
+            key = (rule_name, action_type)
+            self._last_executed[key] = ts
+            self._attempt_counts[key] = self._attempt_counts.get(key, 0) + 1
+            self._history.append(res)
+            return res
+
+    def get_history(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return recent remediation execution history."""
+        with self._lock:
+            return [res.to_dict() for res in reversed(self._history[-limit:])]
+
+    def get_rules(self) -> list[dict[str, Any]]:
+        """Return all registered remediation rules."""
+        with self._lock:
+            flat_rules: list[dict[str, Any]] = []
+            for rule_list in self._rules.values():
+                for r in rule_list:
+                    flat_rules.append(r.to_dict())
+            return flat_rules
+
+    def get_stats(self) -> dict[str, Any]:
+        """Return remediation metrics and counts."""
+        with self._lock:
+            executed = sum(
+                1
+                for r in self._history
+                if r.status == RemediationExecutionStatus.EXECUTED
+            )
+            failed = sum(
+                1
+                for r in self._history
+                if r.status == RemediationExecutionStatus.FAILED
+            )
+            suppressed = sum(
+                1
+                for r in self._history
+                if r.status == RemediationExecutionStatus.COOLDOWN_SUPPRESSED
+            )
+            return {
+                "total_runs": len(self._history),
+                "executed_count": executed,
+                "failed_count": failed,
+                "suppressed_count": suppressed,
+                "registered_rules": sum(len(rl) for rl in self._rules.values()),
+                "registered_handlers": sorted(self._handlers.keys()),
+            }
+
+    def reset(self) -> None:
+        """Clear all execution tracking, cooldowns, and history."""
+        with self._lock:
+            self._last_executed.clear()
+            self._attempt_counts.clear()
+            self._history.clear()
 
 
 class WebhookDispatcher:
