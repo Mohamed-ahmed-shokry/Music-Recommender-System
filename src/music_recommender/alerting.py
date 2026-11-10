@@ -2327,9 +2327,7 @@ class CircuitBreaker:
             elif self._state == CircuitBreakerState.CLOSED:
                 self._consecutive_failures = 0
 
-    def record_failure(
-        self, reason: str = "", now: float | None = None
-    ) -> None:
+    def record_failure(self, reason: str = "", now: float | None = None) -> None:
         """Record an outbound delivery failure."""
         if not self.config.enabled:
             return
@@ -2400,6 +2398,7 @@ class WebhookDispatcher:
         timeout_seconds: float = 5.0,
         max_attempts: int = 3,
         backoff_seconds: float = 0.5,
+        circuit_breaker: CircuitBreaker | None = None,
         sender: Callable[[str, bytes, float], None] | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -2411,6 +2410,7 @@ class WebhookDispatcher:
         self.timeout_seconds = timeout_seconds
         self.max_attempts = max_attempts
         self.backoff_seconds = backoff_seconds
+        self.circuit_breaker = circuit_breaker
         self._sender = sender or _post_json
         self._sleep = sleep
 
@@ -2426,11 +2426,25 @@ class WebhookDispatcher:
         return delivered
 
     def _deliver(self, alert_name: str, body: bytes) -> bool:
+        if self.circuit_breaker is not None:
+            allowed, reason = self.circuit_breaker.allow_request()
+            if not allowed:
+                logger.warning(
+                    "Alert webhook delivery shed by circuit breaker for %s: %s",
+                    alert_name,
+                    reason,
+                )
+                return False
+
+        last_exc: Exception | None = None
         for attempt in range(1, self.max_attempts + 1):
             try:
                 self._sender(self.url, body, self.timeout_seconds)
+                if self.circuit_breaker is not None:
+                    self.circuit_breaker.record_success()
                 return True
             except Exception as exc:
+                last_exc = exc
                 logger.warning(
                     "Alert webhook delivery failed for %s (attempt %d/%d): %s",
                     alert_name,
@@ -2440,6 +2454,8 @@ class WebhookDispatcher:
                 )
                 if attempt < self.max_attempts:
                     self._sleep(self.backoff_seconds * 2 ** (attempt - 1))
+        if self.circuit_breaker is not None and last_exc is not None:
+            self.circuit_breaker.record_failure(str(last_exc))
         return False
 
 
@@ -2450,10 +2466,14 @@ def _post_json(url: str, body: bytes, timeout: float) -> None:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
-        status = getattr(response, "status", 200)
-        if status >= 400:
-            raise OSError(f"webhook responded with HTTP {status}")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+            status = getattr(response, "status", 200)
+            if status >= 400:
+                raise OSError(f"webhook responded with HTTP {status}")
+    except urllib.error.HTTPError as exc:
+        exc.close()
+        raise
 
 
 def _send_http_request(
@@ -2480,6 +2500,7 @@ def _send_http_request(
             if hasattr(exc, "read")
             else str(exc)
         )
+        exc.close()
         return int(exc.code), err_body
     except Exception as exc:
         return 0, str(exc)
@@ -2600,6 +2621,8 @@ class MultiChannelDispatcher:
         | None = None,
         throttler: AlertNotificationThrottler | None = None,
         escalation_engine: AlertEscalationEngine | None = None,
+        circuit_breakers: dict[str, CircuitBreaker] | None = None,
+        circuit_breaker_config: CircuitBreakerConfig | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._channels: dict[
@@ -2607,6 +2630,8 @@ class MultiChannelDispatcher:
         ] = dict(channels or {})
         self.throttler = throttler or AlertNotificationThrottler()
         self.escalation_engine = escalation_engine or AlertEscalationEngine()
+        self._circuit_breakers: dict[str, CircuitBreaker] = dict(circuit_breakers or {})
+        self._cb_config = circuit_breaker_config or CircuitBreakerConfig()
         self._dispatch_count: int = 0
         self._error_count: int = 0
 
@@ -2618,6 +2643,15 @@ class MultiChannelDispatcher:
         """Register a notification handler for a channel name."""
         with self._lock:
             self._channels[name] = handler
+
+    def get_circuit_breaker(self, channel: str) -> CircuitBreaker:
+        """Get or initialize the circuit breaker for a channel."""
+        with self._lock:
+            if channel not in self._circuit_breakers:
+                self._circuit_breakers[channel] = CircuitBreaker(
+                    name=channel, config=self._cb_config
+                )
+            return self._circuit_breakers[channel]
 
     def dispatch(
         self,
@@ -2665,13 +2699,26 @@ class MultiChannelDispatcher:
             if handler is None:
                 results[ch] = (False, 404, f"Unknown channel '{ch}'")
                 continue
+
+            cb = self.get_circuit_breaker(ch)
+            cb_allowed, cb_reason = cb.allow_request(now=now)
+            if not cb_allowed:
+                results[ch] = (False, 503, f"Circuit open: {cb_reason}")
+                with self._lock:
+                    self._error_count += 1
+                continue
+
             try:
                 ok, code, msg = handler(transition)
                 results[ch] = (ok, code, msg)
-                if not ok:
+                if ok:
+                    cb.record_success(now=now)
+                else:
+                    cb.record_failure(f"HTTP {code}: {msg}", now=now)
                     with self._lock:
                         self._error_count += 1
             except Exception as exc:
+                cb.record_failure(str(exc), now=now)
                 with self._lock:
                     self._error_count += 1
                 results[ch] = (False, 500, str(exc))
@@ -2689,6 +2736,10 @@ class MultiChannelDispatcher:
                 "active_firing_durations": (
                     self.escalation_engine.get_active_firing_durations()
                 ),
+                "circuit_breakers": {
+                    ch: cb.get_stats()
+                    for ch, cb in sorted(self._circuit_breakers.items())
+                },
             }
 
     def reset(self) -> None:
@@ -2698,6 +2749,8 @@ class MultiChannelDispatcher:
             self._error_count = 0
             self.throttler.reset()
             self.escalation_engine.reset()
+            for cb in self._circuit_breakers.values():
+                cb.reset()
 
 
 def _format_number(value: float) -> str:

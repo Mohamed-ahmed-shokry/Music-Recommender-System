@@ -279,6 +279,7 @@ def test_dispatcher_default_sender_posts_json_over_http() -> None:
     finally:
         server.shutdown()
         server.server_close()
+        thread.join(timeout=2.0)
     assert received[0][0] == "application/json"
     assert received[0][1]["alert"] == "HighThing"
 
@@ -302,6 +303,7 @@ def test_dispatcher_default_sender_reports_http_errors() -> None:
     finally:
         server.shutdown()
         server.server_close()
+        thread.join(timeout=2.0)
 
 
 # --- Prometheus rule file --------------------------------------------------
