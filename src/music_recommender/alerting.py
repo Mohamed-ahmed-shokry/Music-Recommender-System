@@ -652,6 +652,41 @@ class RemediationActionResult:
         }
 
 
+class CircuitBreakerState(StrEnum):
+    """Lifecycle state of an outbound circuit breaker."""
+
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+@dataclass
+class CircuitBreakerConfig:
+    """Configuration for outbound notification circuit breaker."""
+
+    failure_threshold: int = 5
+    recovery_timeout_seconds: float = 30.0
+    half_open_success_threshold: int = 2
+    enabled: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "failure_threshold": self.failure_threshold,
+            "recovery_timeout_seconds": self.recovery_timeout_seconds,
+            "half_open_success_threshold": self.half_open_success_threshold,
+            "enabled": self.enabled,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CircuitBreakerConfig:
+        return cls(
+            failure_threshold=int(data.get("failure_threshold", 5)),
+            recovery_timeout_seconds=float(data.get("recovery_timeout_seconds", 30.0)),
+            half_open_success_threshold=int(data.get("half_open_success_threshold", 2)),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
 @dataclass
 class AlertLogRotationConfig:
     """Configuration for size-based rotation and age retention of alert logs."""
@@ -2201,6 +2236,151 @@ class IncidentRemediationRunner:
             self._last_executed.clear()
             self._attempt_counts.clear()
             self._history.clear()
+
+
+class CircuitBreaker:
+    """Thread-safe circuit breaker protecting outbound notification dispatchers."""
+
+    def __init__(
+        self,
+        name: str = "default",
+        config: CircuitBreakerConfig | None = None,
+    ) -> None:
+        self.name = name
+        self.config = config or CircuitBreakerConfig()
+        self._lock = threading.Lock()
+        self._state: CircuitBreakerState = CircuitBreakerState.CLOSED
+        self._consecutive_failures: int = 0
+        self._consecutive_successes: int = 0
+        self._last_state_change: float = time.time()
+        self._total_trips: int = 0
+        self._total_rejected: int = 0
+        self._total_calls: int = 0
+
+    @property
+    def state(self) -> CircuitBreakerState:
+        with self._lock:
+            return self._state
+
+    def allow_request(self, now: float | None = None) -> tuple[bool, str]:
+        """Check whether an outbound call is allowed through the circuit breaker."""
+        if not self.config.enabled:
+            return True, "Circuit breaker disabled"
+
+        ts = now if now is not None else time.time()
+        with self._lock:
+            self._total_calls += 1
+
+            if self._state == CircuitBreakerState.CLOSED:
+                return True, "Circuit closed (healthy)"
+
+            if self._state == CircuitBreakerState.OPEN:
+                elapsed = ts - self._last_state_change
+                if elapsed >= self.config.recovery_timeout_seconds:
+                    self._state = CircuitBreakerState.HALF_OPEN
+                    self._consecutive_successes = 0
+                    self._last_state_change = ts
+                    logger.info(
+                        "Circuit breaker '%s' entering HALF_OPEN "
+                        "probe state after %.1fs",
+                        self.name,
+                        elapsed,
+                    )
+                    return True, "Circuit half-open: probing downstream recovery"
+
+                self._total_rejected += 1
+                remaining = max(0.0, self.config.recovery_timeout_seconds - elapsed)
+                return (
+                    False,
+                    (
+                        f"Circuit open: failing fast "
+                        f"({remaining:.1f}s cooldown remaining)"
+                    ),
+                )
+
+            # HALF_OPEN
+            return True, "Circuit half-open: probe request in flight"
+
+    def record_success(self) -> None:
+        """Record a successful outbound delivery."""
+        if not self.config.enabled:
+            return
+
+        with self._lock:
+            if self._state == CircuitBreakerState.HALF_OPEN:
+                self._consecutive_successes += 1
+                if (
+                    self._consecutive_successes
+                    >= self.config.half_open_success_threshold
+                ):
+                    self._state = CircuitBreakerState.CLOSED
+                    self._consecutive_failures = 0
+                    self._consecutive_successes = 0
+                    self._last_state_change = time.time()
+                    logger.info(
+                        "Circuit breaker '%s' recovered and CLOSED "
+                        "after %d consecutive successes",
+                        self.name,
+                        self.config.half_open_success_threshold,
+                    )
+            elif self._state == CircuitBreakerState.CLOSED:
+                self._consecutive_failures = 0
+
+    def record_failure(self, reason: str = "") -> None:
+        """Record an outbound delivery failure."""
+        if not self.config.enabled:
+            return
+
+        ts = time.time()
+        with self._lock:
+            if self._state == CircuitBreakerState.HALF_OPEN:
+                self._state = CircuitBreakerState.OPEN
+                self._last_state_change = ts
+                self._total_trips += 1
+                self._consecutive_successes = 0
+                logger.warning(
+                    "Circuit breaker '%s' probe failed: %s. Tripping back to OPEN.",
+                    self.name,
+                    reason,
+                )
+            elif self._state == CircuitBreakerState.CLOSED:
+                self._consecutive_failures += 1
+                if self._consecutive_failures >= self.config.failure_threshold:
+                    self._state = CircuitBreakerState.OPEN
+                    self._last_state_change = ts
+                    self._total_trips += 1
+                    logger.warning(
+                        "Circuit breaker '%s' tripped OPEN after "
+                        "%d consecutive failures (%s)",
+                        self.name,
+                        self._consecutive_failures,
+                        reason,
+                    )
+
+    def get_stats(self) -> dict[str, Any]:
+        """Return circuit breaker metrics and health status."""
+        with self._lock:
+            return {
+                "name": self.name,
+                "state": str(self._state),
+                "consecutive_failures": self._consecutive_failures,
+                "consecutive_successes": self._consecutive_successes,
+                "total_trips": self._total_trips,
+                "total_rejected": self._total_rejected,
+                "total_calls": self._total_calls,
+                "config": self.config.to_dict(),
+            }
+
+    def reset(self) -> None:
+        """Reset the circuit breaker back to initial CLOSED state."""
+        with self._lock:
+            self._state = CircuitBreakerState.CLOSED
+            self._consecutive_failures = 0
+            self._consecutive_successes = 0
+            self._total_trips = 0
+            self._total_rejected = 0
+            self._total_calls = 0
+            self._last_state_change = time.time()
 
 
 class WebhookDispatcher:
