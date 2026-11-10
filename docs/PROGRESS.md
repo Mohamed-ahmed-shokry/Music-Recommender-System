@@ -18,8 +18,8 @@
 | Task 3 | Unit tests for `IncidentRemediationRunner` in `tests/test_alerting.py` | Completed | `8abfa26` |
 | Task 4 | `CircuitBreakerState`, `CircuitBreakerConfig`, and `CircuitBreaker` in `alerting.py` | Completed | `efb6bf1` |
 | Task 5 | Unit tests for `CircuitBreaker` in `tests/test_alerting.py` | Completed | `27bdbec` |
-| Task 6 | Integrate circuit breaking into `WebhookDispatcher` and `MultiChannelDispatcher` in `alerting.py` | Pending | |
-| Task 7 | Unit tests for circuit-breaker protected dispatching in `tests/test_alerting.py` | Pending | |
+| Task 6 | Integrate circuit breaking into `WebhookDispatcher` and `MultiChannelDispatcher` in `alerting.py` | Completed | `7105b59` |
+| Task 7 | Unit tests for circuit-breaker protected dispatching in `tests/test_alerting.py` | Completed | `9157c3a` |
 | Task 8 | Integrate `IncidentRemediationRunner` into `RecommenderService` in `src/music_recommender/service.py` | Pending | |
 | Task 9 | Service integration tests in `tests/test_service.py` | Pending | |
 | Task 10 | Endpoints `/alerts/remediation/rules`, `/alerts/remediation/history`, `/alerts/remediation/trigger`, `/alerts/circuit-breaker/stats` in `api/main.py` | Pending | |
@@ -60,9 +60,9 @@
 
 | Criterion | Status | Evidence |
 |---|---|---|
-| AC-1: IncidentRemediationRunner with cooldown and attempt limits | Pending | |
-| AC-2: CircuitBreaker state transitions (CLOSED/OPEN/HALF_OPEN) | Pending | |
-| AC-3: Outbound dispatchers reject traffic when circuit is OPEN | Pending | |
+| AC-1: IncidentRemediationRunner with cooldown and attempt limits | Completed | `8abfa26` |
+| AC-2: CircuitBreaker state transitions (CLOSED/OPEN/HALF_OPEN) | Completed | `27bdbec` |
+| AC-3: Outbound dispatchers reject traffic when circuit is OPEN | Completed | `9157c3a` |
 | AC-4: RecommenderService self-healing handler integration | Pending | |
 | AC-5: FastAPI endpoints `/alerts/remediation/*` and `/alerts/circuit-breaker/stats` | Pending | |
 | AC-6: Operator CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` | Pending | |
