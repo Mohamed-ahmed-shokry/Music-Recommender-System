@@ -1808,3 +1808,115 @@ def test_remediation_runner_dry_run_and_manual_execute() -> None:
 
     runner.reset()
     assert runner.get_stats()["total_runs"] == 0
+
+
+def test_circuit_breaker_config_serialization() -> None:
+    from music_recommender.alerting import CircuitBreakerConfig
+
+    cfg = CircuitBreakerConfig(
+        failure_threshold=3,
+        recovery_timeout_seconds=45.0,
+        half_open_success_threshold=1,
+        enabled=True,
+    )
+    data = cfg.to_dict()
+    assert data["failure_threshold"] == 3
+    assert data["recovery_timeout_seconds"] == 45.0
+
+    restored = CircuitBreakerConfig.from_dict(data)
+    assert restored.failure_threshold == 3
+    assert restored.recovery_timeout_seconds == 45.0
+    assert restored.half_open_success_threshold == 1
+
+
+def test_circuit_breaker_state_transitions() -> None:
+    from music_recommender.alerting import (
+        CircuitBreaker,
+        CircuitBreakerConfig,
+        CircuitBreakerState,
+    )
+
+    cb = CircuitBreaker(
+        name="test_cb",
+        config=CircuitBreakerConfig(
+            failure_threshold=3,
+            recovery_timeout_seconds=20.0,
+            half_open_success_threshold=2,
+        ),
+    )
+
+    # 1. Initially CLOSED
+    assert cb.state == CircuitBreakerState.CLOSED
+    allowed, msg = cb.allow_request(now=100.0)
+    assert allowed is True
+    assert "healthy" in msg
+
+    # 2. Record 2 failures (< threshold 3) -> still CLOSED
+    cb.record_failure("error 1", now=100.0)
+    cb.record_failure("error 2", now=100.0)
+    assert cb.state == CircuitBreakerState.CLOSED
+
+    # 3. Third failure -> trips OPEN
+    cb.record_failure("error 3", now=100.0)
+    assert cb.state == CircuitBreakerState.OPEN
+    stats = cb.get_stats()
+    assert stats["total_trips"] == 1
+    assert stats["state"] == "open"
+
+    # 4. Request within recovery timeout (10s elapsed < 20s) -> rejected
+    allowed_blocked, block_msg = cb.allow_request(now=110.0)
+    assert allowed_blocked is False
+    assert "Circuit open" in block_msg
+    assert cb.get_stats()["total_rejected"] == 1
+
+    # 5. Request after recovery timeout (25s elapsed >= 20s) -> probe
+    allowed_probe, probe_msg = cb.allow_request(now=125.0)
+    assert allowed_probe is True
+    assert cb.state == CircuitBreakerState.HALF_OPEN
+    assert "half-open" in probe_msg.lower()
+
+    # 6. Probe failure -> trips back to OPEN
+    cb.record_failure("probe failed", now=125.0)
+    assert cb.state == CircuitBreakerState.OPEN
+    assert cb.get_stats()["total_trips"] == 2
+
+    # 7. Advance time again -> enters HALF_OPEN
+    allowed_probe2, _ = cb.allow_request(now=150.0)
+    assert allowed_probe2 is True
+    assert cb.state == CircuitBreakerState.HALF_OPEN
+
+    # 8. Record 2 consecutive successes -> closes circuit!
+    cb.record_success(now=150.0)
+    assert cb.state == CircuitBreakerState.HALF_OPEN
+    cb.record_success(now=151.0)
+    assert cb.state == CircuitBreakerState.CLOSED
+
+    # Healthy again
+    allowed_recovered, _ = cb.allow_request(now=155.0)
+    assert allowed_recovered is True
+
+
+def test_circuit_breaker_disabled_and_reset() -> None:
+    from music_recommender.alerting import (
+        CircuitBreaker,
+        CircuitBreakerConfig,
+        CircuitBreakerState,
+    )
+
+    cb = CircuitBreaker(config=CircuitBreakerConfig(enabled=False))
+    cb.record_failure("fail")
+    cb.record_failure("fail")
+    cb.record_failure("fail")
+    cb.record_failure("fail")
+    cb.record_failure("fail")
+    cb.record_failure("fail")
+    allowed, _ = cb.allow_request()
+    assert allowed is True
+
+    # Test reset
+    cb_active = CircuitBreaker(config=CircuitBreakerConfig(failure_threshold=1))
+    cb_active.record_failure("fail")
+    assert cb_active.state == CircuitBreakerState.OPEN
+    cb_active.reset()
+    assert cb_active.state == CircuitBreakerState.CLOSED
+    assert cb_active.get_stats()["total_trips"] == 0

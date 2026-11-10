@@ -2301,11 +2301,12 @@ class CircuitBreaker:
             # HALF_OPEN
             return True, "Circuit half-open: probe request in flight"
 
-    def record_success(self) -> None:
+    def record_success(self, now: float | None = None) -> None:
         """Record a successful outbound delivery."""
         if not self.config.enabled:
             return
 
+        ts = now if now is not None else time.time()
         with self._lock:
             if self._state == CircuitBreakerState.HALF_OPEN:
                 self._consecutive_successes += 1
@@ -2316,7 +2317,7 @@ class CircuitBreaker:
                     self._state = CircuitBreakerState.CLOSED
                     self._consecutive_failures = 0
                     self._consecutive_successes = 0
-                    self._last_state_change = time.time()
+                    self._last_state_change = ts
                     logger.info(
                         "Circuit breaker '%s' recovered and CLOSED "
                         "after %d consecutive successes",
@@ -2326,12 +2327,14 @@ class CircuitBreaker:
             elif self._state == CircuitBreakerState.CLOSED:
                 self._consecutive_failures = 0
 
-    def record_failure(self, reason: str = "") -> None:
+    def record_failure(
+        self, reason: str = "", now: float | None = None
+    ) -> None:
         """Record an outbound delivery failure."""
         if not self.config.enabled:
             return
 
-        ts = time.time()
+        ts = now if now is not None else time.time()
         with self._lock:
             if self._state == CircuitBreakerState.HALF_OPEN:
                 self._state = CircuitBreakerState.OPEN
