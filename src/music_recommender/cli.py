@@ -24,6 +24,7 @@ from music_recommender.alerting import (
     AlertSpilloverStorage,
     AlertTransition,
     DLQRetryPolicy,
+    IncidentRemediationRunner,
     OpsgenieGateway,
     PagerDutyGateway,
     WebhookDispatcher,
@@ -5250,17 +5251,28 @@ def trigger_action_cmd(
         typer.secho(f"Invalid JSON parameters: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
 
+    service: RecommenderService | None = None
     try:
         service = RecommenderService.from_artifacts()
-    except Exception:
-        service = RecommenderService()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable: %s", exc)
 
-    result = service.trigger_remediation_action(
-        rule_name=rule_name,
-        action_type=action_type,
-        parameters=params,
-        dry_run=dry_run,
-    )
+    if service is not None:
+        result = service.trigger_remediation_action(
+            rule_name=rule_name,
+            action_type=action_type,
+            parameters=params,
+            dry_run=dry_run,
+        )
+    else:
+        runner = IncidentRemediationRunner()
+        res = runner.execute_action(
+            rule_name=rule_name,
+            action_type=action_type,
+            parameters=params,
+            dry_run=dry_run,
+        )
+        result = res.to_dict()
 
     if json_output:
         typer.echo(json.dumps(result, indent=2))
@@ -5300,13 +5312,15 @@ def circuit_stats_cmd(
     ] = False,
 ) -> None:
     """Inspect or reset outbound webhook and gateway circuit breaker health."""
+    service: RecommenderService | None = None
     try:
         service = RecommenderService.from_artifacts()
-    except Exception:
-        service = RecommenderService()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable: %s", exc)
 
     if reset:
-        service.reset_circuit_breakers()
+        if service is not None:
+            service.reset_circuit_breakers()
         if json_output:
             typer.echo(
                 json.dumps({"status": "ok", "message": "Circuit breakers reset"})
@@ -5318,7 +5332,7 @@ def circuit_stats_cmd(
             )
         return
 
-    stats = service.get_circuit_breaker_stats()
+    stats = service.get_circuit_breaker_stats() if service is not None else {}
     if json_output:
         typer.echo(json.dumps(stats, indent=2))
         return
