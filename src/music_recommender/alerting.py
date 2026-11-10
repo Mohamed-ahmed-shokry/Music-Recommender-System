@@ -576,6 +576,7 @@ class RemediationActionType(StrEnum):
     ROTATE_ALERT_STORAGE = "rotate_alert_storage"
     PURGE_DLQ = "purge_dlq"
     TRIGGER_ONLINE_FOLD = "trigger_online_fold"
+    TRIP_CIRCUIT_BREAKER = "trip_circuit_breaker"
     CUSTOM_CALLBACK = "custom_callback"
 
 
@@ -2371,6 +2372,21 @@ class CircuitBreaker:
                 "total_calls": self._total_calls,
                 "config": self.config.to_dict(),
             }
+
+    def trip(self, reason: str = "", now: float | None = None) -> None:
+        """Manually trip the circuit breaker into OPEN state."""
+        ts = now if now is not None else time.time()
+        with self._lock:
+            self._state = CircuitBreakerState.OPEN
+            self._last_state_change = ts
+            self._total_trips += 1
+            self._consecutive_failures = self.config.failure_threshold
+            self._consecutive_successes = 0
+            logger.warning(
+                "Circuit breaker '%s' manually tripped OPEN (%s)",
+                self.name,
+                reason,
+            )
 
     def reset(self) -> None:
         """Reset the circuit breaker back to initial CLOSED state."""

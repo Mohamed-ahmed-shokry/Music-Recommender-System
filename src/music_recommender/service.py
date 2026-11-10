@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -20,10 +21,14 @@ from music_recommender.alerting import (
     AlertNotificationThrottler,
     AlertSpilloverStorage,
     AlertTransition,
+    CircuitBreakerConfig,
     DeadLetterAlertRecord,
     DLQRetryPolicy,
     DLQRetryReport,
+    IncidentRemediationRunner,
     MultiChannelDispatcher,
+    RemediationActionType,
+    RemediationRule,
     WebhookDispatcher,
 )
 from music_recommender.artifacts import RecommenderArtifact, load_artifact
@@ -172,6 +177,8 @@ class RecommenderService:
         alert_throttler: AlertNotificationThrottler | None = None,
         alert_escalation_engine: AlertEscalationEngine | None = None,
         alert_multichannel_dispatcher: MultiChannelDispatcher | None = None,
+        circuit_breaker_config: CircuitBreakerConfig | None = None,
+        alert_remediation_runner: IncidentRemediationRunner | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -471,12 +478,14 @@ class RecommenderService:
         self.alert_escalation_engine = (
             alert_escalation_engine or AlertEscalationEngine()
         )
+        self.circuit_breaker_config = circuit_breaker_config or CircuitBreakerConfig()
         if alert_multichannel_dispatcher is not None:
             self.alert_multichannel_dispatcher = alert_multichannel_dispatcher
         else:
             self.alert_multichannel_dispatcher = MultiChannelDispatcher(
                 throttler=self.alert_throttler,
                 escalation_engine=self.alert_escalation_engine,
+                circuit_breaker_config=self.circuit_breaker_config,
             )
             if self.alert_dispatcher is not None:
                 dispatcher = self.alert_dispatcher
@@ -488,6 +497,138 @@ class RecommenderService:
                         "Delivered",
                     ),
                 )
+
+        self.alert_remediation_runner = (
+            alert_remediation_runner or IncidentRemediationRunner()
+        )
+        self._register_default_remediation_handlers()
+
+    def _register_default_remediation_handlers(self) -> None:
+        """Register built-in self-healing remediation handlers and fallback rules."""
+
+        def _handle_flush_queue(
+            transition: AlertTransition | None,
+            params: dict[str, Any],
+        ) -> tuple[bool, str, dict[str, Any]]:
+            if self.feedback_queue is not None and not self.feedback_queue.is_closed:
+                timeout = float(params.get("timeout", 2.0))
+                self.feedback_queue.flush(timeout=timeout)
+                return (
+                    True,
+                    "Streaming feedback queue flushed successfully",
+                    {"flushed": True},
+                )
+            return (
+                True,
+                "Streaming feedback queue inactive; flush no-op",
+                {"flushed": False},
+            )
+
+        def _handle_restart_worker(
+            transition: AlertTransition | None,
+            params: dict[str, Any],
+        ) -> tuple[bool, str, dict[str, Any]]:
+            if self.feedback_queue is not None:
+                with contextlib.suppress(Exception):
+                    self.feedback_queue.close(timeout=1.0)
+                self.feedback_queue = StreamingFeedbackQueue(auto_start=True)
+                return (
+                    True,
+                    "Streaming feedback queue worker restarted",
+                    {"restarted": True},
+                )
+            return (
+                True,
+                "Streaming feedback queue inactive; restart no-op",
+                {"restarted": False},
+            )
+
+        def _handle_rotate_storage(
+            transition: AlertTransition | None,
+            params: dict[str, Any],
+        ) -> tuple[bool, str, dict[str, Any]]:
+            max_backups = params.get("max_backups")
+            res = self.rotate_alert_storage(
+                max_backups=int(max_backups) if max_backups is not None else None
+            )
+            return True, "Alert storage rotated successfully", {"storage_result": res}
+
+        def _handle_online_fold(
+            transition: AlertTransition | None,
+            params: dict[str, Any],
+        ) -> tuple[bool, str, dict[str, Any]]:
+            gamma = float(params.get("gamma", 1.0))
+            res = self.sweep_bandit_feedback(gamma=gamma)
+            return (
+                True,
+                "Online bandit feedback folded into state",
+                {"sweep_result": res},
+            )
+
+        def _handle_trip_circuit(
+            transition: AlertTransition | None,
+            params: dict[str, Any],
+        ) -> tuple[bool, str, dict[str, Any]]:
+            channel = str(params.get("channel", "webhook"))
+            reason = str(params.get("reason", "Automated incident remediation trip"))
+            cb = self.alert_multichannel_dispatcher.get_circuit_breaker(channel)
+            cb.trip(reason)
+            return (
+                True,
+                f"Circuit breaker tripped for channel '{channel}'",
+                {"channel": channel, "state": cb.state.value},
+            )
+
+        self.alert_remediation_runner.register_handler(
+            RemediationActionType.FLUSH_FEEDBACK_QUEUE, _handle_flush_queue
+        )
+        self.alert_remediation_runner.register_handler(
+            RemediationActionType.RESTART_MAINTENANCE_WORKER, _handle_restart_worker
+        )
+        self.alert_remediation_runner.register_handler(
+            RemediationActionType.ROTATE_ALERT_STORAGE, _handle_rotate_storage
+        )
+        self.alert_remediation_runner.register_handler(
+            RemediationActionType.TRIGGER_ONLINE_FOLD, _handle_online_fold
+        )
+        self.alert_remediation_runner.register_handler(
+            RemediationActionType.TRIP_CIRCUIT_BREAKER, _handle_trip_circuit
+        )
+
+        if not self.alert_remediation_runner.get_rules():
+            self.alert_remediation_runner.register_rule(
+                RemediationRule(
+                    rule_name="StreamingQueueHighUtilization",
+                    action_type=RemediationActionType.FLUSH_FEEDBACK_QUEUE,
+                    cooldown_seconds=60.0,
+                    max_attempts=3,
+                )
+            )
+            self.alert_remediation_runner.register_rule(
+                RemediationRule(
+                    rule_name="StreamingHealthDegraded",
+                    action_type=RemediationActionType.RESTART_MAINTENANCE_WORKER,
+                    cooldown_seconds=120.0,
+                    max_attempts=2,
+                )
+            )
+            self.alert_remediation_runner.register_rule(
+                RemediationRule(
+                    rule_name="DeadLetterSpilloverHigh",
+                    action_type=RemediationActionType.ROTATE_ALERT_STORAGE,
+                    cooldown_seconds=300.0,
+                    max_attempts=2,
+                )
+            )
+            self.alert_remediation_runner.register_rule(
+                RemediationRule(
+                    rule_name="AlertDeliveryFailureRateHigh",
+                    action_type=RemediationActionType.TRIP_CIRCUIT_BREAKER,
+                    cooldown_seconds=120.0,
+                    max_attempts=1,
+                    parameters={"channel": "webhook"},
+                )
+            )
 
     def _on_maintenance_policy_updated(self, new_policy: dict[str, float]) -> None:
         """Callback invoked by maintenance worker when a sweep derives a new policy."""
@@ -836,11 +977,20 @@ class RecommenderService:
             "off_policy_evaluation": ope_result,
         }
 
-    def evaluate_alerts(self, *, dispatch: bool = True) -> dict[str, Any]:
+    def evaluate_alerts(
+        self,
+        *,
+        dispatch: bool = True,
+        remediate: bool = True,
+        now: float | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
         """Evaluate alert rules on live metrics and notify on state changes.
 
         Firing/resolved transitions are POSTed to the configured webhook when
         ``dispatch`` is true; delivery failures are logged, never raised.
+        When ``remediate`` is true, matching automated self-healing remediation
+        rules are triggered for firing transitions.
         """
         from music_recommender.telemetry import collect_service_metric_families
 
@@ -850,6 +1000,16 @@ class RecommenderService:
         delivered = 0
         if dispatch and self.alert_dispatcher is not None and transitions:
             delivered = self.alert_dispatcher.dispatch(transitions)
+
+        remediations: list[dict[str, Any]] = []
+        if remediate and transitions:
+            for t in transitions:
+                action_results = self.alert_remediation_runner.handle_transition(
+                    t, now=now, dry_run=dry_run
+                )
+                for r in action_results:
+                    remediations.append(r.to_dict())
+
         alerts = self.alert_evaluator.states()
         return {
             "alerts": alerts,
@@ -857,6 +1017,7 @@ class RecommenderService:
             "transitions": [t.to_dict() for t in transitions],
             "webhook_configured": self.alert_dispatcher is not None,
             "notifications_delivered": delivered,
+            "remediations_triggered": remediations,
         }
 
     def alert_states(self) -> list[dict[str, Any]]:
@@ -1007,6 +1168,39 @@ class RecommenderService:
         return self.alert_multichannel_dispatcher.dispatch(
             transition, channels=channels
         )
+
+    def get_remediation_rules(self) -> list[dict[str, Any]]:
+        """Return all registered self-healing remediation rules."""
+        return self.alert_remediation_runner.get_rules()
+
+    def get_remediation_history(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return recently executed self-healing remediation actions."""
+        return self.alert_remediation_runner.get_history(limit=limit)
+
+    def trigger_remediation_action(
+        self,
+        rule_name: str,
+        action_type: str | RemediationActionType,
+        parameters: dict[str, Any] | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Trigger a remediation action on demand."""
+        res = self.alert_remediation_runner.execute_action(
+            rule_name=rule_name,
+            action_type=str(action_type),
+            parameters=parameters,
+            dry_run=dry_run,
+        )
+        return res.to_dict()
+
+    def get_circuit_breaker_stats(self) -> dict[str, Any]:
+        """Return current states and metrics for all outbound circuit breakers."""
+        cbs = self.alert_multichannel_dispatcher.get_stats().get("circuit_breakers", {})
+        return cast(dict[str, Any], cbs if isinstance(cbs, dict) else {})
+
+    def reset_circuit_breakers(self) -> None:
+        """Reset all circuit breakers to CLOSED state."""
+        self.alert_multichannel_dispatcher.reset()
 
     def export_prometheus_metrics(
         self,
