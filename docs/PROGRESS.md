@@ -28,8 +28,8 @@
 | Task 13 | CLI tests in `tests/test_cli.py` | Completed | `9d63048` |
 | Task 14 | Add self-healing remediation and circuit-breaker status indicators to Streamlit sidebar in `dashboard.py` | Completed | `b6bbc32` |
 | Task 15 | Dashboard tests in `tests/test_dashboard.py` | Completed | `69001cb` |
-| Task 16 | Documentation updates in `README.md` and `CHANGELOG.md` | Pending | |
-| Task 17 | Bump package version to `0.39.0` in `pyproject.toml`, run `uv lock`, and `uv build` | Pending | |
+| Task 16 | Documentation updates in `README.md` and `CHANGELOG.md` | Completed | `bd4f1d0` |
+| Task 17 | Bump package version to `0.39.0` in `pyproject.toml`, run `uv lock`, and `uv build` | Completed | `e6d3eda` |
 | Task 18 | Verify local CI parity, push to remote, open draft PR, monitor remote CI to green | Pending | |
 
 ---
