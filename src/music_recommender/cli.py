@@ -5160,5 +5160,192 @@ def alert_correlate(
     typer.echo("-" * 88)
 
 
+@app.command("remediation-history")
+def remediation_history_cmd(
+    limit: Annotated[
+        int,
+        typer.Option("--limit", "-l", help="Maximum execution entries to return."),
+    ] = 50,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output execution history as JSON."),
+    ] = False,
+) -> None:
+    """Inspect history of automated incident self-healing actions."""
+    history: list[dict[str, Any]] = []
+    try:
+        service = RecommenderService.from_artifacts()
+        if service is not None:
+            history = service.get_remediation_history(limit=limit)
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable for remediation history: %s", exc)
+
+    if json_output:
+        typer.echo(json.dumps(history, indent=2))
+        return
+
+    if not history:
+        typer.echo("No remediation actions have been recorded yet.")
+        return
+
+    typer.secho("=== Automated Remediation Execution History ===", bold=True)
+    for entry in history:
+        status_val = str(entry.get("status", "unknown"))
+        status_color = (
+            typer.colors.GREEN if status_val == "executed" else typer.colors.YELLOW
+        )
+        typer.secho(
+            f"[{entry.get('timestamp')}] {entry.get('rule_name')} -> "
+            f"{entry.get('action_type')}: {status_val}",
+            fg=status_color,
+            bold=True,
+        )
+        if entry.get("message"):
+            typer.echo(f"  Message:  {entry.get('message')}")
+        dur = entry.get("duration_ms")
+        if dur is not None:
+            typer.echo(f"  Duration: {float(dur):.2f}ms")
+
+
+@app.command("trigger-action")
+def trigger_action_cmd(
+    action_type: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Remediation action type (e.g. flush_feedback_queue, "
+                "rotate_alert_storage, trip_circuit_breaker)."
+            ),
+        ),
+    ],
+    rule_name: Annotated[
+        str,
+        typer.Option(
+            "--rule-name", "-r", help="Associated alert rule name or trigger label."
+        ),
+    ] = "manual",
+    parameters: Annotated[
+        str,
+        typer.Option(
+            "--parameters", "-p", help="JSON dictionary of parameters for the action."
+        ),
+    ] = "{}",
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run", help="Simulate action execution without applying side effects."
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output execution result as JSON."),
+    ] = False,
+) -> None:
+    """Trigger an automated self-healing remediation action on demand."""
+    try:
+        params = json.loads(parameters)
+        if not isinstance(params, dict):
+            raise ValueError("Parameters must be a JSON object.")
+    except Exception as exc:
+        typer.secho(f"Invalid JSON parameters: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception:
+        service = RecommenderService()
+
+    result = service.trigger_remediation_action(
+        rule_name=rule_name,
+        action_type=action_type,
+        parameters=params,
+        dry_run=dry_run,
+    )
+
+    if json_output:
+        typer.echo(json.dumps(result, indent=2))
+        return
+
+    status_val = str(result.get("status", "unknown"))
+    status_color = (
+        typer.colors.GREEN
+        if status_val in ("executed", "dry_run")
+        else typer.colors.RED
+    )
+    typer.secho(
+        f"Remediation Action Result: {status_val}",
+        fg=status_color,
+        bold=True,
+    )
+    typer.echo(f"Rule:     {result.get('rule_name')}")
+    typer.echo(f"Action:   {result.get('action_type')}")
+    typer.echo(f"Message:  {result.get('message')}")
+    dur = result.get("duration_ms")
+    if dur is not None:
+        typer.echo(f"Duration: {float(dur):.2f}ms")
+
+
+@app.command("circuit-stats")
+def circuit_stats_cmd(
+    reset: Annotated[
+        bool,
+        typer.Option(
+            "--reset",
+            help="Reset all outbound circuit breakers back to CLOSED state.",
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output circuit breaker stats as JSON."),
+    ] = False,
+) -> None:
+    """Inspect or reset outbound webhook and gateway circuit breaker health."""
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception:
+        service = RecommenderService()
+
+    if reset:
+        service.reset_circuit_breakers()
+        if json_output:
+            typer.echo(
+                json.dumps({"status": "ok", "message": "Circuit breakers reset"})
+            )
+        else:
+            typer.secho(
+                "All outbound circuit breakers reset to CLOSED.",
+                fg=typer.colors.GREEN,
+            )
+        return
+
+    stats = service.get_circuit_breaker_stats()
+    if json_output:
+        typer.echo(json.dumps(stats, indent=2))
+        return
+
+    if not stats:
+        typer.echo("No circuit breakers are currently registered.")
+        return
+
+    typer.secho("=== Outbound Circuit Breaker Health ===", bold=True)
+    for channel, cb in sorted(stats.items()):
+        state = str(cb.get("state", "closed"))
+        state_color = (
+            typer.colors.GREEN
+            if state == "closed"
+            else (typer.colors.YELLOW if state == "half_open" else typer.colors.RED)
+        )
+        typer.secho(
+            f"Channel: {channel} | State: {state.upper()}",
+            fg=state_color,
+            bold=True,
+        )
+        typer.echo(f"  Failures (consecutive): {cb.get('consecutive_failures', 0)}")
+        typer.echo(f"  Successes (consecutive): {cb.get('consecutive_successes', 0)}")
+        typer.echo(f"  Total Trips:            {cb.get('total_trips', 0)}")
+        typer.echo(f"  Total Rejected:         {cb.get('total_rejected', 0)}")
+        typer.echo(f"  Total Calls:            {cb.get('total_calls', 0)}")
+
+
 if __name__ == "__main__":
     app()  # pragma: no cover - CLI entry point invoked by `python -m`
