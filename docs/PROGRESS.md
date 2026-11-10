@@ -14,8 +14,8 @@
 | Task ID | Task Description | Status | Commit |
 |---|---|---|---|
 | Task 1 | Roadmap, Plan & Progress initialization | Completed | `4f33396`, `9346be1` |
-| Task 2 | `RemediationActionType`, `RemediationRule`, `RemediationActionResult`, and `IncidentRemediationRunner` in `alerting.py` | Pending | |
-| Task 3 | Unit tests for `IncidentRemediationRunner` in `tests/test_alerting.py` | Pending | |
+| Task 2 | `RemediationActionType`, `RemediationRule`, `RemediationActionResult`, and `IncidentRemediationRunner` in `alerting.py` | Completed | `60d09de` |
+| Task 3 | Unit tests for `IncidentRemediationRunner` in `tests/test_alerting.py` | Completed | `8abfa26` |
 | Task 4 | `CircuitBreakerState`, `CircuitBreakerConfig`, and `CircuitBreaker` in `alerting.py` | Pending | |
 | Task 5 | Unit tests for `CircuitBreaker` in `tests/test_alerting.py` | Pending | |
 | Task 6 | Integrate circuit breaking into `WebhookDispatcher` and `MultiChannelDispatcher` in `alerting.py` | Pending | |
