@@ -1108,6 +1108,10 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
     uv run music-recommender throttle-stats --reset     # reset alert throttling state
     uv run music-recommender test-gateway pagerduty --routing-key $KEY # test PagerDuty integration
     uv run music-recommender test-gateway opsgenie --api-key $KEY     # test Opsgenie integration
+    uv run music-recommender remediation-history        # inspect automated self-healing actions
+    uv run music-recommender trigger-action flush_feedback_queue --dry-run # preview self-healing execution
+    uv run music-recommender circuit-stats              # inspect outbound circuit breaker states
+    uv run music-recommender circuit-stats --reset      # reset circuit breakers to CLOSED
     ```
 
 5. **Alertmanager webhook ingestion & history buffer** — The API provides a webhook receiver at `POST /alerts/webhook` that parses standard Prometheus/Alertmanager v4 webhook payloads as well as internal transitions, recording them in a thread-safe in-memory ring buffer (default capacity 500 events). Query recent events at `GET /alerts/history` or inspect them in the Streamlit dashboard sidebar.
@@ -1117,6 +1121,8 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
 7. **Storage size rotation, retention pruning & archive bundles** — Persistent spillover and DLQ files support automatic and on-demand size-capped rotation (`.1`, `.2`, etc.) and age-based retention pruning (`rotate-alerts`, `POST /alerts/rotate`). Failed notifications in the DLQ can be retried with exponential backoff (`retry-dlq`, `POST /alerts/dlq/retry`), and complete storage snapshots can be exported as compressed `.tar.gz` or `.zip` archive bundles (`archive-alerts`, `GET /alerts/archive`).
 
 8. **Notification throttling, escalation policies & incident gateways** — Sliding-window deduplication and rate limiting prevent notification storms during catastrophic failure cascades (`throttle-stats`, `GET /alerts/throttling/stats`, `POST /alerts/throttling/reset`). Multi-tier escalation policies route persistent unacknowledged alerts to elevated responder channels based on firing duration. Native PagerDuty Events API v2 and Opsgenie Alert API v2 gateways deliver rich incident context without vendor SDK dependencies (`test-gateway`, `POST /alerts/gateway/test`).
+
+9. **Automated Incident Remediation & Outbound Circuit Breaking** — Self-healing runner executes targeted remediation actions (`remediation-history`, `trigger-action`, `GET /alerts/remediation/rules`, `POST /alerts/remediation/trigger`) upon alert triggers with cooldown suppression, attempt bounding, and execution profiling. Resilient three-state circuit breakers (`circuit-stats`, `GET /alerts/circuit-breaker/stats`, `POST /alerts/circuit-breaker/reset`) guard outbound webhook and gateway calls, failing fast without thread or socket exhaustion during remote provider degradation.
 
 ## API Reference
 
@@ -1155,6 +1161,11 @@ uv run uvicorn api.main:app --reload
 | `POST` | `/alerts/replay?dry_run=false` | Replay serialized alert notification sequence into the service |
 | `GET` | `/alerts/correlation?limit=50&window_seconds=300` | Incident root-cause correlation analysis of active alert notifications |
 | `POST` | `/alerts/correlate` | Analyze an arbitrary batch of alert events and attribute root causes and symptoms |
+| `GET` | `/alerts/remediation/rules` | Inspect configured automated self-healing remediation rules |
+| `GET` | `/alerts/remediation/history?limit=50` | Query executed self-healing remediation actions |
+| `POST` | `/alerts/remediation/trigger` | Trigger a self-healing action on demand with optional dry-run |
+| `GET` | `/alerts/circuit-breaker/stats` | Inspect health states and trip counters for outbound circuit breakers |
+| `POST` | `/alerts/circuit-breaker/reset` | Reset all outbound circuit breakers back to CLOSED |
 | `GET` | `/metadata` | Training config, dataset fingerprint, artifact metadata |
 | `GET` | `/evaluation/ablation-summary` | Persisted aggregated knob-importance summary |
 | `GET` | `/catalog/artists?query=pop&limit=25` | Search and page through artists and metadata |

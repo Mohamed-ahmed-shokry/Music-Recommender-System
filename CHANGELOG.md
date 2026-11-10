@@ -5,6 +5,26 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.39.0] - 2026-11-10
+
+### Added
+
+- **Automated Incident Remediation & Self-Healing Actions (Phase 171):**
+  - Thread-safe `IncidentRemediationRunner` executing targeted self-healing operations (`RemediationRule`) upon alert transition triggers with per-action cooldown suppression, max attempt bounds, and execution duration profiling.
+  - Built-in action types `RemediationActionType` (`flush_feedback_queue`, `restart_maintenance_worker`, `rotate_alert_storage`, `purge_dlq`, `trigger_online_fold`, `trip_circuit_breaker`, and `custom_callback`).
+  - Integration into `RecommenderService.evaluate_alerts(remediate=True)` with default self-healing handlers and rules for high queue utilization, degraded worker health, dead-letter storage, and delivery failure rates.
+  - FastAPI endpoints `GET /alerts/remediation/rules`, `GET /alerts/remediation/history`, and `POST /alerts/remediation/trigger` (with dry-run simulation support).
+  - Operator CLI commands `music-recommender remediation-history` and `music-recommender trigger-action`.
+  - Streamlit dashboard sidebar section displaying recent automated self-healing actions.
+
+- **Outbound Webhook & Gateway Circuit Breaking (Phase 172):**
+  - Robust three-state machine `CircuitBreaker` (`CLOSED`, `OPEN`, `HALF_OPEN`) with configurable failure thresholds, recovery timeout windows, and half-open probe success counts (`CircuitBreakerConfig`).
+  - Native protection in `WebhookDispatcher` and `MultiChannelDispatcher` failing fast (HTTP 503) without network exhaustion when downstream gateways or webhooks are degraded.
+  - Manual override capability via `CircuitBreaker.trip()` and `reset()`.
+  - FastAPI endpoints `GET /alerts/circuit-breaker/stats` and `POST /alerts/circuit-breaker/reset`.
+  - Operator CLI command `music-recommender circuit-stats` with `--reset` and `--json` support.
+  - Streamlit dashboard sidebar real-time status badges and trip counters for all outbound circuit breakers.
+
 ## [0.38.0] - 2026-11-09
 
 ### Added
