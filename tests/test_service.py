@@ -6,7 +6,12 @@ import pandas as pd
 import pytest
 
 import music_recommender.service as service_module
-from music_recommender.alerting import AlertEvaluator, AlertRule, WebhookDispatcher
+from music_recommender.alerting import (
+    AlertEvaluator,
+    AlertRule,
+    AlertTransition,
+    WebhookDispatcher,
+)
 from music_recommender.artifacts import (
     build_artist_stats,
     build_recommender_artifact,
@@ -2399,3 +2404,66 @@ def test_service_alert_throttling_and_multichannel(tmp_path: Path) -> None:
 
     service.reset_alert_throttling()
     assert service.get_alert_throttling_stats()["total_evaluated"] == 0
+
+
+def test_service_remediation_default_rules_and_manual_trigger(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    rules = service.get_remediation_rules()
+    rule_names = {r["rule_name"] for r in rules}
+    assert "StreamingQueueHighUtilization" in rule_names
+    assert "StreamingHealthDegraded" in rule_names
+    assert "DeadLetterSpilloverHigh" in rule_names
+    assert "AlertDeliveryFailureRateHigh" in rule_names
+
+    res = service.trigger_remediation_action(
+        rule_name="manual-flush",
+        action_type="flush_feedback_queue",
+    )
+    assert res["rule_name"] == "manual-flush"
+    assert res["action_type"] == "flush_feedback_queue"
+    assert res["status"] == "executed"
+
+    history = service.get_remediation_history()
+    assert len(history) == 1
+    assert history[0]["action_type"] == "flush_feedback_queue"
+
+
+def test_service_remediation_circuit_breaker_stats_and_reset(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    res = service.trigger_remediation_action(
+        rule_name="trip-breaker",
+        action_type="trip_circuit_breaker",
+        parameters={"channel": "webhook", "reason": "simulated overload"},
+    )
+    assert res["status"] == "executed"
+
+    stats = service.get_circuit_breaker_stats()
+    assert "webhook" in stats
+    assert stats["webhook"]["state"] == "open"
+
+    service.reset_circuit_breakers()
+    stats_after = service.get_circuit_breaker_stats()
+    assert stats_after["webhook"]["state"] == "closed"
+
+
+def test_service_evaluate_alerts_triggers_remediation(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    # Manually pass a transition directly to alert_remediation_runner
+    rule = AlertRule(
+        name="StreamingQueueHighUtilization",
+        metric="streaming_queue_utilization",
+        comparator=">",
+        threshold=0.8,
+        severity="warning",
+        summary="Queue above 80%",
+    )
+    t = AlertTransition(
+        rule=rule,
+        event="firing",
+        value=0.9,
+        timestamp="2026-11-09T10:00:00Z",
+    )
+    results = service.alert_remediation_runner.handle_transition(t)
+    assert len(results) == 1
+    assert results[0].status == "executed"
+    assert results[0].action_type == "flush_feedback_queue"
