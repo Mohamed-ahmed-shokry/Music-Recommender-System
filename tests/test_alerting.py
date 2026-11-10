@@ -1922,3 +1922,119 @@ def test_circuit_breaker_disabled_and_reset() -> None:
     cb_active.reset()
     assert cb_active.state == CircuitBreakerState.CLOSED
     assert cb_active.get_stats()["total_trips"] == 0
+
+
+def test_webhook_dispatcher_with_circuit_breaker() -> None:
+    from music_recommender.alerting import (
+        CircuitBreaker,
+        CircuitBreakerConfig,
+        CircuitBreakerState,
+        WebhookDispatcher,
+    )
+
+    cb = CircuitBreaker(
+        name="test-webhook",
+        config=CircuitBreakerConfig(failure_threshold=2, recovery_timeout_seconds=30.0),
+    )
+    calls = []
+
+    def failing_sender(url: str, body: bytes, timeout: float) -> None:
+        calls.append(url)
+        raise ConnectionRefusedError("connection refused")
+
+    dispatcher = WebhookDispatcher(
+        url="http://test-webhook.internal/hook",
+        max_attempts=1,
+        circuit_breaker=cb,
+        sender=failing_sender,
+    )
+
+    # First dispatch fails and records failure
+    res1 = dispatcher.dispatch([_transition()])
+    assert res1 == 0
+    assert len(calls) == 1
+    assert cb.state == CircuitBreakerState.CLOSED
+
+    # Second dispatch fails and trips breaker
+    res2 = dispatcher.dispatch([_transition()])
+    assert res2 == 0
+    assert len(calls) == 2
+    assert cb.state == CircuitBreakerState.OPEN
+
+    # Third dispatch is shed fast by circuit breaker without calling failing_sender
+    res3 = dispatcher.dispatch([_transition()])
+    assert res3 == 0
+    assert len(calls) == 2  # sender was NOT called
+    assert cb.get_stats()["total_trips"] == 1
+
+
+def test_multichannel_dispatcher_circuit_breaker_isolation() -> None:
+    from music_recommender.alerting import (
+        AlertNotificationThrottler,
+        AlertThrottleConfig,
+        CircuitBreakerConfig,
+        CircuitBreakerState,
+        MultiChannelDispatcher,
+    )
+
+    pd_calls = 0
+    slack_calls = 0
+
+    def pd_handler(t: AlertTransition) -> tuple[bool, int, str]:
+        nonlocal pd_calls
+        pd_calls += 1
+        return False, 500, "PD upstream error"
+
+    def slack_handler(t: AlertTransition) -> tuple[bool, int, str]:
+        nonlocal slack_calls
+        slack_calls += 1
+        return True, 200, "Slack ok"
+
+    dispatcher = MultiChannelDispatcher(
+        channels={"pagerduty": pd_handler, "slack": slack_handler},
+        throttler=AlertNotificationThrottler(AlertThrottleConfig(enabled=False)),
+        circuit_breaker_config=CircuitBreakerConfig(
+            failure_threshold=2, recovery_timeout_seconds=60.0
+        ),
+    )
+
+    t = _transition()
+
+    # Dispatch 1: PD fails, Slack succeeds
+    res1 = dispatcher.dispatch(t, channels=["pagerduty", "slack"], now=10.0)
+    assert res1["pagerduty"] == (False, 500, "PD upstream error")
+    assert res1["slack"] == (True, 200, "Slack ok")
+    assert pd_calls == 1
+    assert slack_calls == 1
+
+    # Dispatch 2: PD fails again -> trips PD circuit breaker
+    res2 = dispatcher.dispatch(t, channels=["pagerduty", "slack"], now=11.0)
+    assert res2["pagerduty"] == (False, 500, "PD upstream error")
+    assert res2["slack"] == (True, 200, "Slack ok")
+    assert pd_calls == 2
+    assert slack_calls == 2
+
+    pd_cb = dispatcher.get_circuit_breaker("pagerduty")
+    slack_cb = dispatcher.get_circuit_breaker("slack")
+    assert pd_cb.state == CircuitBreakerState.OPEN
+    assert slack_cb.state == CircuitBreakerState.CLOSED
+
+    # Dispatch 3: PD fails fast (503) due to open circuit, Slack still succeeds
+    res3 = dispatcher.dispatch(t, channels=["pagerduty", "slack"], now=12.0)
+    assert res3["pagerduty"][0] is False
+    assert res3["pagerduty"][1] == 503
+    assert "Circuit open" in res3["pagerduty"][2]
+    assert res3["slack"] == (True, 200, "Slack ok")
+    assert pd_calls == 2  # PD handler not called!
+    assert slack_calls == 3
+
+    # Check stats include circuit breakers
+    stats = dispatcher.get_stats()
+    assert "circuit_breakers" in stats
+    assert "pagerduty" in stats["circuit_breakers"]
+    assert stats["circuit_breakers"]["pagerduty"]["state"] == "open"
+    assert stats["circuit_breakers"]["slack"]["state"] == "closed"
+
+    # Reset resets circuit breakers
+    dispatcher.reset()
+    assert pd_cb.state == CircuitBreakerState.CLOSED
