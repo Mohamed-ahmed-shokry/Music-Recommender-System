@@ -20,8 +20,8 @@
 | Task 5 | Unit tests for `CircuitBreaker` in `tests/test_alerting.py` | Completed | `27bdbec` |
 | Task 6 | Integrate circuit breaking into `WebhookDispatcher` and `MultiChannelDispatcher` in `alerting.py` | Completed | `7105b59` |
 | Task 7 | Unit tests for circuit-breaker protected dispatching in `tests/test_alerting.py` | Completed | `9157c3a` |
-| Task 8 | Integrate `IncidentRemediationRunner` into `RecommenderService` in `src/music_recommender/service.py` | Pending | |
-| Task 9 | Service integration tests in `tests/test_service.py` | Pending | |
+| Task 8 | Integrate `IncidentRemediationRunner` into `RecommenderService` in `src/music_recommender/service.py` | Completed | `0acaf99` |
+| Task 9 | Service integration tests in `tests/test_service.py` | Completed | `8a97dae` |
 | Task 10 | Endpoints `/alerts/remediation/rules`, `/alerts/remediation/history`, `/alerts/remediation/trigger`, `/alerts/circuit-breaker/stats` in `api/main.py` | Pending | |
 | Task 11 | API integration tests in `tests/test_api.py` | Pending | |
 | Task 12 | CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` in `src/music_recommender/cli.py` | Pending | |
@@ -63,7 +63,7 @@
 | AC-1: IncidentRemediationRunner with cooldown and attempt limits | Completed | `8abfa26` |
 | AC-2: CircuitBreaker state transitions (CLOSED/OPEN/HALF_OPEN) | Completed | `27bdbec` |
 | AC-3: Outbound dispatchers reject traffic when circuit is OPEN | Completed | `9157c3a` |
-| AC-4: RecommenderService self-healing handler integration | Pending | |
+| AC-4: RecommenderService self-healing handler integration | Completed | `0acaf99` |
 | AC-5: FastAPI endpoints `/alerts/remediation/*` and `/alerts/circuit-breaker/stats` | Pending | |
 | AC-6: Operator CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` | Pending | |
 | AC-7: Streamlit dashboard sidebar remediation and circuit status | Pending | |
