@@ -26,8 +26,8 @@
 | Task 11 | API integration tests in `tests/test_api.py` | Completed | `2b0e925` |
 | Task 12 | CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` in `src/music_recommender/cli.py` | Completed | `0568ae1` |
 | Task 13 | CLI tests in `tests/test_cli.py` | Completed | `9d63048` |
-| Task 14 | Add self-healing remediation and circuit-breaker status indicators to Streamlit sidebar in `dashboard.py` | Pending | |
-| Task 15 | Dashboard tests in `tests/test_dashboard.py` | Pending | |
+| Task 14 | Add self-healing remediation and circuit-breaker status indicators to Streamlit sidebar in `dashboard.py` | Completed | `b6bbc32` |
+| Task 15 | Dashboard tests in `tests/test_dashboard.py` | Completed | `69001cb` |
 | Task 16 | Documentation updates in `README.md` and `CHANGELOG.md` | Pending | |
 | Task 17 | Bump package version to `0.39.0` in `pyproject.toml`, run `uv lock`, and `uv build` | Pending | |
 | Task 18 | Verify local CI parity, push to remote, open draft PR, monitor remote CI to green | Pending | |
@@ -66,13 +66,8 @@
 | AC-4: RecommenderService self-healing handler integration | Completed | `0acaf99` |
 | AC-5: FastAPI endpoints `/alerts/remediation/*` and `/alerts/circuit-breaker/stats` | Completed | `3f35c36` |
 | AC-6: Operator CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` | Completed | `0568ae1` |
-| AC-7: Streamlit dashboard sidebar remediation and circuit status | Pending | |
+| AC-7: Streamlit dashboard sidebar remediation and circuit status | Completed | `b6bbc32` |
 | AC-8: 100% green CI parity locally and remotely | Pending | |
-
-
-|---|---|---|
-| AC-1 Notification throttling & deduplication | Pending | |
-| AC-2 Continuous firing escalation tiers | Pending | |
 | AC-3 PagerDuty & Opsgenie gateway API v2 dispatch | Pending | |
 | AC-4 FastAPI throttling & gateway test endpoints | Pending | |
 | AC-5 Operator CLI throttle-stats & test-gateway | Pending | |
