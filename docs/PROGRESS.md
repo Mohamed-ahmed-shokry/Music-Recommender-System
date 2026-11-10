@@ -24,8 +24,8 @@
 | Task 9 | Service integration tests in `tests/test_service.py` | Completed | `8a97dae` |
 | Task 10 | Endpoints `/alerts/remediation/rules`, `/alerts/remediation/history`, `/alerts/remediation/trigger`, `/alerts/circuit-breaker/stats` in `api/main.py` | Completed | `3f35c36` |
 | Task 11 | API integration tests in `tests/test_api.py` | Completed | `2b0e925` |
-| Task 12 | CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` in `src/music_recommender/cli.py` | Pending | |
-| Task 13 | CLI tests in `tests/test_cli.py` | Pending | |
+| Task 12 | CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` in `src/music_recommender/cli.py` | Completed | `0568ae1` |
+| Task 13 | CLI tests in `tests/test_cli.py` | Completed | `9d63048` |
 | Task 14 | Add self-healing remediation and circuit-breaker status indicators to Streamlit sidebar in `dashboard.py` | Pending | |
 | Task 15 | Dashboard tests in `tests/test_dashboard.py` | Pending | |
 | Task 16 | Documentation updates in `README.md` and `CHANGELOG.md` | Pending | |
@@ -65,7 +65,7 @@
 | AC-3: Outbound dispatchers reject traffic when circuit is OPEN | Completed | `9157c3a` |
 | AC-4: RecommenderService self-healing handler integration | Completed | `0acaf99` |
 | AC-5: FastAPI endpoints `/alerts/remediation/*` and `/alerts/circuit-breaker/stats` | Completed | `3f35c36` |
-| AC-6: Operator CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` | Pending | |
+| AC-6: Operator CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` | Completed | `0568ae1` |
 | AC-7: Streamlit dashboard sidebar remediation and circuit status | Pending | |
 | AC-8: 100% green CI parity locally and remotely | Pending | |
 
