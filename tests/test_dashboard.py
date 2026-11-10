@@ -575,6 +575,20 @@ class FakeDashboardService:
             },
         )
 
+    def get_remediation_history(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return getattr(
+            self,
+            "_fake_remediation_history",
+            [],
+        )
+
+    def get_circuit_breaker_stats(self) -> dict[str, Any]:
+        return getattr(
+            self,
+            "_fake_circuit_breaker_stats",
+            {},
+        )
+
     def correlate_alert_history(self, **kwargs: Any) -> Any:
         from music_recommender.alerting import AlertCorrelationReport
 
@@ -1854,3 +1868,34 @@ def test_dashboard_sidebar_throttling_rendering() -> None:
     assert any("Notification Throttling" in m.value for m in app.markdown)
     assert any("notification(s) throttled" in c.value for c in app.caption)
     assert any("3 duplicate" in c.value for c in app.caption)
+
+
+def test_dashboard_sidebar_remediation_and_circuit_breaker_rendering() -> None:
+    service = FakeDashboardService()
+    service._fake_remediation_history = [
+        {
+            "action_type": "flush_feedback_queue",
+            "status": "executed",
+            "message": "Flushed 25 records",
+        }
+    ]
+    service._fake_circuit_breaker_stats = {
+        "webhook": {
+            "name": "webhook",
+            "state": "open",
+            "total_trips": 1,
+            "total_rejected": 5,
+        }
+    }
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("Automated Self-Healing" in m.value for m in app.markdown)
+    assert any("flush_feedback_queue" in m.value for m in app.markdown)
+    assert any("Outbound Circuit Breakers" in m.value for m in app.markdown)
+    assert any("webhook" in m.value for m in app.markdown)
+    assert any("Trips: 1" in c.value for c in app.caption)
