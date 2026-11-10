@@ -736,6 +736,63 @@ class FakeService:
             "tracks": page,
         }
 
+    def get_remediation_rules(self) -> list[dict[str, object]]:
+        return [
+            {
+                "rule_name": "StreamingQueueHighUtilization",
+                "action_type": "flush_feedback_queue",
+                "cooldown_seconds": 60.0,
+                "max_attempts": 3,
+                "enabled": True,
+            }
+        ]
+
+    def get_remediation_history(self, limit: int = 50) -> list[dict[str, object]]:
+        return [
+            {
+                "rule_name": "StreamingQueueHighUtilization",
+                "action_type": "flush_feedback_queue",
+                "status": "executed",
+                "message": "Flushed",
+                "timestamp": "2026-11-10T12:00:00Z",
+                "duration_ms": 1.5,
+                "details": {"flushed": True},
+            }
+        ][:limit]
+
+    def trigger_remediation_action(
+        self,
+        rule_name: str,
+        action_type: str,
+        parameters: dict[str, object] | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "rule_name": rule_name,
+            "action_type": action_type,
+            "status": "dry_run" if dry_run else "executed",
+            "message": "Triggered via fake service",
+            "timestamp": "2026-11-10T12:00:00Z",
+            "duration_ms": 1.2,
+            "details": parameters or {},
+        }
+
+    def get_circuit_breaker_stats(self) -> dict[str, object]:
+        return {
+            "webhook": {
+                "name": "webhook",
+                "state": "closed",
+                "consecutive_failures": 0,
+                "consecutive_successes": 0,
+                "total_trips": 0,
+                "total_rejected": 0,
+                "total_calls": 0,
+            }
+        }
+
+    def reset_circuit_breakers(self) -> None:
+        pass
+
 
 def test_health_route_uses_loaded_service() -> None:
     with TestClient(api_main.app) as client:
@@ -2875,3 +2932,88 @@ def test_alerts_gateway_test_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
         data_og = res_og.json()
         assert data_og["gateway"] == "opsgenie"
         assert data_og["success"] is True
+
+
+def test_alerts_remediation_and_circuit_breaker_routes() -> None:
+    with TestClient(api_main.app) as client:
+        # 1. Test with FakeService loaded
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        # GET /alerts/remediation/rules
+        res_rules = client.get("/alerts/remediation/rules")
+        assert res_rules.status_code == 200
+        data_rules = res_rules.json()
+        assert data_rules["count"] >= 1
+        assert any(
+            r["rule_name"] == "StreamingQueueHighUtilization"
+            for r in data_rules["rules"]
+        )
+
+        # GET /alerts/remediation/history
+        res_hist = client.get("/alerts/remediation/history?limit=10")
+        assert res_hist.status_code == 200
+        data_hist = res_hist.json()
+        assert data_hist["count"] >= 1
+        assert data_hist["history"][0]["action_type"] == "flush_feedback_queue"
+
+        # POST /alerts/remediation/trigger (dry run)
+        res_trig_dry = client.post(
+            "/alerts/remediation/trigger",
+            json={
+                "rule_name": "test-manual",
+                "action_type": "flush_feedback_queue",
+                "parameters": {"timeout": 2.5},
+                "dry_run": True,
+            },
+        )
+        assert res_trig_dry.status_code == 200
+        assert res_trig_dry.json()["result"]["status"] == "dry_run"
+
+        # POST /alerts/remediation/trigger (executed)
+        res_trig = client.post(
+            "/alerts/remediation/trigger",
+            json={
+                "rule_name": "test-manual",
+                "action_type": "rotate_alert_storage",
+            },
+        )
+        assert res_trig.status_code == 200
+        assert res_trig.json()["result"]["status"] == "executed"
+
+        # GET /alerts/circuit-breaker/stats
+        res_cb = client.get("/alerts/circuit-breaker/stats")
+        assert res_cb.status_code == 200
+        assert "circuit_breakers" in res_cb.json()
+        assert "webhook" in res_cb.json()["circuit_breakers"]
+
+        # POST /alerts/circuit-breaker/reset
+        res_cb_reset = client.post("/alerts/circuit-breaker/reset")
+        assert res_cb_reset.status_code == 200
+        assert res_cb_reset.json()["status"] == "ok"
+
+        # 2. Test fallback mode when service is None
+        api_main.service = None
+        api_main.service_load_error = "Service offline"
+
+        res_rules_fallback = client.get("/alerts/remediation/rules")
+        assert res_rules_fallback.status_code == 200
+        assert res_rules_fallback.json()["count"] >= 1
+
+        res_hist_fallback = client.get("/alerts/remediation/history")
+        assert res_hist_fallback.status_code == 200
+
+        res_trig_fallback = client.post(
+            "/alerts/remediation/trigger",
+            json={
+                "rule_name": "fallback-test",
+                "action_type": "flush_feedback_queue",
+            },
+        )
+        assert res_trig_fallback.status_code == 200
+
+        res_cb_fallback = client.get("/alerts/circuit-breaker/stats")
+        assert res_cb_fallback.status_code == 200
+
+        res_reset_fallback = client.post("/alerts/circuit-breaker/reset")
+        assert res_reset_fallback.status_code == 200
