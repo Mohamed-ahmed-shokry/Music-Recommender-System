@@ -30,7 +30,7 @@
 | Task 15 | Dashboard tests in `tests/test_dashboard.py` | Completed | `69001cb` |
 | Task 16 | Documentation updates in `README.md` and `CHANGELOG.md` | Completed | `bd4f1d0` |
 | Task 17 | Bump package version to `0.39.0` in `pyproject.toml`, run `uv lock`, and `uv build` | Completed | `e6d3eda` |
-| Task 18 | Verify local CI parity, push to remote, open draft PR, monitor remote CI to green | Pending | |
+| Task 18 | Verify local CI parity, push to remote, open draft PR, monitor remote CI to green | Completed | `d901c89` (PR #34) |
 
 ---
 
@@ -53,6 +53,8 @@
 | `uv run mypy` | Passed (30 source files checked) |
 | `uv run --extra dashboard --extra tracking --extra spotify pytest -q` | Passed (1289 passed) |
 | `uv build` | Passed (built sdist and wheel) |
+| Remote CI (Build and smoke test container) | Passed (Run 42833718431, Job 129890343305) |
+| Remote CI (Test, lint, and build) | Passed (Run 42833718431, Job 129890343958) |
 
 ---
 
@@ -67,12 +69,7 @@
 | AC-5: FastAPI endpoints `/alerts/remediation/*` and `/alerts/circuit-breaker/stats` | Completed | `3f35c36` |
 | AC-6: Operator CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` | Completed | `0568ae1` |
 | AC-7: Streamlit dashboard sidebar remediation and circuit status | Completed | `b6bbc32` |
-| AC-8: 100% green CI parity locally and remotely | Pending | |
-| AC-3 PagerDuty & Opsgenie gateway API v2 dispatch | Pending | |
-| AC-4 FastAPI throttling & gateway test endpoints | Pending | |
-| AC-5 Operator CLI throttle-stats & test-gateway | Pending | |
-| AC-6 Streamlit dashboard throttling indicators | Pending | |
-| AC-7 100% green CI locally and remotely | Pending | |
+| AC-8: 100% green CI parity locally and remotely | Completed | Run `42833718431` (100% green) |
 
 ---
 

@@ -52,7 +52,7 @@ Harden production operations with autonomous self-healing and fault-tolerant not
 - [x] AC-5: FastAPI endpoints `/alerts/remediation/*` and `/alerts/circuit-breaker/stats` return valid schema responses.
 - [x] AC-6: Operator CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` operate cleanly in table and JSON formats.
 - [x] AC-7: Streamlit dashboard sidebar surfaces self-healing activity and circuit breaker status.
-- [ ] AC-8: All local CI-parity checks and remote CI workflow runs pass 100%.
+- [x] AC-8: All local CI-parity checks and remote CI workflow runs pass 100%.
 
 ### 4. Validation & CI Plan
 - `uv run ruff format --check .`
@@ -83,7 +83,7 @@ Harden production operations with autonomous self-healing and fault-tolerant not
 - [x] Task 15: Add dashboard tests in `tests/test_dashboard.py`.
 - [x] Task 16: Update `README.md` and `CHANGELOG.md` with 0.39.0 documentation.
 - [x] Task 17: Bump package version to `0.39.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
-- [ ] Task 18: Verify local CI parity, push to remote, open draft PR, monitor remote CI to 100% green.
+- [x] Task 18: Verify local CI parity, push to remote, open draft PR, monitor remote CI to 100% green.
 
 ---
 

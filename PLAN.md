@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.39.0) — in progress (branch `phase/171-remediation-and-circuit-breaker`)
+## Current milestone (0.39.0) — completed & verified (branch `phase/171-remediation-and-circuit-breaker`, PR #34)
 
 Automated Incident Remediation, Circuit Breaking, and Self-Healing Maintenance Triggers.
 The 0.38.0 release delivered sliding-window notification throttling, tiered escalation policies, and PagerDuty/Opsgenie gateways.
@@ -16,9 +16,9 @@ FastAPI endpoints (`/alerts/remediation/*`, `/alerts/circuit-breaker/stats`), op
 `trigger-action`, `circuit-stats`), and Streamlit dashboard visibility.
 
 - Phase 171 — Automated self-healing action runner for active firing alert remediation:
-  `RemediationActionType`, `RemediationRule`, `RemediationActionResult`, and `IncidentRemediationRunner` in `alerting.py`.
+  `RemediationActionType`, `RemediationRule`, `RemediationActionResult`, and `IncidentRemediationRunner` in `alerting.py` (completed). ✅
 - Phase 172 — Outbound webhook circuit breaking, adaptive rate regulation, and 0.39.0 release:
-  `CircuitBreakerState`, `CircuitBreakerConfig`, `CircuitBreaker`, dispatcher integration, service integration, API endpoints, CLI commands, dashboard indicators, clean CI.
+  `CircuitBreakerState`, `CircuitBreakerConfig`, `CircuitBreaker`, dispatcher integration, service integration, API endpoints, CLI commands, dashboard indicators, clean CI (completed, 100% green remote CI). ✅
 
 ## Next milestone (0.40.0) — planned
 
