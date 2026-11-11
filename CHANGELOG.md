@@ -5,6 +5,24 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.0] - 2026-11-11
+
+### Added
+
+- **Alert Silencing & Scheduled Maintenance Windows (Phase 173):**
+  - Thread-safe `AlertSilencingEngine` evaluating active alerts against flexible `AlertSilenceRule` matchers (`SilenceMatcher`: rule name, severity, and regex/exact label pairs) and `MaintenanceWindow` schedules.
+  - Granular suppression decisions (`SilenceDecision.ACTIVE`, `SUPPRESSED_SILENCE_RULE`, `SUPPRESSED_MAINTENANCE_WINDOW`) suppressing outbound notification dispatch while preserving transition logs.
+  - JSON file persistence for silence rules and maintenance windows (`data/alerts/silences.json`).
+  - Integration into `RecommenderService` (`add_silence_rule`, `remove_silence_rule`, `get_silence_rules`, `schedule_maintenance_window`, `cancel_maintenance_window`, `get_maintenance_windows`).
+  - FastAPI endpoints `GET /alerts/silences`, `POST /alerts/silences`, `DELETE /alerts/silences/{silence_id}`, `GET /alerts/maintenance`, `POST /alerts/maintenance`, and `DELETE /alerts/maintenance/{window_id}`.
+  - Operator CLI commands `silence-alert`, `list-silences`, `expire-silence`, `schedule-maintenance`, and `list-maintenance`.
+  - Streamlit dashboard sidebar visibility for active alert silences and scheduled maintenance windows.
+
+- **Slack & Microsoft Teams Rich Card Webhook Adapters (Phase 174):**
+  - `SlackWebhookAdapter` generating Block Kit JSON payloads featuring color-coded severity bars (`#E01E5A` danger, `#ECB22E` warning, `#2EB886` resolved), alert summaries, markdown metric details, and interactive dashboard links.
+  - `TeamsWebhookAdapter` generating Microsoft Teams Office 365 Connector / Adaptive Cards with formatted FactSets (rule, severity, metric expression, current value, timestamp) and OpenUri dashboard action buttons.
+  - Direct integration into `MultiChannelDispatcher` via `register_slack()` and `register_teams()` with full circuit breaking, rate limiting, and silencing suppression support.
+
 ## [0.39.0] - 2026-11-10
 
 ### Added

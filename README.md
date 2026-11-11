@@ -1112,6 +1112,10 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
     uv run music-recommender trigger-action flush_feedback_queue --dry-run # preview self-healing execution
     uv run music-recommender circuit-stats              # inspect outbound circuit breaker states
     uv run music-recommender circuit-stats --reset      # reset circuit breakers to CLOSED
+    uv run music-recommender silence-alert HighLatency -d 3600  # silence alert rule for 1 hour
+    uv run music-recommender list-silences              # list active alert silences
+    uv run music-recommender schedule-maintenance -n "DB Upgrade" -d 7200 # schedule maintenance window
+    uv run music-recommender list-maintenance           # inspect scheduled maintenance windows
     ```
 
 5. **Alertmanager webhook ingestion & history buffer** — The API provides a webhook receiver at `POST /alerts/webhook` that parses standard Prometheus/Alertmanager v4 webhook payloads as well as internal transitions, recording them in a thread-safe in-memory ring buffer (default capacity 500 events). Query recent events at `GET /alerts/history` or inspect them in the Streamlit dashboard sidebar.
@@ -1123,6 +1127,8 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
 8. **Notification throttling, escalation policies & incident gateways** — Sliding-window deduplication and rate limiting prevent notification storms during catastrophic failure cascades (`throttle-stats`, `GET /alerts/throttling/stats`, `POST /alerts/throttling/reset`). Multi-tier escalation policies route persistent unacknowledged alerts to elevated responder channels based on firing duration. Native PagerDuty Events API v2 and Opsgenie Alert API v2 gateways deliver rich incident context without vendor SDK dependencies (`test-gateway`, `POST /alerts/gateway/test`).
 
 9. **Automated Incident Remediation & Outbound Circuit Breaking** — Self-healing runner executes targeted remediation actions (`remediation-history`, `trigger-action`, `GET /alerts/remediation/rules`, `POST /alerts/remediation/trigger`) upon alert triggers with cooldown suppression, attempt bounding, and execution profiling. Resilient three-state circuit breakers (`circuit-stats`, `GET /alerts/circuit-breaker/stats`, `POST /alerts/circuit-breaker/reset`) guard outbound webhook and gateway calls, failing fast without thread or socket exhaustion during remote provider degradation.
+
+10. **Alert Silencing, Maintenance Windows & Chat Adapters** — Dynamic silence rules and scheduled maintenance windows suppress notification dispatch while preserving transition logs (`silence-alert`, `list-silences`, `schedule-maintenance`, `list-maintenance`, `/alerts/silences/*`, `/alerts/maintenance/*`). First-class Slack Block Kit and Microsoft Teams Adaptive Card adapters deliver formatted status indicators and interactive dashboard action buttons.
 
 ## API Reference
 
@@ -1166,6 +1172,12 @@ uv run uvicorn api.main:app --reload
 | `POST` | `/alerts/remediation/trigger` | Trigger a self-healing action on demand with optional dry-run |
 | `GET` | `/alerts/circuit-breaker/stats` | Inspect health states and trip counters for outbound circuit breakers |
 | `POST` | `/alerts/circuit-breaker/reset` | Reset all outbound circuit breakers back to CLOSED |
+| `GET` | `/alerts/silences?active_only=false` | Query active or all alert silence rules |
+| `POST` | `/alerts/silences` | Create a temporary alert silence rule with matchers |
+| `DELETE` | `/alerts/silences/{silence_id}` | Cancel or delete an alert silence rule |
+| `GET` | `/alerts/maintenance?active_only=false` | Query scheduled maintenance windows |
+| `POST` | `/alerts/maintenance` | Schedule a maintenance window for alert suppression |
+| `DELETE` | `/alerts/maintenance/{window_id}` | Cancel a scheduled maintenance window |
 | `GET` | `/metadata` | Training config, dataset fingerprint, artifact metadata |
 | `GET` | `/evaluation/ablation-summary` | Persisted aggregated knob-importance summary |
 | `GET` | `/catalog/artists?query=pop&limit=25` | Search and page through artists and metadata |
