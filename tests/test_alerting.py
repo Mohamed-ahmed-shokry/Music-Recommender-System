@@ -20,8 +20,13 @@ from music_recommender.alerting import (
     AlertMode,
     AlertRule,
     AlertSeverity,
+    AlertSilenceRule,
+    AlertSilencingEngine,
     AlertTransition,
+    MaintenanceWindow,
     ReceivedAlertEvent,
+    SilenceDecision,
+    SilenceMatcher,
     WebhookDispatcher,
     lookup_metric_value,
     parse_alert_payload,
@@ -2038,3 +2043,162 @@ def test_multichannel_dispatcher_circuit_breaker_isolation() -> None:
     # Reset resets circuit breakers
     dispatcher.reset()
     assert pd_cb.state == CircuitBreakerState.CLOSED
+
+
+def test_silence_matcher_matching() -> None:
+    matcher_name = SilenceMatcher(name="alertname", value="HighErrorRate")
+    assert matcher_name.matches("HighErrorRate", "critical")
+    assert not matcher_name.matches("LowMemory", "critical")
+
+    matcher_sev = SilenceMatcher(name="severity", value="warning")
+    assert matcher_sev.matches("AnyAlert", "warning")
+    assert not matcher_sev.matches("AnyAlert", "critical")
+
+    matcher_lbl = SilenceMatcher(name="env", value="prod")
+    assert matcher_lbl.matches("AnyAlert", "critical", {"env": "prod"})
+    assert not matcher_lbl.matches("AnyAlert", "critical", {"env": "staging"})
+    assert not matcher_lbl.matches("AnyAlert", "critical", {})
+
+    matcher_regex = SilenceMatcher(
+        name="cluster", value=r"^eu-(west|central)-\d$", is_regex=True
+    )
+    assert matcher_regex.matches("AnyAlert", "critical", {"cluster": "eu-west-1"})
+    assert not matcher_regex.matches("AnyAlert", "critical", {"cluster": "us-east-1"})
+
+    bad_regex = SilenceMatcher(name="cluster", value=r"[invalid", is_regex=True)
+    assert not bad_regex.matches("AnyAlert", "critical", {"cluster": "eu-west-1"})
+
+    data = matcher_regex.to_dict()
+    restored = SilenceMatcher.from_dict(data)
+    assert restored.name == "cluster"
+    assert restored.value == r"^eu-(west|central)-\d$"
+    assert restored.is_regex is True
+
+
+def test_alert_silence_rule_lifecycle() -> None:
+    now = 1000.0
+    rule = AlertSilenceRule(
+        silence_id="sil-1",
+        matchers=[
+            SilenceMatcher(name="alertname", value="HighMemory"),
+            SilenceMatcher(name="severity", value="critical"),
+        ],
+        starts_at=900.0,
+        ends_at=1100.0,
+        author="sre-team",
+        comment="Planned load test",
+    )
+    assert rule.is_active(now=now)
+    assert rule.matches("HighMemory", "critical")
+    assert not rule.matches("HighMemory", "warning")
+    assert not rule.matches("LowDisk", "critical")
+
+    # Time boundaries
+    assert not rule.is_active(now=850.0)
+    assert not rule.is_active(now=1150.0)
+
+    # Disabled toggle
+    rule.enabled = False
+    assert not rule.is_active(now=now)
+
+    # Roundtrip serialization
+    data = rule.to_dict()
+    restored = AlertSilenceRule.from_dict(data)
+    assert restored.silence_id == "sil-1"
+    assert len(restored.matchers) == 2
+    assert restored.author == "sre-team"
+    assert restored.comment == "Planned load test"
+
+
+def test_maintenance_window_suppression() -> None:
+    now = 2000.0
+    mw_all = MaintenanceWindow(
+        window_id="mw-1",
+        name="Cluster Upgrade",
+        starts_at=1900.0,
+        ends_at=2100.0,
+        suppress_all=True,
+    )
+    assert mw_all.is_active(now=now)
+    assert mw_all.suppresses("AnyAlert", now=now)
+    assert not mw_all.suppresses("AnyAlert", now=2200.0)
+
+    mw_target = MaintenanceWindow(
+        window_id="mw-2",
+        name="Database Reindex",
+        starts_at=1900.0,
+        ends_at=2100.0,
+        suppress_all=False,
+        affected_rules=["DatabaseLatencyHigh", "LockContention"],
+    )
+    assert mw_target.suppresses("DatabaseLatencyHigh", now=now)
+    assert not mw_target.suppresses("HighMemoryUsage", now=now)
+
+    # Disabled toggle
+    mw_target.enabled = False
+    assert not mw_target.suppresses("DatabaseLatencyHigh", now=now)
+
+    # Roundtrip serialization
+    data = mw_target.to_dict()
+    restored = MaintenanceWindow.from_dict(data)
+    assert restored.window_id == "mw-2"
+    assert restored.name == "Database Reindex"
+    assert "DatabaseLatencyHigh" in restored.affected_rules
+
+
+def test_alert_silencing_engine_evaluation_and_persistence(tmp_path: Path) -> None:
+    now = 3000.0
+    storage = tmp_path / "silences.json"
+    engine = AlertSilencingEngine(storage_path=storage)
+
+    # Initially empty
+    assert engine.list_silences() == []
+    assert engine.list_maintenance_windows() == []
+    dec, target = engine.evaluate("HighErrorRate", "critical", now=now)
+    assert dec == SilenceDecision.ACTIVE
+    assert target is None
+
+    # Add silence rule
+    silence = AlertSilenceRule(
+        silence_id="sil-test",
+        matchers=[SilenceMatcher(name="alertname", value="HighErrorRate")],
+        starts_at=2900.0,
+        ends_at=3100.0,
+    )
+    engine.add_silence(silence)
+    assert engine.get_silence("sil-test") is not None
+    assert len(engine.list_silences(active_only=True, now=now)) == 1
+
+    # Matching alert is suppressed
+    dec, target = engine.evaluate("HighErrorRate", "critical", now=now)
+    assert dec == SilenceDecision.SUPPRESSED_SILENCE_RULE
+    assert target == "sil-test"
+
+    # Non-matching alert remains active
+    dec, target = engine.evaluate("MemoryExhausted", "critical", now=now)
+    assert dec == SilenceDecision.ACTIVE
+
+    # Maintenance window takes precedence
+    mw = MaintenanceWindow(
+        window_id="mw-global",
+        starts_at=2900.0,
+        ends_at=3100.0,
+        suppress_all=True,
+    )
+    engine.add_maintenance_window(mw)
+    dec, target = engine.evaluate("HighErrorRate", "critical", now=now)
+    assert dec == SilenceDecision.SUPPRESSED_MAINTENANCE_WINDOW
+    assert target == "mw-global"
+
+    # Persistence verification: reload into fresh engine
+    assert storage.exists()
+    engine2 = AlertSilencingEngine(storage_path=storage)
+    assert engine2.get_silence("sil-test") is not None
+    assert engine2.get_maintenance_window("mw-global") is not None
+
+    # Removal
+    assert engine.remove_silence("sil-test")
+    assert not engine.remove_silence("nonexistent")
+    assert engine.remove_maintenance_window("mw-global")
+    dec, target = engine.evaluate("HighErrorRate", "critical", now=now)
+    assert dec == SilenceDecision.ACTIVE
