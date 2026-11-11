@@ -49,16 +49,16 @@ Enhance incident management and operations by providing dynamic alert suppressio
    - Bump version to `0.40.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
 
 ### 3. Acceptance Criteria
-- [ ] AC-1: `AlertSilencingEngine` evaluates `AlertSilenceRule` matchers against alert transitions and suppresses notification dispatch during active windows.
-- [ ] AC-2: `MaintenanceWindow` suppresses notifications for all or targeted alert rules during active maintenance intervals.
-- [ ] AC-3: `SlackWebhookAdapter` formats Slack Block Kit payloads with severity colors and action buttons.
-- [ ] AC-4: `TeamsWebhookAdapter` formats Adaptive Card payloads with facts and details.
-- [ ] AC-5: `MultiChannelDispatcher` dispatches to Slack and Teams channels and honors silencing suppression.
-- [ ] AC-6: `RecommenderService` provides complete management of silences and maintenance windows.
-- [ ] AC-7: FastAPI endpoints `/alerts/silences/*` and `/alerts/maintenance/*` return validated schema responses.
-- [ ] AC-8: Operator CLI commands `silence-alert`, `list-silences`, `expire-silence`, `schedule-maintenance`, and `list-maintenance` operate cleanly.
-- [ ] AC-9: Streamlit dashboard renders silence rules and maintenance window controls.
-- [ ] AC-10: All local CI-parity checks and remote CI workflow runs pass 100%.
+- [x] AC-1: `AlertSilencingEngine` evaluates `AlertSilenceRule` matchers against alert transitions and suppresses notification dispatch during active windows.
+- [x] AC-2: `MaintenanceWindow` suppresses notifications for all or targeted alert rules during active maintenance intervals.
+- [x] AC-3: `SlackWebhookAdapter` formats Slack Block Kit payloads with severity colors and action buttons.
+- [x] AC-4: `TeamsWebhookAdapter` formats Adaptive Card payloads with facts and details.
+- [x] AC-5: `MultiChannelDispatcher` dispatches to Slack and Teams channels and honors silencing suppression.
+- [x] AC-6: `RecommenderService` provides complete management of silences and maintenance windows.
+- [x] AC-7: FastAPI endpoints `/alerts/silences/*` and `/alerts/maintenance/*` return validated schema responses.
+- [x] AC-8: Operator CLI commands `silence-alert`, `list-silences`, `expire-silence`, `schedule-maintenance`, and `list-maintenance` operate cleanly.
+- [x] AC-9: Streamlit dashboard renders silence rules and maintenance window controls.
+- [x] AC-10: All local CI-parity checks and remote CI workflow runs pass 100%.
 
 ### 4. Validation & CI Plan
 - `uv run ruff format --check .`
@@ -72,26 +72,26 @@ Enhance incident management and operations by providing dynamic alert suppressio
 - External internet delivery during automated test runs is simulated with local HTTP test servers and mocks. Real outbound webhooks require configured webhook URLs.
 
 ### 6. Micro-Task Breakdown
-- [ ] Task 1: Define Phase 173 & 174 roadmap, update plan, and initialize progress record.
-- [ ] Task 2: Implement `SilenceMatcher`, `AlertSilenceRule`, `MaintenanceWindow`, and `SilenceDecision` in `src/music_recommender/alerting.py`.
-- [ ] Task 3: Implement `AlertSilencingEngine` in `src/music_recommender/alerting.py`.
-- [ ] Task 4: Add unit tests for `AlertSilenceRule`, `MaintenanceWindow`, and `AlertSilencingEngine` in `tests/test_alerting.py`.
-- [ ] Task 5: Implement `SlackWebhookAdapter` Block Kit formatter and dispatcher in `src/music_recommender/alerting.py`.
-- [ ] Task 6: Implement `TeamsWebhookAdapter` Adaptive Card formatter and dispatcher in `src/music_recommender/alerting.py`.
-- [ ] Task 7: Add unit tests for `SlackWebhookAdapter` and `TeamsWebhookAdapter` in `tests/test_alerting.py`.
-- [ ] Task 8: Integrate silencing engine and chat webhook adapters into `MultiChannelDispatcher` in `src/music_recommender/alerting.py`.
-- [ ] Task 9: Add unit tests for dispatcher silencing and chat adapters in `tests/test_alerting.py`.
-- [ ] Task 10: Integrate silencing and maintenance windows into `RecommenderService` in `src/music_recommender/service.py`.
-- [ ] Task 11: Add service integration tests in `tests/test_service.py`.
-- [ ] Task 12: Implement endpoints `/alerts/silences/*` and `/alerts/maintenance/*` in `api/main.py`.
-- [ ] Task 13: Add API integration tests in `tests/test_api.py`.
-- [ ] Task 14: Implement CLI commands `silence-alert`, `list-silences`, `expire-silence`, `schedule-maintenance`, and `list-maintenance` in `src/music_recommender/cli.py`.
-- [ ] Task 15: Add CLI tests in `tests/test_cli.py`.
-- [ ] Task 16: Add silencing management and maintenance window status to Streamlit dashboard in `src/music_recommender/dashboard.py`.
-- [ ] Task 17: Add dashboard tests in `tests/test_dashboard.py`.
-- [ ] Task 18: Update `README.md` and `CHANGELOG.md` with 0.40.0 documentation.
-- [ ] Task 19: Bump package version to `0.40.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
-- [ ] Task 20: Verify local CI parity, push to remote, monitor remote CI to 100% green.
+- [x] Task 1: Define Phase 173 & 174 roadmap, update plan, and initialize progress record.
+- [x] Task 2: Implement `SilenceMatcher`, `AlertSilenceRule`, `MaintenanceWindow`, and `SilenceDecision` in `src/music_recommender/alerting.py`.
+- [x] Task 3: Implement `AlertSilencingEngine` in `src/music_recommender/alerting.py`.
+- [x] Task 4: Add unit tests for `AlertSilenceRule`, `MaintenanceWindow`, and `AlertSilencingEngine` in `tests/test_alerting.py`.
+- [x] Task 5: Implement `SlackWebhookAdapter` Block Kit formatter and dispatcher in `src/music_recommender/alerting.py`.
+- [x] Task 6: Implement `TeamsWebhookAdapter` Adaptive Card formatter and dispatcher in `src/music_recommender/alerting.py`.
+- [x] Task 7: Add unit tests for `SlackWebhookAdapter` and `TeamsWebhookAdapter` in `tests/test_alerting.py`.
+- [x] Task 8: Integrate silencing engine and chat webhook adapters into `MultiChannelDispatcher` in `src/music_recommender/alerting.py`.
+- [x] Task 9: Add unit tests for dispatcher silencing and chat adapters in `tests/test_alerting.py`.
+- [x] Task 10: Integrate silencing and maintenance windows into `RecommenderService` in `src/music_recommender/service.py`.
+- [x] Task 11: Add service integration tests in `tests/test_service.py`.
+- [x] Task 12: Implement endpoints `/alerts/silences/*` and `/alerts/maintenance/*` in `api/main.py`.
+- [x] Task 13: Add API integration tests in `tests/test_api.py`.
+- [x] Task 14: Implement CLI commands `silence-alert`, `list-silences`, `expire-silence`, `schedule-maintenance`, and `list-maintenance` in `src/music_recommender/cli.py`.
+- [x] Task 15: Add CLI tests in `tests/test_cli.py`.
+- [x] Task 16: Add silencing management and maintenance window status to Streamlit dashboard in `src/music_recommender/dashboard.py`.
+- [x] Task 17: Add dashboard tests in `tests/test_dashboard.py`.
+- [x] Task 18: Update `README.md` and `CHANGELOG.md` with 0.40.0 documentation.
+- [x] Task 19: Bump package version to `0.40.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [x] Task 20: Verify local CI parity, push to remote, monitor remote CI to 100% green.
 
 ---
 

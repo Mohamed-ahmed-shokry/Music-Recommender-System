@@ -3,11 +3,11 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.40.0) — active (branch `phase/173-silencing-and-chat-adapters`, PR #35)
+## Current milestone (0.40.0) — completed & verified (branch `phase/173-silencing-and-chat-adapters`, PR #35)
 
 Alert Silencing, Maintenance Window Schedules, and Slack/Teams Webhook Adapters.
 The 0.39.0 release introduced automated incident remediation and outbound circuit breaking.
-This milestone introduces dynamic alert silencing and chat notification integrations:
+This milestone delivers dynamic alert silencing and team collaboration integrations:
 an Alert Silencing & Maintenance Window Engine (`AlertSilenceRule`, `SilenceMatcher`, `MaintenanceWindow`, `AlertSilencingEngine`)
 that matches active alerts against targeted silence criteria (rule name, severity, labels) and scheduled maintenance windows;
 Slack and Microsoft Teams rich card adapters (`SlackWebhookAdapter`, `TeamsWebhookAdapter`) delivering interactive,
@@ -16,9 +16,15 @@ FastAPI endpoints (`/alerts/silences/*`, `/alerts/maintenance/*`), operator CLI 
 `expire-silence`, `schedule-maintenance`, `list-maintenance`), and Streamlit dashboard controls.
 
 - Phase 173 — Dynamic alert silencing rules and scheduled maintenance window suppression:
-  `AlertSilenceRule`, `SilenceMatcher`, `MaintenanceWindow`, `AlertSilencingEngine` in `alerting.py` (active). 🔄
+  `AlertSilenceRule`, `SilenceMatcher`, `MaintenanceWindow`, `AlertSilencingEngine` in `alerting.py` (completed). ✅
 - Phase 174 — Slack and Microsoft Teams rich card notification adapters:
-  `SlackWebhookAdapter`, `TeamsWebhookAdapter`, dispatcher integration, service integration, API endpoints, CLI commands, dashboard indicators, clean CI (active). 🔄
+  `SlackWebhookAdapter`, `TeamsWebhookAdapter`, dispatcher integration, service integration, API endpoints, CLI commands, dashboard indicators, clean CI (completed). ✅
+
+## Next milestone (0.41.0) — planned
+
+Alert Analytics, Mean Time to Detect/Resolve (MTTD/MTTR) Reporting, and Prometheus Alert Exporter.
+- Phase 175 — Incident metrics aggregation, MTTD/MTTR telemetry calculation, and historical SLO compliance.
+- Phase 176 — Export of alerting telemetry and incident state to Prometheus gauge/histogram metrics.
 
 ## Previous milestone (0.39.0) — shipped (branch `phase/171-remediation-and-circuit-breaker`, PR #34)
 
