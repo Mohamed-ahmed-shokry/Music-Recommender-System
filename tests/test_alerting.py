@@ -24,6 +24,7 @@ from music_recommender.alerting import (
     AlertSilencingEngine,
     AlertTransition,
     MaintenanceWindow,
+    MultiChannelDispatcher,
     ReceivedAlertEvent,
     SilenceDecision,
     SilenceMatcher,
@@ -2336,3 +2337,86 @@ def test_teams_webhook_adapter_payload_and_send() -> None:
     payload_res = adapter.build_payload(t_res)
     assert payload_res["themeColor"] == "2EB886"
     assert "RESOLVED" in payload_res["title"]
+
+
+def test_multichannel_dispatcher_silencing_suppression() -> None:
+    now = 5000.0
+    called_channels: list[str] = []
+
+    def fake_handler(ch: str) -> Any:
+        def _h(t: AlertTransition) -> tuple[bool, int, str]:
+            called_channels.append(ch)
+            return True, 200, "ok"
+
+        return _h
+
+    silencing = AlertSilencingEngine()
+    silence = AlertSilenceRule(
+        silence_id="sil-lat",
+        matchers=[SilenceMatcher(name="alertname", value="HighLatency")],
+        starts_at=4900.0,
+        ends_at=5100.0,
+    )
+    silencing.add_silence(silence)
+
+    dispatcher = MultiChannelDispatcher(
+        channels={"slack": fake_handler("slack"), "teams": fake_handler("teams")},
+        silencing_engine=silencing,
+    )
+
+    # HighLatency is silenced
+    lat_rule = _rule(name="HighLatency", summary="High Latency")
+    t_lat = AlertTransition(lat_rule, "firing", 2.0, "2026-11-11T12:00:00Z")
+    res_lat = dispatcher.dispatch(t_lat, now=now)
+    assert "silenced" in res_lat
+    assert res_lat["silenced"][0] is False
+    assert res_lat["silenced"][1] == 204
+    assert "suppressed_silence_rule" in res_lat["silenced"][2]
+    assert called_channels == []
+
+    # DiskFull is NOT silenced -> sent to both channels
+    disk_rule = _rule(name="DiskFull", summary="Disk full")
+    t_disk = AlertTransition(disk_rule, "firing", 99.0, "2026-11-11T12:00:00Z")
+    res_disk = dispatcher.dispatch(t_disk, now=now)
+    assert "slack" in res_disk
+    assert "teams" in res_disk
+    assert res_disk["slack"] == (True, 200, "ok")
+    assert called_channels == ["slack", "teams"]
+
+    # Now add maintenance window that suppresses all alerts
+    mw = MaintenanceWindow(
+        window_id="mw-outage",
+        starts_at=4900.0,
+        ends_at=5100.0,
+        suppress_all=True,
+    )
+    silencing.add_maintenance_window(mw)
+
+    res_disk2 = dispatcher.dispatch(t_disk, now=now)
+    assert "silenced" in res_disk2
+    assert res_disk2["silenced"][1] == 204
+    assert "suppressed_maintenance_window" in res_disk2["silenced"][2]
+
+
+def test_multichannel_dispatcher_chat_registration_and_stats() -> None:
+    silencing = AlertSilencingEngine()
+    silencing.add_silence(
+        AlertSilenceRule(silence_id="s1", starts_at=10.0, ends_at=100.0)
+    )
+    silencing.add_maintenance_window(
+        MaintenanceWindow(window_id="m1", starts_at=10.0, ends_at=100.0)
+    )
+
+    dispatcher = MultiChannelDispatcher(silencing_engine=silencing)
+    slack_adapter = dispatcher.register_slack(webhook_url="https://slack.example.com")
+    teams_adapter = dispatcher.register_teams(webhook_url="https://teams.example.com")
+
+    assert isinstance(slack_adapter, SlackWebhookAdapter)
+    assert isinstance(teams_adapter, TeamsWebhookAdapter)
+
+    stats = dispatcher.get_stats()
+    assert "slack" in stats["registered_channels"]
+    assert "teams" in stats["registered_channels"]
+    assert "silencing" in stats
+    assert stats["silencing"]["total_silences"] == 1
+    assert stats["silencing"]["total_maintenance_windows"] == 1

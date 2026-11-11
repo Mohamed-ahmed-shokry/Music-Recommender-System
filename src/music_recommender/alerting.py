@@ -3328,9 +3328,7 @@ class MultiChannelDispatcher:
                     ),
                     "total_silences": len(self.silencing_engine.list_silences()),
                     "active_maintenance_windows": len(
-                        self.silencing_engine.list_maintenance_windows(
-                            active_only=True
-                        )
+                        self.silencing_engine.list_maintenance_windows(active_only=True)
                     ),
                     "total_maintenance_windows": len(
                         self.silencing_engine.list_maintenance_windows()
