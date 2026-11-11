@@ -2574,6 +2574,155 @@ class CircuitBreaker:
             self._last_state_change = time.time()
 
 
+class AlertSilencingEngine:
+    """Thread-safe engine managing alert silences and scheduled maintenance windows."""
+
+    def __init__(
+        self,
+        silences: Sequence[AlertSilenceRule] | None = None,
+        maintenance_windows: Sequence[MaintenanceWindow] | None = None,
+        storage_path: Path | None = None,
+    ) -> None:
+        self._lock = threading.Lock()
+        self._silences: dict[str, AlertSilenceRule] = {}
+        self._maintenance_windows: dict[str, MaintenanceWindow] = {}
+        self._storage_path = storage_path
+
+        for s in silences or []:
+            self._silences[s.silence_id] = s
+        for mw in maintenance_windows or []:
+            self._maintenance_windows[mw.window_id] = mw
+
+        if self._storage_path and self._storage_path.exists():
+            self.load_from_disk()
+
+    def add_silence(self, rule: AlertSilenceRule) -> AlertSilenceRule:
+        """Register a new silence rule and persist if configured."""
+        with self._lock:
+            self._silences[rule.silence_id] = rule
+        self.save_to_disk()
+        return rule
+
+    def get_silence(self, silence_id: str) -> AlertSilenceRule | None:
+        """Lookup a silence rule by its ID."""
+        with self._lock:
+            return self._silences.get(silence_id)
+
+    def remove_silence(self, silence_id: str) -> bool:
+        """Remove or expire a silence rule by its ID."""
+        with self._lock:
+            removed = self._silences.pop(silence_id, None) is not None
+        if removed:
+            self.save_to_disk()
+        return removed
+
+    def list_silences(
+        self, active_only: bool = False, now: float | None = None
+    ) -> list[AlertSilenceRule]:
+        """List silence rules, optionally filtered to currently active ones."""
+        with self._lock:
+            rules = list(self._silences.values())
+        if active_only:
+            rules = [r for r in rules if r.is_active(now=now)]
+        return rules
+
+    def add_maintenance_window(self, window: MaintenanceWindow) -> MaintenanceWindow:
+        """Register a maintenance window and persist if configured."""
+        with self._lock:
+            self._maintenance_windows[window.window_id] = window
+        self.save_to_disk()
+        return window
+
+    def get_maintenance_window(self, window_id: str) -> MaintenanceWindow | None:
+        """Lookup a maintenance window by its ID."""
+        with self._lock:
+            return self._maintenance_windows.get(window_id)
+
+    def remove_maintenance_window(self, window_id: str) -> bool:
+        """Remove a maintenance window by its ID."""
+        with self._lock:
+            removed = self._maintenance_windows.pop(window_id, None) is not None
+        if removed:
+            self.save_to_disk()
+        return removed
+
+    def list_maintenance_windows(
+        self, active_only: bool = False, now: float | None = None
+    ) -> list[MaintenanceWindow]:
+        """List maintenance windows, optionally filtered to active ones."""
+        with self._lock:
+            windows = list(self._maintenance_windows.values())
+        if active_only:
+            windows = [w for w in windows if w.is_active(now=now)]
+        return windows
+
+    def evaluate(
+        self,
+        rule_name: str,
+        severity: str,
+        labels: Mapping[str, Any] | None = None,
+        now: float | None = None,
+    ) -> tuple[SilenceDecision, str | None]:
+        """Evaluate an alert transition against maintenance windows and silence rules.
+
+        Returns (decision, matching_id_or_reason).
+        """
+        ts = now if now is not None else time.time()
+        with self._lock:
+            # Check maintenance windows first (broadest scope)
+            for window in self._maintenance_windows.values():
+                if window.suppresses(rule_name, now=ts):
+                    return (
+                        SilenceDecision.SUPPRESSED_MAINTENANCE_WINDOW,
+                        window.window_id,
+                    )
+
+            # Check individual silence rules
+            for silence in self._silences.values():
+                if silence.is_active(now=ts) and silence.matches(
+                    rule_name, severity, labels
+                ):
+                    return (
+                        SilenceDecision.SUPPRESSED_SILENCE_RULE,
+                        silence.silence_id,
+                    )
+
+        return (SilenceDecision.ACTIVE, None)
+
+    def save_to_disk(self) -> None:
+        """Serialize silences and maintenance windows to JSON on disk if path set."""
+        if not self._storage_path:
+            return
+        with self._lock:
+            data = {
+                "silences": [s.to_dict() for s in self._silences.values()],
+                "maintenance_windows": [
+                    mw.to_dict() for mw in self._maintenance_windows.values()
+                ],
+            }
+        try:
+            self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+            self._storage_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except OSError as e:
+            logger.warning("Failed to persist alert silencing state: %s", e)
+
+    def load_from_disk(self) -> None:
+        """Load silences and maintenance windows from JSON file on disk."""
+        if not self._storage_path or not self._storage_path.exists():
+            return
+        try:
+            data = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            with self._lock:
+                for item in data.get("silences", []):
+                    rule = AlertSilenceRule.from_dict(item)
+                    self._silences[rule.silence_id] = rule
+                for item in data.get("maintenance_windows", []):
+                    window = MaintenanceWindow.from_dict(item)
+                    self._maintenance_windows[window.window_id] = window
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("Failed to load alert silencing state: %s", e)
+
+
 class WebhookDispatcher:
     """Deliver alert transitions to an HTTP(S) webhook as JSON.
 
