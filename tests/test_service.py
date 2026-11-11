@@ -9,7 +9,10 @@ import music_recommender.service as service_module
 from music_recommender.alerting import (
     AlertEvaluator,
     AlertRule,
+    AlertSilenceRule,
     AlertTransition,
+    MaintenanceWindow,
+    SilenceMatcher,
     WebhookDispatcher,
 )
 from music_recommender.artifacts import (
@@ -2467,3 +2470,77 @@ def test_service_evaluate_alerts_triggers_remediation(tmp_path: Path) -> None:
     assert len(results) == 1
     assert results[0].status == "executed"
     assert results[0].action_type == "flush_feedback_queue"
+
+
+def test_service_silence_rules_management(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    assert service.get_silence_rules() == []
+
+    silence = AlertSilenceRule(
+        silence_id="sil-svc-1",
+        matchers=[SilenceMatcher(name="alertname", value="StreamingRecordsDropped")],
+        starts_at=100.0,
+        ends_at=500.0,
+        author="ops",
+        comment="Maintenance testing",
+    )
+    added = service.add_silence_rule(silence)
+    assert added.silence_id == "sil-svc-1"
+
+    rules = service.get_silence_rules()
+    assert len(rules) == 1
+    assert rules[0]["silence_id"] == "sil-svc-1"
+    assert rules[0]["author"] == "ops"
+
+    # Active only filtering
+    active_rules = service.get_silence_rules(active_only=True, now=200.0)
+    assert len(active_rules) == 1
+    inactive_rules = service.get_silence_rules(active_only=True, now=600.0)
+    assert len(inactive_rules) == 0
+
+    # Verification in multichannel dispatcher
+    rule = AlertRule(
+        name="StreamingRecordsDropped",
+        metric="dropped_records",
+        comparator=">",
+        threshold=0,
+        severity="critical",
+        summary="Records dropped",
+    )
+    t = AlertTransition(rule, "firing", 10.0, "2026-11-11T12:00:00Z")
+    res = service.alert_multichannel_dispatcher.dispatch(t, now=200.0)
+    assert "silenced" in res
+
+    # Remove silence rule
+    assert service.remove_silence_rule("sil-svc-1") is True
+    assert len(service.get_silence_rules()) == 0
+
+
+def test_service_maintenance_windows_management(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    assert service.get_maintenance_windows() == []
+
+    mw = MaintenanceWindow(
+        window_id="mw-svc-1",
+        name="Weekly Maintenance",
+        starts_at=100.0,
+        ends_at=500.0,
+        suppress_all=True,
+        author="sre",
+    )
+    scheduled = service.schedule_maintenance_window(mw)
+    assert scheduled.window_id == "mw-svc-1"
+
+    windows = service.get_maintenance_windows()
+    assert len(windows) == 1
+    assert windows[0]["window_id"] == "mw-svc-1"
+    assert windows[0]["name"] == "Weekly Maintenance"
+
+    active_windows = service.get_maintenance_windows(active_only=True, now=300.0)
+    assert len(active_windows) == 1
+    inactive_windows = service.get_maintenance_windows(active_only=True, now=700.0)
+    assert len(inactive_windows) == 0
+
+    # Cancel maintenance window
+    assert service.cancel_maintenance_window("mw-svc-1") is True
+    assert len(service.get_maintenance_windows()) == 0
