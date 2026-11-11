@@ -19,6 +19,8 @@ from music_recommender.alerting import (
     AlertEvaluator,
     AlertHistoryBuffer,
     AlertNotificationThrottler,
+    AlertSilenceRule,
+    AlertSilencingEngine,
     AlertSpilloverStorage,
     AlertTransition,
     CircuitBreakerConfig,
@@ -26,6 +28,7 @@ from music_recommender.alerting import (
     DLQRetryPolicy,
     DLQRetryReport,
     IncidentRemediationRunner,
+    MaintenanceWindow,
     MultiChannelDispatcher,
     RemediationActionType,
     RemediationRule,
@@ -179,6 +182,7 @@ class RecommenderService:
         alert_multichannel_dispatcher: MultiChannelDispatcher | None = None,
         circuit_breaker_config: CircuitBreakerConfig | None = None,
         alert_remediation_runner: IncidentRemediationRunner | None = None,
+        alert_silencing_engine: AlertSilencingEngine | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -479,13 +483,19 @@ class RecommenderService:
             alert_escalation_engine or AlertEscalationEngine()
         )
         self.circuit_breaker_config = circuit_breaker_config or CircuitBreakerConfig()
+        self.alert_silencing_engine = alert_silencing_engine or AlertSilencingEngine()
         if alert_multichannel_dispatcher is not None:
             self.alert_multichannel_dispatcher = alert_multichannel_dispatcher
+            if self.alert_multichannel_dispatcher.silencing_engine is None:
+                self.alert_multichannel_dispatcher.silencing_engine = (
+                    self.alert_silencing_engine
+                )
         else:
             self.alert_multichannel_dispatcher = MultiChannelDispatcher(
                 throttler=self.alert_throttler,
                 escalation_engine=self.alert_escalation_engine,
                 circuit_breaker_config=self.circuit_breaker_config,
+                silencing_engine=self.alert_silencing_engine,
             )
             if self.alert_dispatcher is not None:
                 dispatcher = self.alert_dispatcher
@@ -1201,6 +1211,42 @@ class RecommenderService:
     def reset_circuit_breakers(self) -> None:
         """Reset all circuit breakers to CLOSED state."""
         self.alert_multichannel_dispatcher.reset()
+
+    def add_silence_rule(self, rule: AlertSilenceRule) -> AlertSilenceRule:
+        """Add an alert silencing rule."""
+        return self.alert_silencing_engine.add_silence(rule)
+
+    def remove_silence_rule(self, silence_id: str) -> bool:
+        """Remove or expire an alert silencing rule."""
+        return self.alert_silencing_engine.remove_silence(silence_id)
+
+    def get_silence_rules(
+        self, active_only: bool = False, now: float | None = None
+    ) -> list[dict[str, Any]]:
+        """Return registered alert silence rules."""
+        rules = self.alert_silencing_engine.list_silences(
+            active_only=active_only, now=now
+        )
+        return [r.to_dict() for r in rules]
+
+    def schedule_maintenance_window(
+        self, window: MaintenanceWindow
+    ) -> MaintenanceWindow:
+        """Schedule a maintenance window for alert suppression."""
+        return self.alert_silencing_engine.add_maintenance_window(window)
+
+    def cancel_maintenance_window(self, window_id: str) -> bool:
+        """Cancel a maintenance window."""
+        return self.alert_silencing_engine.remove_maintenance_window(window_id)
+
+    def get_maintenance_windows(
+        self, active_only: bool = False, now: float | None = None
+    ) -> list[dict[str, Any]]:
+        """Return scheduled maintenance windows."""
+        windows = self.alert_silencing_engine.list_maintenance_windows(
+            active_only=active_only, now=now
+        )
+        return [w.to_dict() for w in windows]
 
     def export_prometheus_metrics(
         self,
