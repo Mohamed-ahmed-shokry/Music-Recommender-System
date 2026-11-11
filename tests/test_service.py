@@ -6,7 +6,15 @@ import pandas as pd
 import pytest
 
 import music_recommender.service as service_module
-from music_recommender.alerting import AlertEvaluator, AlertRule, WebhookDispatcher
+from music_recommender.alerting import (
+    AlertEvaluator,
+    AlertRule,
+    AlertSilenceRule,
+    AlertTransition,
+    MaintenanceWindow,
+    SilenceMatcher,
+    WebhookDispatcher,
+)
 from music_recommender.artifacts import (
     build_artist_stats,
     build_recommender_artifact,
@@ -2399,3 +2407,140 @@ def test_service_alert_throttling_and_multichannel(tmp_path: Path) -> None:
 
     service.reset_alert_throttling()
     assert service.get_alert_throttling_stats()["total_evaluated"] == 0
+
+
+def test_service_remediation_default_rules_and_manual_trigger(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    rules = service.get_remediation_rules()
+    rule_names = {r["rule_name"] for r in rules}
+    assert "StreamingQueueHighUtilization" in rule_names
+    assert "StreamingHealthDegraded" in rule_names
+    assert "DeadLetterSpilloverHigh" in rule_names
+    assert "AlertDeliveryFailureRateHigh" in rule_names
+
+    res = service.trigger_remediation_action(
+        rule_name="manual-flush",
+        action_type="flush_feedback_queue",
+    )
+    assert res["rule_name"] == "manual-flush"
+    assert res["action_type"] == "flush_feedback_queue"
+    assert res["status"] == "executed"
+
+    history = service.get_remediation_history()
+    assert len(history) == 1
+    assert history[0]["action_type"] == "flush_feedback_queue"
+
+
+def test_service_remediation_circuit_breaker_stats_and_reset(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    res = service.trigger_remediation_action(
+        rule_name="trip-breaker",
+        action_type="trip_circuit_breaker",
+        parameters={"channel": "webhook", "reason": "simulated overload"},
+    )
+    assert res["status"] == "executed"
+
+    stats = service.get_circuit_breaker_stats()
+    assert "webhook" in stats
+    assert stats["webhook"]["state"] == "open"
+
+    service.reset_circuit_breakers()
+    stats_after = service.get_circuit_breaker_stats()
+    assert stats_after["webhook"]["state"] == "closed"
+
+
+def test_service_evaluate_alerts_triggers_remediation(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    # Manually pass a transition directly to alert_remediation_runner
+    rule = AlertRule(
+        name="StreamingQueueHighUtilization",
+        metric="streaming_queue_utilization",
+        comparator=">",
+        threshold=0.8,
+        severity="warning",
+        summary="Queue above 80%",
+    )
+    t = AlertTransition(
+        rule=rule,
+        event="firing",
+        value=0.9,
+        timestamp="2026-11-09T10:00:00Z",
+    )
+    results = service.alert_remediation_runner.handle_transition(t)
+    assert len(results) == 1
+    assert results[0].status == "executed"
+    assert results[0].action_type == "flush_feedback_queue"
+
+
+def test_service_silence_rules_management(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    assert service.get_silence_rules() == []
+
+    silence = AlertSilenceRule(
+        silence_id="sil-svc-1",
+        matchers=[SilenceMatcher(name="alertname", value="StreamingRecordsDropped")],
+        starts_at=100.0,
+        ends_at=500.0,
+        author="ops",
+        comment="Maintenance testing",
+    )
+    added = service.add_silence_rule(silence)
+    assert added.silence_id == "sil-svc-1"
+
+    rules = service.get_silence_rules()
+    assert len(rules) == 1
+    assert rules[0]["silence_id"] == "sil-svc-1"
+    assert rules[0]["author"] == "ops"
+
+    # Active only filtering
+    active_rules = service.get_silence_rules(active_only=True, now=200.0)
+    assert len(active_rules) == 1
+    inactive_rules = service.get_silence_rules(active_only=True, now=600.0)
+    assert len(inactive_rules) == 0
+
+    # Verification in multichannel dispatcher
+    rule = AlertRule(
+        name="StreamingRecordsDropped",
+        metric="dropped_records",
+        comparator=">",
+        threshold=0,
+        severity="critical",
+        summary="Records dropped",
+    )
+    t = AlertTransition(rule, "firing", 10.0, "2026-11-11T12:00:00Z")
+    res = service.alert_multichannel_dispatcher.dispatch(t, now=200.0)
+    assert "silenced" in res
+
+    # Remove silence rule
+    assert service.remove_silence_rule("sil-svc-1") is True
+    assert len(service.get_silence_rules()) == 0
+
+
+def test_service_maintenance_windows_management(tmp_path: Path) -> None:
+    service = create_service(tmp_path)
+    assert service.get_maintenance_windows() == []
+
+    mw = MaintenanceWindow(
+        window_id="mw-svc-1",
+        name="Weekly Maintenance",
+        starts_at=100.0,
+        ends_at=500.0,
+        suppress_all=True,
+        author="sre",
+    )
+    scheduled = service.schedule_maintenance_window(mw)
+    assert scheduled.window_id == "mw-svc-1"
+
+    windows = service.get_maintenance_windows()
+    assert len(windows) == 1
+    assert windows[0]["window_id"] == "mw-svc-1"
+    assert windows[0]["name"] == "Weekly Maintenance"
+
+    active_windows = service.get_maintenance_windows(active_only=True, now=300.0)
+    assert len(active_windows) == 1
+    inactive_windows = service.get_maintenance_windows(active_only=True, now=700.0)
+    assert len(inactive_windows) == 0
+
+    # Cancel maintenance window
+    assert service.cancel_maintenance_window("mw-svc-1") is True
+    assert len(service.get_maintenance_windows()) == 0

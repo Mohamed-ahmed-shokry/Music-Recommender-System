@@ -20,8 +20,16 @@ from music_recommender.alerting import (
     AlertMode,
     AlertRule,
     AlertSeverity,
+    AlertSilenceRule,
+    AlertSilencingEngine,
     AlertTransition,
+    MaintenanceWindow,
+    MultiChannelDispatcher,
     ReceivedAlertEvent,
+    SilenceDecision,
+    SilenceMatcher,
+    SlackWebhookAdapter,
+    TeamsWebhookAdapter,
     WebhookDispatcher,
     lookup_metric_value,
     parse_alert_payload,
@@ -279,6 +287,7 @@ def test_dispatcher_default_sender_posts_json_over_http() -> None:
     finally:
         server.shutdown()
         server.server_close()
+        thread.join(timeout=2.0)
     assert received[0][0] == "application/json"
     assert received[0][1]["alert"] == "HighThing"
 
@@ -302,6 +311,7 @@ def test_dispatcher_default_sender_reports_http_errors() -> None:
     finally:
         server.shutdown()
         server.server_close()
+        thread.join(timeout=2.0)
 
 
 # --- Prometheus rule file --------------------------------------------------
@@ -1808,3 +1818,605 @@ def test_remediation_runner_dry_run_and_manual_execute() -> None:
 
     runner.reset()
     assert runner.get_stats()["total_runs"] == 0
+
+
+def test_circuit_breaker_config_serialization() -> None:
+    from music_recommender.alerting import CircuitBreakerConfig
+
+    cfg = CircuitBreakerConfig(
+        failure_threshold=3,
+        recovery_timeout_seconds=45.0,
+        half_open_success_threshold=1,
+        enabled=True,
+    )
+    data = cfg.to_dict()
+    assert data["failure_threshold"] == 3
+    assert data["recovery_timeout_seconds"] == 45.0
+
+    restored = CircuitBreakerConfig.from_dict(data)
+    assert restored.failure_threshold == 3
+    assert restored.recovery_timeout_seconds == 45.0
+    assert restored.half_open_success_threshold == 1
+
+
+def test_circuit_breaker_state_transitions() -> None:
+    from music_recommender.alerting import (
+        CircuitBreaker,
+        CircuitBreakerConfig,
+        CircuitBreakerState,
+    )
+
+    cb = CircuitBreaker(
+        name="test_cb",
+        config=CircuitBreakerConfig(
+            failure_threshold=3,
+            recovery_timeout_seconds=20.0,
+            half_open_success_threshold=2,
+        ),
+    )
+
+    # 1. Initially CLOSED
+    assert cb.state == CircuitBreakerState.CLOSED
+    allowed, msg = cb.allow_request(now=100.0)
+    assert allowed is True
+    assert "healthy" in msg
+
+    # 2. Record 2 failures (< threshold 3) -> still CLOSED
+    cb.record_failure("error 1", now=100.0)
+    cb.record_failure("error 2", now=100.0)
+    assert cb.state == CircuitBreakerState.CLOSED
+
+    # 3. Third failure -> trips OPEN
+    cb.record_failure("error 3", now=100.0)
+    assert cb.state == CircuitBreakerState.OPEN
+    stats = cb.get_stats()
+    assert stats["total_trips"] == 1
+    assert stats["state"] == "open"
+
+    # 4. Request within recovery timeout (10s elapsed < 20s) -> rejected
+    allowed_blocked, block_msg = cb.allow_request(now=110.0)
+    assert allowed_blocked is False
+    assert "Circuit open" in block_msg
+    assert cb.get_stats()["total_rejected"] == 1
+
+    # 5. Request after recovery timeout (25s elapsed >= 20s) -> probe
+    allowed_probe, probe_msg = cb.allow_request(now=125.0)
+    assert allowed_probe is True
+    assert cb.state == CircuitBreakerState.HALF_OPEN
+    assert "half-open" in probe_msg.lower()
+
+    # 6. Probe failure -> trips back to OPEN
+    cb.record_failure("probe failed", now=125.0)
+    assert cb.state == CircuitBreakerState.OPEN
+    assert cb.get_stats()["total_trips"] == 2
+
+    # 7. Advance time again -> enters HALF_OPEN
+    allowed_probe2, _ = cb.allow_request(now=150.0)
+    assert allowed_probe2 is True
+    assert cb.state == CircuitBreakerState.HALF_OPEN
+
+    # 8. Record 2 consecutive successes -> closes circuit!
+    cb.record_success(now=150.0)
+    assert cb.state == CircuitBreakerState.HALF_OPEN
+    cb.record_success(now=151.0)
+    assert cb.state == CircuitBreakerState.CLOSED
+
+    # Healthy again
+    allowed_recovered, _ = cb.allow_request(now=155.0)
+    assert allowed_recovered is True
+
+
+def test_circuit_breaker_disabled_and_reset() -> None:
+    from music_recommender.alerting import (
+        CircuitBreaker,
+        CircuitBreakerConfig,
+        CircuitBreakerState,
+    )
+
+    cb = CircuitBreaker(config=CircuitBreakerConfig(enabled=False))
+    cb.record_failure("fail")
+    cb.record_failure("fail")
+    cb.record_failure("fail")
+    cb.record_failure("fail")
+    cb.record_failure("fail")
+    cb.record_failure("fail")
+    allowed, _ = cb.allow_request()
+    assert allowed is True
+
+    # Test reset
+    cb_active = CircuitBreaker(config=CircuitBreakerConfig(failure_threshold=1))
+    cb_active.record_failure("fail")
+    assert cb_active.state == CircuitBreakerState.OPEN
+    cb_active.reset()
+    assert cb_active.state == CircuitBreakerState.CLOSED
+    assert cb_active.get_stats()["total_trips"] == 0
+
+
+def test_webhook_dispatcher_with_circuit_breaker() -> None:
+    from music_recommender.alerting import (
+        CircuitBreaker,
+        CircuitBreakerConfig,
+        CircuitBreakerState,
+        WebhookDispatcher,
+    )
+
+    cb = CircuitBreaker(
+        name="test-webhook",
+        config=CircuitBreakerConfig(failure_threshold=2, recovery_timeout_seconds=30.0),
+    )
+    calls = []
+
+    def failing_sender(url: str, body: bytes, timeout: float) -> None:
+        calls.append(url)
+        raise ConnectionRefusedError("connection refused")
+
+    dispatcher = WebhookDispatcher(
+        url="http://test-webhook.internal/hook",
+        max_attempts=1,
+        circuit_breaker=cb,
+        sender=failing_sender,
+    )
+
+    # First dispatch fails and records failure
+    res1 = dispatcher.dispatch([_transition()])
+    assert res1 == 0
+    assert len(calls) == 1
+    assert cb.state == CircuitBreakerState.CLOSED
+
+    # Second dispatch fails and trips breaker
+    res2 = dispatcher.dispatch([_transition()])
+    assert res2 == 0
+    assert len(calls) == 2
+    assert cb.state == CircuitBreakerState.OPEN
+
+    # Third dispatch is shed fast by circuit breaker without calling failing_sender
+    res3 = dispatcher.dispatch([_transition()])
+    assert res3 == 0
+    assert len(calls) == 2  # sender was NOT called
+    assert cb.get_stats()["total_trips"] == 1
+
+
+def test_multichannel_dispatcher_circuit_breaker_isolation() -> None:
+    from music_recommender.alerting import (
+        AlertNotificationThrottler,
+        AlertThrottleConfig,
+        CircuitBreakerConfig,
+        CircuitBreakerState,
+        MultiChannelDispatcher,
+    )
+
+    pd_calls = 0
+    slack_calls = 0
+
+    def pd_handler(t: AlertTransition) -> tuple[bool, int, str]:
+        nonlocal pd_calls
+        pd_calls += 1
+        return False, 500, "PD upstream error"
+
+    def slack_handler(t: AlertTransition) -> tuple[bool, int, str]:
+        nonlocal slack_calls
+        slack_calls += 1
+        return True, 200, "Slack ok"
+
+    dispatcher = MultiChannelDispatcher(
+        channels={"pagerduty": pd_handler, "slack": slack_handler},
+        throttler=AlertNotificationThrottler(AlertThrottleConfig(enabled=False)),
+        circuit_breaker_config=CircuitBreakerConfig(
+            failure_threshold=2, recovery_timeout_seconds=60.0
+        ),
+    )
+
+    t = _transition()
+
+    # Dispatch 1: PD fails, Slack succeeds
+    res1 = dispatcher.dispatch(t, channels=["pagerduty", "slack"], now=10.0)
+    assert res1["pagerduty"] == (False, 500, "PD upstream error")
+    assert res1["slack"] == (True, 200, "Slack ok")
+    assert pd_calls == 1
+    assert slack_calls == 1
+
+    # Dispatch 2: PD fails again -> trips PD circuit breaker
+    res2 = dispatcher.dispatch(t, channels=["pagerduty", "slack"], now=11.0)
+    assert res2["pagerduty"] == (False, 500, "PD upstream error")
+    assert res2["slack"] == (True, 200, "Slack ok")
+    assert pd_calls == 2
+    assert slack_calls == 2
+
+    pd_cb = dispatcher.get_circuit_breaker("pagerduty")
+    slack_cb = dispatcher.get_circuit_breaker("slack")
+    assert pd_cb.state == CircuitBreakerState.OPEN
+    assert slack_cb.state == CircuitBreakerState.CLOSED
+
+    # Dispatch 3: PD fails fast (503) due to open circuit, Slack still succeeds
+    res3 = dispatcher.dispatch(t, channels=["pagerduty", "slack"], now=12.0)
+    assert res3["pagerduty"][0] is False
+    assert res3["pagerduty"][1] == 503
+    assert "Circuit open" in res3["pagerduty"][2]
+    assert res3["slack"] == (True, 200, "Slack ok")
+    assert pd_calls == 2  # PD handler not called!
+    assert slack_calls == 3
+
+    # Check stats include circuit breakers
+    stats = dispatcher.get_stats()
+    assert "circuit_breakers" in stats
+    assert "pagerduty" in stats["circuit_breakers"]
+    assert stats["circuit_breakers"]["pagerduty"]["state"] == "open"
+    assert stats["circuit_breakers"]["slack"]["state"] == "closed"
+
+    # Reset resets circuit breakers
+    dispatcher.reset()
+    assert pd_cb.state == CircuitBreakerState.CLOSED
+
+
+def test_silence_matcher_matching() -> None:
+    matcher_name = SilenceMatcher(name="alertname", value="HighErrorRate")
+    assert matcher_name.matches("HighErrorRate", "critical")
+    assert not matcher_name.matches("LowMemory", "critical")
+
+    matcher_sev = SilenceMatcher(name="severity", value="warning")
+    assert matcher_sev.matches("AnyAlert", "warning")
+    assert not matcher_sev.matches("AnyAlert", "critical")
+
+    matcher_lbl = SilenceMatcher(name="env", value="prod")
+    assert matcher_lbl.matches("AnyAlert", "critical", {"env": "prod"})
+    assert not matcher_lbl.matches("AnyAlert", "critical", {"env": "staging"})
+    assert not matcher_lbl.matches("AnyAlert", "critical", {})
+
+    matcher_regex = SilenceMatcher(
+        name="cluster", value=r"^eu-(west|central)-\d$", is_regex=True
+    )
+    assert matcher_regex.matches("AnyAlert", "critical", {"cluster": "eu-west-1"})
+    assert not matcher_regex.matches("AnyAlert", "critical", {"cluster": "us-east-1"})
+
+    bad_regex = SilenceMatcher(name="cluster", value=r"[invalid", is_regex=True)
+    assert not bad_regex.matches("AnyAlert", "critical", {"cluster": "eu-west-1"})
+
+    data = matcher_regex.to_dict()
+    restored = SilenceMatcher.from_dict(data)
+    assert restored.name == "cluster"
+    assert restored.value == r"^eu-(west|central)-\d$"
+    assert restored.is_regex is True
+
+
+def test_alert_silence_rule_lifecycle() -> None:
+    now = 1000.0
+    rule = AlertSilenceRule(
+        silence_id="sil-1",
+        matchers=[
+            SilenceMatcher(name="alertname", value="HighMemory"),
+            SilenceMatcher(name="severity", value="critical"),
+        ],
+        starts_at=900.0,
+        ends_at=1100.0,
+        author="sre-team",
+        comment="Planned load test",
+    )
+    assert rule.is_active(now=now)
+    assert rule.matches("HighMemory", "critical")
+    assert not rule.matches("HighMemory", "warning")
+    assert not rule.matches("LowDisk", "critical")
+
+    # Time boundaries
+    assert not rule.is_active(now=850.0)
+    assert not rule.is_active(now=1150.0)
+
+    # Disabled toggle
+    rule.enabled = False
+    assert not rule.is_active(now=now)
+
+    # Roundtrip serialization
+    data = rule.to_dict()
+    restored = AlertSilenceRule.from_dict(data)
+    assert restored.silence_id == "sil-1"
+    assert len(restored.matchers) == 2
+    assert restored.author == "sre-team"
+    assert restored.comment == "Planned load test"
+
+
+def test_maintenance_window_suppression() -> None:
+    now = 2000.0
+    mw_all = MaintenanceWindow(
+        window_id="mw-1",
+        name="Cluster Upgrade",
+        starts_at=1900.0,
+        ends_at=2100.0,
+        suppress_all=True,
+    )
+    assert mw_all.is_active(now=now)
+    assert mw_all.suppresses("AnyAlert", now=now)
+    assert not mw_all.suppresses("AnyAlert", now=2200.0)
+
+    mw_target = MaintenanceWindow(
+        window_id="mw-2",
+        name="Database Reindex",
+        starts_at=1900.0,
+        ends_at=2100.0,
+        suppress_all=False,
+        affected_rules=["DatabaseLatencyHigh", "LockContention"],
+    )
+    assert mw_target.suppresses("DatabaseLatencyHigh", now=now)
+    assert not mw_target.suppresses("HighMemoryUsage", now=now)
+
+    # Disabled toggle
+    mw_target.enabled = False
+    assert not mw_target.suppresses("DatabaseLatencyHigh", now=now)
+
+    # Roundtrip serialization
+    data = mw_target.to_dict()
+    restored = MaintenanceWindow.from_dict(data)
+    assert restored.window_id == "mw-2"
+    assert restored.name == "Database Reindex"
+    assert "DatabaseLatencyHigh" in restored.affected_rules
+
+
+def test_alert_silencing_engine_evaluation_and_persistence(tmp_path: Path) -> None:
+    now = 3000.0
+    storage = tmp_path / "silences.json"
+    engine = AlertSilencingEngine(storage_path=storage)
+
+    # Initially empty
+    assert engine.list_silences() == []
+    assert engine.list_maintenance_windows() == []
+    dec, target = engine.evaluate("HighErrorRate", "critical", now=now)
+    assert dec == SilenceDecision.ACTIVE
+    assert target is None
+
+    # Add silence rule
+    silence = AlertSilenceRule(
+        silence_id="sil-test",
+        matchers=[SilenceMatcher(name="alertname", value="HighErrorRate")],
+        starts_at=2900.0,
+        ends_at=3100.0,
+    )
+    engine.add_silence(silence)
+    assert engine.get_silence("sil-test") is not None
+    assert len(engine.list_silences(active_only=True, now=now)) == 1
+
+    # Matching alert is suppressed
+    dec, target = engine.evaluate("HighErrorRate", "critical", now=now)
+    assert dec == SilenceDecision.SUPPRESSED_SILENCE_RULE
+    assert target == "sil-test"
+
+    # Non-matching alert remains active
+    dec, target = engine.evaluate("MemoryExhausted", "critical", now=now)
+    assert dec == SilenceDecision.ACTIVE
+
+    # Maintenance window takes precedence
+    mw = MaintenanceWindow(
+        window_id="mw-global",
+        starts_at=2900.0,
+        ends_at=3100.0,
+        suppress_all=True,
+    )
+    engine.add_maintenance_window(mw)
+    dec, target = engine.evaluate("HighErrorRate", "critical", now=now)
+    assert dec == SilenceDecision.SUPPRESSED_MAINTENANCE_WINDOW
+    assert target == "mw-global"
+
+    # Persistence verification: reload into fresh engine
+    assert storage.exists()
+    engine2 = AlertSilencingEngine(storage_path=storage)
+    assert engine2.get_silence("sil-test") is not None
+    assert engine2.get_maintenance_window("mw-global") is not None
+
+    # Removal
+    assert engine.remove_silence("sil-test")
+    assert not engine.remove_silence("nonexistent")
+    assert engine.remove_maintenance_window("mw-global")
+    dec, target = engine.evaluate("HighErrorRate", "critical", now=now)
+    assert dec == SilenceDecision.ACTIVE
+
+
+def test_slack_webhook_adapter_payload_and_send() -> None:
+    sent_requests: list[tuple[str, bytes, dict[str, str], float, str]] = []
+
+    def mock_sender(
+        url: str, body: bytes, headers: dict[str, str], timeout: float, method: str
+    ) -> tuple[int, str]:
+        sent_requests.append((url, body, headers, timeout, method))
+        return 200, "ok"
+
+    adapter = SlackWebhookAdapter(
+        webhook_url="https://hooks.slack.com/services/T00/B00/X00",
+        channel="#incidents",
+        dashboard_url="https://dash.example.com",
+        sender=mock_sender,
+    )
+
+    crit_rule = _rule(
+        name="DiskFull",
+        metric="node_disk_avail",
+        threshold=10,
+        comparator="<",
+        severity="critical",
+        summary="Disk space low",
+    )
+    t_crit = AlertTransition(
+        rule=crit_rule,
+        event="firing",
+        value=5.0,
+        timestamp="2026-11-11T12:00:00Z",
+    )
+
+    payload_crit = adapter.build_payload(t_crit)
+    assert payload_crit["channel"] == "#incidents"
+    assert payload_crit["attachments"][0]["color"] == "#E01E5A"
+    blocks = payload_crit["attachments"][0]["blocks"]
+    assert blocks[0]["type"] == "header"
+    assert "CRITICAL" in blocks[0]["text"]["text"]
+    assert blocks[1]["type"] == "section"
+    assert "DiskFull" in payload_crit["text"]
+    assert blocks[2]["type"] == "actions"
+    assert blocks[2]["elements"][0]["url"] == "https://dash.example.com"
+
+    # Send critical
+    ok, code, msg = adapter.send(t_crit)
+    assert ok is True
+    assert code == 200
+    assert len(sent_requests) == 1
+    assert sent_requests[0][0] == "https://hooks.slack.com/services/T00/B00/X00"
+    assert sent_requests[0][4] == "POST"
+
+    # Warning severity
+    warn_rule = _rule(name="HighLatency", severity="warning", summary="Latency warning")
+    t_warn = AlertTransition(
+        rule=warn_rule,
+        event="firing",
+        value=1.5,
+        timestamp="2026-11-11T12:05:00Z",
+    )
+    payload_warn = adapter.build_payload(t_warn)
+    assert payload_warn["attachments"][0]["color"] == "#ECB22E"
+
+    # Resolved state
+    t_res = AlertTransition(
+        rule=crit_rule,
+        event="resolved",
+        value=50.0,
+        timestamp="2026-11-11T12:10:00Z",
+    )
+    payload_res = adapter.build_payload(t_res)
+    assert payload_res["attachments"][0]["color"] == "#2EB886"
+    assert "RESOLVED" in payload_res["attachments"][0]["blocks"][0]["text"]["text"]
+
+
+def test_teams_webhook_adapter_payload_and_send() -> None:
+    sent_requests: list[tuple[str, bytes, dict[str, str], float, str]] = []
+
+    def mock_sender(
+        url: str, body: bytes, headers: dict[str, str], timeout: float, method: str
+    ) -> tuple[int, str]:
+        sent_requests.append((url, body, headers, timeout, method))
+        return 200, "ok"
+
+    adapter = TeamsWebhookAdapter(
+        webhook_url="https://outlook.office.com/webhook/xxx",
+        dashboard_url="https://dash.example.com",
+        sender=mock_sender,
+    )
+
+    crit_rule = _rule(
+        name="ServiceDown",
+        metric="up",
+        threshold=1,
+        comparator="==",
+        severity="critical",
+        summary="Service is unreachable",
+    )
+    t_crit = AlertTransition(
+        rule=crit_rule,
+        event="firing",
+        value=0.0,
+        timestamp="2026-11-11T12:00:00Z",
+    )
+
+    payload_crit = adapter.build_payload(t_crit)
+    assert payload_crit["@type"] == "MessageCard"
+    assert payload_crit["themeColor"] == "E01E5A"
+    assert "CRITICAL" in payload_crit["title"]
+    facts = payload_crit["sections"][0]["facts"]
+    assert any(f["name"] == "Rule" and f["value"] == "ServiceDown" for f in facts)
+    assert any(f["name"] == "Current Value" and f["value"] == "0.0000" for f in facts)
+    assert payload_crit["potentialAction"][0]["targets"][0]["uri"] == (
+        "https://dash.example.com"
+    )
+
+    # Send critical
+    ok, code, msg = adapter.send(t_crit)
+    assert ok is True
+    assert code == 200
+    assert len(sent_requests) == 1
+
+    # Resolved transition
+    t_res = AlertTransition(
+        rule=crit_rule,
+        event="resolved",
+        value=1.0,
+        timestamp="2026-11-11T12:15:00Z",
+    )
+    payload_res = adapter.build_payload(t_res)
+    assert payload_res["themeColor"] == "2EB886"
+    assert "RESOLVED" in payload_res["title"]
+
+
+def test_multichannel_dispatcher_silencing_suppression() -> None:
+    now = 5000.0
+    called_channels: list[str] = []
+
+    def fake_handler(ch: str) -> Any:
+        def _h(t: AlertTransition) -> tuple[bool, int, str]:
+            called_channels.append(ch)
+            return True, 200, "ok"
+
+        return _h
+
+    silencing = AlertSilencingEngine()
+    silence = AlertSilenceRule(
+        silence_id="sil-lat",
+        matchers=[SilenceMatcher(name="alertname", value="HighLatency")],
+        starts_at=4900.0,
+        ends_at=5100.0,
+    )
+    silencing.add_silence(silence)
+
+    dispatcher = MultiChannelDispatcher(
+        channels={"slack": fake_handler("slack"), "teams": fake_handler("teams")},
+        silencing_engine=silencing,
+    )
+
+    # HighLatency is silenced
+    lat_rule = _rule(name="HighLatency", summary="High Latency")
+    t_lat = AlertTransition(lat_rule, "firing", 2.0, "2026-11-11T12:00:00Z")
+    res_lat = dispatcher.dispatch(t_lat, now=now)
+    assert "silenced" in res_lat
+    assert res_lat["silenced"][0] is False
+    assert res_lat["silenced"][1] == 204
+    assert "suppressed_silence_rule" in res_lat["silenced"][2]
+    assert called_channels == []
+
+    # DiskFull is NOT silenced -> sent to both channels
+    disk_rule = _rule(name="DiskFull", summary="Disk full")
+    t_disk = AlertTransition(disk_rule, "firing", 99.0, "2026-11-11T12:00:00Z")
+    res_disk = dispatcher.dispatch(t_disk, now=now)
+    assert "slack" in res_disk
+    assert "teams" in res_disk
+    assert res_disk["slack"] == (True, 200, "ok")
+    assert sorted(called_channels) == ["slack", "teams"]
+
+    # Now add maintenance window that suppresses all alerts
+    mw = MaintenanceWindow(
+        window_id="mw-outage",
+        starts_at=4900.0,
+        ends_at=5100.0,
+        suppress_all=True,
+    )
+    silencing.add_maintenance_window(mw)
+
+    res_disk2 = dispatcher.dispatch(t_disk, now=now)
+    assert "silenced" in res_disk2
+    assert res_disk2["silenced"][1] == 204
+    assert "suppressed_maintenance_window" in res_disk2["silenced"][2]
+
+
+def test_multichannel_dispatcher_chat_registration_and_stats() -> None:
+    silencing = AlertSilencingEngine()
+    silencing.add_silence(
+        AlertSilenceRule(silence_id="s1", starts_at=10.0, ends_at=100.0)
+    )
+    silencing.add_maintenance_window(
+        MaintenanceWindow(window_id="m1", starts_at=10.0, ends_at=100.0)
+    )
+
+    dispatcher = MultiChannelDispatcher(silencing_engine=silencing)
+    slack_adapter = dispatcher.register_slack(webhook_url="https://slack.example.com")
+    teams_adapter = dispatcher.register_teams(webhook_url="https://teams.example.com")
+
+    assert isinstance(slack_adapter, SlackWebhookAdapter)
+    assert isinstance(teams_adapter, TeamsWebhookAdapter)
+
+    stats = dispatcher.get_stats()
+    assert "slack" in stats["registered_channels"]
+    assert "teams" in stats["registered_channels"]
+    assert "silencing" in stats
+    assert stats["silencing"]["total_silences"] == 1
+    assert stats["silencing"]["total_maintenance_windows"] == 1

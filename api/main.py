@@ -6,7 +6,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,14 +20,21 @@ from music_recommender.alerting import (
     AlertHistoryBuffer,
     AlertNotificationThrottler,
     AlertRule,
+    AlertSilenceRule,
+    AlertSilencingEngine,
     AlertSpilloverStorage,
     AlertTransition,
     DeadLetterAlertRecord,
     DLQRetryPolicy,
+    IncidentRemediationRunner,
+    MaintenanceWindow,
     MultiChannelDispatcher,
     OpsgenieGateway,
     PagerDutyGateway,
     ReceivedAlertEvent,
+    RemediationActionType,
+    RemediationRule,
+    SilenceMatcher,
     parse_alert_payload,
 )
 from music_recommender.bandit import (
@@ -66,6 +73,66 @@ _fallback_alert_history = AlertHistoryBuffer(spillover_storage=_fallback_storage
 _fallback_alert_throttler = AlertNotificationThrottler()
 _fallback_alert_multichannel_dispatcher = MultiChannelDispatcher(
     throttler=_fallback_alert_throttler
+)
+_fallback_remediation_runner = IncidentRemediationRunner()
+_fallback_silencing_engine = AlertSilencingEngine()
+_fallback_alert_multichannel_dispatcher.silencing_engine = _fallback_silencing_engine
+_fallback_remediation_runner.register_rule(
+    RemediationRule(
+        rule_name="StreamingQueueHighUtilization",
+        action_type=RemediationActionType.FLUSH_FEEDBACK_QUEUE,
+        cooldown_seconds=60.0,
+    )
+)
+_fallback_remediation_runner.register_rule(
+    RemediationRule(
+        rule_name="StreamingHealthDegraded",
+        action_type=RemediationActionType.RESTART_MAINTENANCE_WORKER,
+        cooldown_seconds=120.0,
+    )
+)
+_fallback_remediation_runner.register_rule(
+    RemediationRule(
+        rule_name="DeadLetterSpilloverHigh",
+        action_type=RemediationActionType.ROTATE_ALERT_STORAGE,
+        cooldown_seconds=300.0,
+    )
+)
+_fallback_remediation_runner.register_rule(
+    RemediationRule(
+        rule_name="AlertDeliveryFailureRateHigh",
+        action_type=RemediationActionType.TRIP_CIRCUIT_BREAKER,
+        cooldown_seconds=120.0,
+        parameters={"channel": "webhook"},
+    )
+)
+_fallback_remediation_runner.register_handler(
+    RemediationActionType.FLUSH_FEEDBACK_QUEUE,
+    lambda tr, params: (
+        True,
+        "Fallback flush feedback queue no-op",
+        {"flushed": False},
+    ),
+)
+_fallback_remediation_runner.register_handler(
+    RemediationActionType.RESTART_MAINTENANCE_WORKER,
+    lambda tr, params: (True, "Fallback restart worker no-op", {"restarted": False}),
+)
+_fallback_remediation_runner.register_handler(
+    RemediationActionType.ROTATE_ALERT_STORAGE,
+    lambda tr, params: (True, "Fallback rotate storage no-op", {"rotated": False}),
+)
+_fallback_remediation_runner.register_handler(
+    RemediationActionType.TRIGGER_ONLINE_FOLD,
+    lambda tr, params: (True, "Fallback online fold no-op", {"folded": False}),
+)
+_fallback_remediation_runner.register_handler(
+    RemediationActionType.TRIP_CIRCUIT_BREAKER,
+    lambda tr, params: (
+        True,
+        f"Fallback trip circuit breaker for {params.get('channel', 'webhook')}",
+        {"channel": params.get("channel", "webhook")},
+    ),
 )
 
 
@@ -702,6 +769,284 @@ def alert_gateway_test(payload: GatewayTestRequest) -> dict[str, object]:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Webhook delivery failed: {exc}",
         ) from exc
+
+
+class SilenceMatcherModel(BaseModel):
+    """Matcher criteria for alert silencing."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        ...,
+        description="Target property: rule_name, alertname, severity, or label key",
+    )
+    value: str = Field(..., description="Value to match")
+    is_regex: bool = Field(False, description="Match using regular expression")
+
+
+class CreateSilenceRequest(BaseModel):
+    """Request payload to create a new alert silence rule."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    silence_id: str | None = Field(
+        None, description="Optional custom silence identifier"
+    )
+    matchers: list[SilenceMatcherModel] = Field(
+        default_factory=list, description="List of matchers"
+    )
+    duration_seconds: float | None = Field(
+        None, description="Silence duration in seconds from now"
+    )
+    starts_at: float | None = Field(
+        None, description="Silence start timestamp (epoch seconds)"
+    )
+    ends_at: float | None = Field(
+        None, description="Silence end timestamp (epoch seconds)"
+    )
+    author: str = Field("operator", description="Author creating the silence")
+    comment: str = Field("", description="Context or explanation for silence")
+
+
+class CreateMaintenanceWindowRequest(BaseModel):
+    """Request payload to schedule a maintenance window."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    window_id: str | None = Field(None, description="Optional custom window identifier")
+    name: str = Field(
+        "scheduled_maintenance", description="Name of the maintenance window"
+    )
+    duration_seconds: float | None = Field(
+        None, description="Window duration in seconds from now"
+    )
+    starts_at: float | None = Field(
+        None, description="Window start timestamp (epoch seconds)"
+    )
+    ends_at: float | None = Field(
+        None, description="Window end timestamp (epoch seconds)"
+    )
+    suppress_all: bool = Field(
+        True, description="Suppress all alert rules during window"
+    )
+    affected_rules: list[str] = Field(
+        default_factory=list, description="Specific rules to suppress"
+    )
+    author: str = Field("operator", description="Author scheduling the window")
+    description: str = Field("", description="Details regarding maintenance tasks")
+
+
+class RemediationTriggerRequest(BaseModel):
+    """Payload to trigger an automated self-healing remediation action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rule_name: str = Field(
+        default="manual", description="Alert rule or trigger identifier"
+    )
+    action_type: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1)
+    ] = Field(..., description="Remediation action type")
+    parameters: dict[str, Any] = Field(
+        default_factory=dict, description="Action parameters"
+    )
+    dry_run: bool = Field(
+        default=False, description="Simulate action without side effects"
+    )
+
+
+@app.get("/alerts/remediation/rules")
+def alerts_remediation_rules() -> dict[str, object]:
+    """Return configured automated incident remediation rules."""
+    rules = (
+        service.get_remediation_rules()
+        if service is not None
+        else _fallback_remediation_runner.get_rules()
+    )
+    return {"rules": rules, "count": len(rules)}
+
+
+@app.get("/alerts/remediation/history")
+def alerts_remediation_history(
+    limit: Annotated[int, Query(ge=1, le=1000)] = 50,
+) -> dict[str, object]:
+    """Return execution history of self-healing remediation actions."""
+    history = (
+        service.get_remediation_history(limit=limit)
+        if service is not None
+        else _fallback_remediation_runner.get_history(limit=limit)
+    )
+    return {"history": history, "count": len(history)}
+
+
+@app.post("/alerts/remediation/trigger")
+def alerts_remediation_trigger(payload: RemediationTriggerRequest) -> dict[str, object]:
+    """Manually trigger a self-healing remediation action on demand."""
+    if service is not None:
+        result = service.trigger_remediation_action(
+            rule_name=payload.rule_name,
+            action_type=payload.action_type,
+            parameters=payload.parameters,
+            dry_run=payload.dry_run,
+        )
+    else:
+        res = _fallback_remediation_runner.execute_action(
+            rule_name=payload.rule_name,
+            action_type=payload.action_type,
+            parameters=payload.parameters,
+            dry_run=payload.dry_run,
+        )
+        result = res.to_dict()
+    return {"status": "ok", "result": result}
+
+
+@app.get("/alerts/circuit-breaker/stats")
+def alert_circuit_breaker_stats() -> dict[str, object]:
+    """Return health states and trip counters for outbound circuit breakers."""
+    cbs = (
+        service.get_circuit_breaker_stats()
+        if service is not None
+        else _fallback_alert_multichannel_dispatcher.get_stats().get(
+            "circuit_breakers", {}
+        )
+    )
+    return {"circuit_breakers": cbs}
+
+
+@app.post("/alerts/circuit-breaker/reset")
+def alert_circuit_breaker_reset() -> dict[str, object]:
+    """Reset all outbound circuit breakers back to CLOSED."""
+    if service is not None:
+        service.reset_circuit_breakers()
+    else:
+        _fallback_alert_multichannel_dispatcher.reset()
+    return {"status": "ok", "message": "Circuit breakers reset to CLOSED"}
+
+
+@app.get("/alerts/silences")
+def alerts_silences_list(
+    active_only: bool = False,
+) -> dict[str, object]:
+    """Return active or all alert silence rules."""
+    if service is not None:
+        rules = service.get_silence_rules(active_only=active_only)
+    else:
+        raw_rules = _fallback_silencing_engine.list_silences(active_only=active_only)
+        rules = [r.to_dict() for r in raw_rules]
+    return {"silences": rules, "count": len(rules)}
+
+
+@app.post("/alerts/silences")
+def alerts_silences_create(payload: CreateSilenceRequest) -> dict[str, object]:
+    """Create an alert silence rule."""
+    now = time.time()
+    starts_at = payload.starts_at if payload.starts_at is not None else now
+    if payload.ends_at is not None:
+        ends_at = payload.ends_at
+    elif payload.duration_seconds is not None:
+        ends_at = starts_at + payload.duration_seconds
+    else:
+        ends_at = starts_at + 3600.0
+
+    matchers = [
+        SilenceMatcher(name=m.name, value=m.value, is_regex=m.is_regex)
+        for m in payload.matchers
+    ]
+    rule_kwargs: dict[str, Any] = {
+        "matchers": matchers,
+        "starts_at": starts_at,
+        "ends_at": ends_at,
+        "author": payload.author,
+        "comment": payload.comment,
+        "enabled": True,
+    }
+    if payload.silence_id:
+        rule_kwargs["silence_id"] = payload.silence_id
+
+    silence_rule = AlertSilenceRule(**rule_kwargs)
+    if service is not None:
+        created = service.add_silence_rule(silence_rule)
+    else:
+        created = _fallback_silencing_engine.add_silence(silence_rule)
+    return {"status": "ok", "silence": created.to_dict()}
+
+
+@app.delete("/alerts/silences/{silence_id}")
+def alerts_silences_delete(silence_id: str) -> dict[str, object]:
+    """Delete or cancel an alert silence rule."""
+    if service is not None:
+        removed = service.remove_silence_rule(silence_id)
+    else:
+        removed = _fallback_silencing_engine.remove_silence(silence_id)
+    if not removed:
+        raise HTTPException(
+            status_code=404, detail=f"Silence rule '{silence_id}' not found"
+        )
+    return {"status": "ok", "removed": True, "silence_id": silence_id}
+
+
+@app.get("/alerts/maintenance")
+def alerts_maintenance_list(
+    active_only: bool = False,
+) -> dict[str, object]:
+    """Return active or all scheduled maintenance windows."""
+    if service is not None:
+        windows = service.get_maintenance_windows(active_only=active_only)
+    else:
+        raw_windows = _fallback_silencing_engine.list_maintenance_windows(
+            active_only=active_only
+        )
+        windows = [w.to_dict() for w in raw_windows]
+    return {"maintenance_windows": windows, "count": len(windows)}
+
+
+@app.post("/alerts/maintenance")
+def alerts_maintenance_create(
+    payload: CreateMaintenanceWindowRequest,
+) -> dict[str, object]:
+    """Schedule a maintenance window for alert suppression."""
+    now = time.time()
+    starts_at = payload.starts_at if payload.starts_at is not None else now
+    if payload.ends_at is not None:
+        ends_at = payload.ends_at
+    elif payload.duration_seconds is not None:
+        ends_at = starts_at + payload.duration_seconds
+    else:
+        ends_at = starts_at + 7200.0
+
+    mw_kwargs: dict[str, Any] = {
+        "name": payload.name,
+        "starts_at": starts_at,
+        "ends_at": ends_at,
+        "suppress_all": payload.suppress_all,
+        "affected_rules": payload.affected_rules,
+        "author": payload.author,
+        "description": payload.description,
+        "enabled": True,
+    }
+    if payload.window_id:
+        mw_kwargs["window_id"] = payload.window_id
+
+    window = MaintenanceWindow(**mw_kwargs)
+    if service is not None:
+        created = service.schedule_maintenance_window(window)
+    else:
+        created = _fallback_silencing_engine.add_maintenance_window(window)
+    return {"status": "ok", "maintenance_window": created.to_dict()}
+
+
+@app.delete("/alerts/maintenance/{window_id}")
+def alerts_maintenance_delete(window_id: str) -> dict[str, object]:
+    """Cancel a scheduled maintenance window."""
+    if service is not None:
+        removed = service.cancel_maintenance_window(window_id)
+    else:
+        removed = _fallback_silencing_engine.remove_maintenance_window(window_id)
+    if not removed:
+        raise HTTPException(
+            status_code=404, detail=f"Maintenance window '{window_id}' not found"
+        )
+    return {"status": "ok", "cancelled": True, "window_id": window_id}
 
 
 @app.post("/alerts/replay")

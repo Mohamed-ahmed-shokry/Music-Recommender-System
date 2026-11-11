@@ -15,6 +15,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -576,6 +577,7 @@ class RemediationActionType(StrEnum):
     ROTATE_ALERT_STORAGE = "rotate_alert_storage"
     PURGE_DLQ = "purge_dlq"
     TRIGGER_ONLINE_FOLD = "trigger_online_fold"
+    TRIP_CIRCUIT_BREAKER = "trip_circuit_breaker"
     CUSTOM_CALLBACK = "custom_callback"
 
 
@@ -650,6 +652,214 @@ class RemediationActionResult:
             "duration_ms": self.duration_ms,
             "details": dict(self.details),
         }
+
+
+class CircuitBreakerState(StrEnum):
+    """Lifecycle state of an outbound circuit breaker."""
+
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+@dataclass
+class CircuitBreakerConfig:
+    """Configuration for outbound notification circuit breaker."""
+
+    failure_threshold: int = 5
+    recovery_timeout_seconds: float = 30.0
+    half_open_success_threshold: int = 2
+    enabled: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "failure_threshold": self.failure_threshold,
+            "recovery_timeout_seconds": self.recovery_timeout_seconds,
+            "half_open_success_threshold": self.half_open_success_threshold,
+            "enabled": self.enabled,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CircuitBreakerConfig:
+        return cls(
+            failure_threshold=int(data.get("failure_threshold", 5)),
+            recovery_timeout_seconds=float(data.get("recovery_timeout_seconds", 30.0)),
+            half_open_success_threshold=int(data.get("half_open_success_threshold", 2)),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
+class SilenceDecision(StrEnum):
+    """Decision indicating whether an alert is active or silenced."""
+
+    ACTIVE = "active"
+    SUPPRESSED_SILENCE_RULE = "suppressed_silence_rule"
+    SUPPRESSED_MAINTENANCE_WINDOW = "suppressed_maintenance_window"
+
+
+@dataclass
+class SilenceMatcher:
+    """Criteria matching alert properties for silencing."""
+
+    name: str
+    value: str
+    is_regex: bool = False
+
+    def matches(
+        self,
+        rule_name: str,
+        severity: str,
+        labels: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Check whether the matcher satisfies the given alert attributes."""
+        candidate: str | None = None
+        if self.name in ("alertname", "rule_name"):
+            candidate = rule_name
+        elif self.name == "severity":
+            candidate = severity
+        elif labels and self.name in labels:
+            candidate = str(labels[self.name])
+
+        if candidate is None:
+            return False
+
+        if self.is_regex:
+            try:
+                return bool(re.search(self.value, candidate))
+            except re.error:
+                return False
+        return candidate == self.value
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "value": self.value,
+            "is_regex": self.is_regex,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SilenceMatcher:
+        return cls(
+            name=str(data.get("name", "")),
+            value=str(data.get("value", "")),
+            is_regex=bool(data.get("is_regex", False)),
+        )
+
+
+@dataclass
+class AlertSilenceRule:
+    """Rule defining a temporary silence window for matching alerts."""
+
+    silence_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    matchers: list[SilenceMatcher] = field(default_factory=list)
+    starts_at: float = field(default_factory=time.time)
+    ends_at: float = field(default_factory=lambda: time.time() + 3600.0)
+    author: str = "operator"
+    comment: str = ""
+    enabled: bool = True
+
+    def is_active(self, now: float | None = None) -> bool:
+        """Return True if this silence rule is currently active."""
+        if not self.enabled:
+            return False
+        t = time.time() if now is None else now
+        return self.starts_at <= t <= self.ends_at
+
+    def matches(
+        self,
+        rule_name: str,
+        severity: str,
+        labels: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Return True if all matchers match the alert (AND condition)."""
+        if not self.matchers:
+            return True
+        return all(m.matches(rule_name, severity, labels) for m in self.matchers)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "silence_id": self.silence_id,
+            "matchers": [m.to_dict() for m in self.matchers],
+            "starts_at": self.starts_at,
+            "ends_at": self.ends_at,
+            "author": self.author,
+            "comment": self.comment,
+            "enabled": self.enabled,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AlertSilenceRule:
+        matchers = [
+            SilenceMatcher.from_dict(m)
+            for m in data.get("matchers", [])
+            if isinstance(m, dict)
+        ]
+        return cls(
+            silence_id=str(data.get("silence_id", str(uuid.uuid4())[:8])),
+            matchers=matchers,
+            starts_at=float(data.get("starts_at", time.time())),
+            ends_at=float(data.get("ends_at", time.time() + 3600.0)),
+            author=str(data.get("author", "operator")),
+            comment=str(data.get("comment", "")),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
+@dataclass
+class MaintenanceWindow:
+    """Scheduled maintenance window that suppresses notifications."""
+
+    window_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    name: str = "scheduled_maintenance"
+    starts_at: float = field(default_factory=time.time)
+    ends_at: float = field(default_factory=lambda: time.time() + 7200.0)
+    suppress_all: bool = True
+    affected_rules: list[str] = field(default_factory=list)
+    author: str = "operator"
+    description: str = ""
+    enabled: bool = True
+
+    def is_active(self, now: float | None = None) -> bool:
+        """Return True if this maintenance window is currently active."""
+        if not self.enabled:
+            return False
+        t = time.time() if now is None else now
+        return self.starts_at <= t <= self.ends_at
+
+    def suppresses(self, rule_name: str, now: float | None = None) -> bool:
+        """Return True if this maintenance window suppresses the given rule."""
+        if not self.is_active(now=now):
+            return False
+        if self.suppress_all:
+            return True
+        return rule_name in self.affected_rules
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "window_id": self.window_id,
+            "name": self.name,
+            "starts_at": self.starts_at,
+            "ends_at": self.ends_at,
+            "suppress_all": self.suppress_all,
+            "affected_rules": list(self.affected_rules),
+            "author": self.author,
+            "description": self.description,
+            "enabled": self.enabled,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MaintenanceWindow:
+        return cls(
+            window_id=str(data.get("window_id", str(uuid.uuid4())[:8])),
+            name=str(data.get("name", "scheduled_maintenance")),
+            starts_at=float(data.get("starts_at", time.time())),
+            ends_at=float(data.get("ends_at", time.time() + 7200.0)),
+            suppress_all=bool(data.get("suppress_all", True)),
+            affected_rules=list(data.get("affected_rules", [])),
+            author=str(data.get("author", "operator")),
+            description=str(data.get("description", "")),
+            enabled=bool(data.get("enabled", True)),
+        )
 
 
 @dataclass
@@ -2203,6 +2413,316 @@ class IncidentRemediationRunner:
             self._history.clear()
 
 
+class CircuitBreaker:
+    """Thread-safe circuit breaker protecting outbound notification dispatchers."""
+
+    def __init__(
+        self,
+        name: str = "default",
+        config: CircuitBreakerConfig | None = None,
+    ) -> None:
+        self.name = name
+        self.config = config or CircuitBreakerConfig()
+        self._lock = threading.Lock()
+        self._state: CircuitBreakerState = CircuitBreakerState.CLOSED
+        self._consecutive_failures: int = 0
+        self._consecutive_successes: int = 0
+        self._last_state_change: float = time.time()
+        self._total_trips: int = 0
+        self._total_rejected: int = 0
+        self._total_calls: int = 0
+
+    @property
+    def state(self) -> CircuitBreakerState:
+        with self._lock:
+            return self._state
+
+    def allow_request(self, now: float | None = None) -> tuple[bool, str]:
+        """Check whether an outbound call is allowed through the circuit breaker."""
+        if not self.config.enabled:
+            return True, "Circuit breaker disabled"
+
+        ts = now if now is not None else time.time()
+        with self._lock:
+            self._total_calls += 1
+
+            if self._state == CircuitBreakerState.CLOSED:
+                return True, "Circuit closed (healthy)"
+
+            if self._state == CircuitBreakerState.OPEN:
+                elapsed = ts - self._last_state_change
+                if elapsed >= self.config.recovery_timeout_seconds:
+                    self._state = CircuitBreakerState.HALF_OPEN
+                    self._consecutive_successes = 0
+                    self._last_state_change = ts
+                    logger.info(
+                        "Circuit breaker '%s' entering HALF_OPEN "
+                        "probe state after %.1fs",
+                        self.name,
+                        elapsed,
+                    )
+                    return True, "Circuit half-open: probing downstream recovery"
+
+                self._total_rejected += 1
+                remaining = max(0.0, self.config.recovery_timeout_seconds - elapsed)
+                return (
+                    False,
+                    (
+                        f"Circuit open: failing fast "
+                        f"({remaining:.1f}s cooldown remaining)"
+                    ),
+                )
+
+            # HALF_OPEN
+            return True, "Circuit half-open: probe request in flight"
+
+    def record_success(self, now: float | None = None) -> None:
+        """Record a successful outbound delivery."""
+        if not self.config.enabled:
+            return
+
+        ts = now if now is not None else time.time()
+        with self._lock:
+            if self._state == CircuitBreakerState.HALF_OPEN:
+                self._consecutive_successes += 1
+                if (
+                    self._consecutive_successes
+                    >= self.config.half_open_success_threshold
+                ):
+                    self._state = CircuitBreakerState.CLOSED
+                    self._consecutive_failures = 0
+                    self._consecutive_successes = 0
+                    self._last_state_change = ts
+                    logger.info(
+                        "Circuit breaker '%s' recovered and CLOSED "
+                        "after %d consecutive successes",
+                        self.name,
+                        self.config.half_open_success_threshold,
+                    )
+            elif self._state == CircuitBreakerState.CLOSED:
+                self._consecutive_failures = 0
+
+    def record_failure(self, reason: str = "", now: float | None = None) -> None:
+        """Record an outbound delivery failure."""
+        if not self.config.enabled:
+            return
+
+        ts = now if now is not None else time.time()
+        with self._lock:
+            if self._state == CircuitBreakerState.HALF_OPEN:
+                self._state = CircuitBreakerState.OPEN
+                self._last_state_change = ts
+                self._total_trips += 1
+                self._consecutive_successes = 0
+                logger.warning(
+                    "Circuit breaker '%s' probe failed: %s. Tripping back to OPEN.",
+                    self.name,
+                    reason,
+                )
+            elif self._state == CircuitBreakerState.CLOSED:
+                self._consecutive_failures += 1
+                if self._consecutive_failures >= self.config.failure_threshold:
+                    self._state = CircuitBreakerState.OPEN
+                    self._last_state_change = ts
+                    self._total_trips += 1
+                    logger.warning(
+                        "Circuit breaker '%s' tripped OPEN after "
+                        "%d consecutive failures (%s)",
+                        self.name,
+                        self._consecutive_failures,
+                        reason,
+                    )
+
+    def get_stats(self) -> dict[str, Any]:
+        """Return circuit breaker metrics and health status."""
+        with self._lock:
+            return {
+                "name": self.name,
+                "state": str(self._state),
+                "consecutive_failures": self._consecutive_failures,
+                "consecutive_successes": self._consecutive_successes,
+                "total_trips": self._total_trips,
+                "total_rejected": self._total_rejected,
+                "total_calls": self._total_calls,
+                "config": self.config.to_dict(),
+            }
+
+    def trip(self, reason: str = "", now: float | None = None) -> None:
+        """Manually trip the circuit breaker into OPEN state."""
+        ts = now if now is not None else time.time()
+        with self._lock:
+            self._state = CircuitBreakerState.OPEN
+            self._last_state_change = ts
+            self._total_trips += 1
+            self._consecutive_failures = self.config.failure_threshold
+            self._consecutive_successes = 0
+            logger.warning(
+                "Circuit breaker '%s' manually tripped OPEN (%s)",
+                self.name,
+                reason,
+            )
+
+    def reset(self) -> None:
+        """Reset the circuit breaker back to initial CLOSED state."""
+        with self._lock:
+            self._state = CircuitBreakerState.CLOSED
+            self._consecutive_failures = 0
+            self._consecutive_successes = 0
+            self._total_trips = 0
+            self._total_rejected = 0
+            self._total_calls = 0
+            self._last_state_change = time.time()
+
+
+class AlertSilencingEngine:
+    """Thread-safe engine managing alert silences and scheduled maintenance windows."""
+
+    def __init__(
+        self,
+        silences: Sequence[AlertSilenceRule] | None = None,
+        maintenance_windows: Sequence[MaintenanceWindow] | None = None,
+        storage_path: Path | None = None,
+    ) -> None:
+        self._lock = threading.Lock()
+        self._silences: dict[str, AlertSilenceRule] = {}
+        self._maintenance_windows: dict[str, MaintenanceWindow] = {}
+        self._storage_path = storage_path
+
+        for s in silences or []:
+            self._silences[s.silence_id] = s
+        for mw in maintenance_windows or []:
+            self._maintenance_windows[mw.window_id] = mw
+
+        if self._storage_path and self._storage_path.exists():
+            self.load_from_disk()
+
+    def add_silence(self, rule: AlertSilenceRule) -> AlertSilenceRule:
+        """Register a new silence rule and persist if configured."""
+        with self._lock:
+            self._silences[rule.silence_id] = rule
+        self.save_to_disk()
+        return rule
+
+    def get_silence(self, silence_id: str) -> AlertSilenceRule | None:
+        """Lookup a silence rule by its ID."""
+        with self._lock:
+            return self._silences.get(silence_id)
+
+    def remove_silence(self, silence_id: str) -> bool:
+        """Remove or expire a silence rule by its ID."""
+        with self._lock:
+            removed = self._silences.pop(silence_id, None) is not None
+        if removed:
+            self.save_to_disk()
+        return removed
+
+    def list_silences(
+        self, active_only: bool = False, now: float | None = None
+    ) -> list[AlertSilenceRule]:
+        """List silence rules, optionally filtered to currently active ones."""
+        with self._lock:
+            rules = list(self._silences.values())
+        if active_only:
+            rules = [r for r in rules if r.is_active(now=now)]
+        return rules
+
+    def add_maintenance_window(self, window: MaintenanceWindow) -> MaintenanceWindow:
+        """Register a maintenance window and persist if configured."""
+        with self._lock:
+            self._maintenance_windows[window.window_id] = window
+        self.save_to_disk()
+        return window
+
+    def get_maintenance_window(self, window_id: str) -> MaintenanceWindow | None:
+        """Lookup a maintenance window by its ID."""
+        with self._lock:
+            return self._maintenance_windows.get(window_id)
+
+    def remove_maintenance_window(self, window_id: str) -> bool:
+        """Remove a maintenance window by its ID."""
+        with self._lock:
+            removed = self._maintenance_windows.pop(window_id, None) is not None
+        if removed:
+            self.save_to_disk()
+        return removed
+
+    def list_maintenance_windows(
+        self, active_only: bool = False, now: float | None = None
+    ) -> list[MaintenanceWindow]:
+        """List maintenance windows, optionally filtered to active ones."""
+        with self._lock:
+            windows = list(self._maintenance_windows.values())
+        if active_only:
+            windows = [w for w in windows if w.is_active(now=now)]
+        return windows
+
+    def evaluate(
+        self,
+        rule_name: str,
+        severity: str,
+        labels: Mapping[str, Any] | None = None,
+        now: float | None = None,
+    ) -> tuple[SilenceDecision, str | None]:
+        """Evaluate an alert transition against maintenance windows and silence rules.
+
+        Returns (decision, matching_id_or_reason).
+        """
+        ts = now if now is not None else time.time()
+        with self._lock:
+            # Check maintenance windows first (broadest scope)
+            for window in self._maintenance_windows.values():
+                if window.suppresses(rule_name, now=ts):
+                    return (
+                        SilenceDecision.SUPPRESSED_MAINTENANCE_WINDOW,
+                        window.window_id,
+                    )
+
+            # Check individual silence rules
+            for silence in self._silences.values():
+                if silence.is_active(now=ts) and silence.matches(
+                    rule_name, severity, labels
+                ):
+                    return (
+                        SilenceDecision.SUPPRESSED_SILENCE_RULE,
+                        silence.silence_id,
+                    )
+
+        return (SilenceDecision.ACTIVE, None)
+
+    def save_to_disk(self) -> None:
+        """Serialize silences and maintenance windows to JSON on disk if path set."""
+        if not self._storage_path:
+            return
+        with self._lock:
+            data = {
+                "silences": [s.to_dict() for s in self._silences.values()],
+                "maintenance_windows": [
+                    mw.to_dict() for mw in self._maintenance_windows.values()
+                ],
+            }
+        try:
+            self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+            self._storage_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except OSError as e:
+            logger.warning("Failed to persist alert silencing state: %s", e)
+
+    def load_from_disk(self) -> None:
+        """Load silences and maintenance windows from JSON file on disk."""
+        if not self._storage_path or not self._storage_path.exists():
+            return
+        try:
+            data = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            with self._lock:
+                for item in data.get("silences", []):
+                    rule = AlertSilenceRule.from_dict(item)
+                    self._silences[rule.silence_id] = rule
+                for item in data.get("maintenance_windows", []):
+                    window = MaintenanceWindow.from_dict(item)
+                    self._maintenance_windows[window.window_id] = window
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("Failed to load alert silencing state: %s", e)
+
+
 class WebhookDispatcher:
     """Deliver alert transitions to an HTTP(S) webhook as JSON.
 
@@ -2217,6 +2737,7 @@ class WebhookDispatcher:
         timeout_seconds: float = 5.0,
         max_attempts: int = 3,
         backoff_seconds: float = 0.5,
+        circuit_breaker: CircuitBreaker | None = None,
         sender: Callable[[str, bytes, float], None] | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -2228,6 +2749,7 @@ class WebhookDispatcher:
         self.timeout_seconds = timeout_seconds
         self.max_attempts = max_attempts
         self.backoff_seconds = backoff_seconds
+        self.circuit_breaker = circuit_breaker
         self._sender = sender or _post_json
         self._sleep = sleep
 
@@ -2243,11 +2765,25 @@ class WebhookDispatcher:
         return delivered
 
     def _deliver(self, alert_name: str, body: bytes) -> bool:
+        if self.circuit_breaker is not None:
+            allowed, reason = self.circuit_breaker.allow_request()
+            if not allowed:
+                logger.warning(
+                    "Alert webhook delivery shed by circuit breaker for %s: %s",
+                    alert_name,
+                    reason,
+                )
+                return False
+
+        last_exc: Exception | None = None
         for attempt in range(1, self.max_attempts + 1):
             try:
                 self._sender(self.url, body, self.timeout_seconds)
+                if self.circuit_breaker is not None:
+                    self.circuit_breaker.record_success()
                 return True
             except Exception as exc:
+                last_exc = exc
                 logger.warning(
                     "Alert webhook delivery failed for %s (attempt %d/%d): %s",
                     alert_name,
@@ -2257,6 +2793,8 @@ class WebhookDispatcher:
                 )
                 if attempt < self.max_attempts:
                     self._sleep(self.backoff_seconds * 2 ** (attempt - 1))
+        if self.circuit_breaker is not None and last_exc is not None:
+            self.circuit_breaker.record_failure(str(last_exc))
         return False
 
 
@@ -2267,10 +2805,14 @@ def _post_json(url: str, body: bytes, timeout: float) -> None:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
-        status = getattr(response, "status", 200)
-        if status >= 400:
-            raise OSError(f"webhook responded with HTTP {status}")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+            status = getattr(response, "status", 200)
+            if status >= 400:
+                raise OSError(f"webhook responded with HTTP {status}")
+    except urllib.error.HTTPError as exc:
+        exc.close()
+        raise
 
 
 def _send_http_request(
@@ -2297,6 +2839,7 @@ def _send_http_request(
             if hasattr(exc, "read")
             else str(exc)
         )
+        exc.close()
         return int(exc.code), err_body
     except Exception as exc:
         return 0, str(exc)
@@ -2406,6 +2949,199 @@ class OpsgenieGateway:
         return success, status, response
 
 
+class SlackWebhookAdapter:
+    """Delivers rich Slack notifications using Block Kit and attachments."""
+
+    def __init__(
+        self,
+        webhook_url: str,
+        channel: str | None = None,
+        username: str = "Music Recommender Alerting",
+        icon_emoji: str = ":musical_note:",
+        dashboard_url: str = "http://localhost:8501",
+        timeout_seconds: float = 5.0,
+        sender: Callable[[str, bytes, dict[str, str], float, str], tuple[int, str]]
+        | None = None,
+    ) -> None:
+        self.webhook_url = webhook_url
+        self.channel = channel
+        self.username = username
+        self.icon_emoji = icon_emoji
+        self.dashboard_url = dashboard_url
+        self.timeout_seconds = timeout_seconds
+        self._sender = sender or _send_http_request
+
+    def build_payload(self, transition: AlertTransition) -> dict[str, Any]:
+        """Build Slack Block Kit payload with color bar and action buttons."""
+        is_firing = transition.is_firing
+        sev = str(transition.rule.severity).lower()
+        if not is_firing:
+            color = "#2EB886"  # Slack green (resolved)
+            status_title = f":white_check_mark: RESOLVED: {transition.rule.name}"
+        elif sev == "critical":
+            color = "#E01E5A"  # Slack danger/red
+            status_title = f":rotating_light: CRITICAL ALERT: {transition.rule.name}"
+        else:
+            color = "#ECB22E"  # Slack warning/yellow
+            status_title = f":warning: WARNING ALERT: {transition.rule.name}"
+
+        val_str = f"{transition.value:.4f}" if transition.value is not None else "N/A"
+        blocks: list[dict[str, Any]] = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": status_title[:150],
+                    "emoji": True,
+                },
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"*{transition.rule.summary}*\n"
+                        f"> *Metric:* `{transition.rule.metric}` "
+                        f"{transition.rule.comparator} `{transition.rule.threshold}`\n"
+                        f"> *Current Value:* `{val_str}`\n"
+                        f"> *Time:* `{transition.timestamp}`"
+                    ),
+                },
+            },
+        ]
+
+        if self.dashboard_url:
+            blocks.append(
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {
+                                "type": "plain_text",
+                                "text": "View Dashboard",
+                                "emoji": True,
+                            },
+                            "url": self.dashboard_url,
+                            "style": "primary" if is_firing else "default",
+                        }
+                    ],
+                }
+            )
+
+        payload: dict[str, Any] = {
+            "text": (
+                f"[{'RESOLVED' if not is_firing else sev.upper()}] "
+                f"{transition.rule.name}: {transition.rule.summary}"
+            ),
+            "username": self.username,
+            "icon_emoji": self.icon_emoji,
+            "attachments": [
+                {
+                    "color": color,
+                    "blocks": blocks,
+                }
+            ],
+        }
+        if self.channel:
+            payload["channel"] = self.channel
+        return payload
+
+    def send(self, transition: AlertTransition) -> tuple[bool, int, str]:
+        """Dispatch an alert transition to Slack via Incoming Webhook."""
+        payload = self.build_payload(transition)
+        body = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        status, response_text = self._sender(
+            self.webhook_url, body, headers, self.timeout_seconds, "POST"
+        )
+        success = 200 <= status < 300
+        return success, status, response_text
+
+
+class TeamsWebhookAdapter:
+    """Delivers Microsoft Teams notifications via Office 365 Connector Cards."""
+
+    def __init__(
+        self,
+        webhook_url: str,
+        dashboard_url: str = "http://localhost:8501",
+        timeout_seconds: float = 5.0,
+        sender: Callable[[str, bytes, dict[str, str], float, str], tuple[int, str]]
+        | None = None,
+    ) -> None:
+        self.webhook_url = webhook_url
+        self.dashboard_url = dashboard_url
+        self.timeout_seconds = timeout_seconds
+        self._sender = sender or _send_http_request
+
+    def build_payload(self, transition: AlertTransition) -> dict[str, Any]:
+        """Build Office 365 Connector Card payload for Microsoft Teams."""
+        is_firing = transition.is_firing
+        sev = str(transition.rule.severity).lower()
+        if not is_firing:
+            theme_color = "2EB886"  # Green
+            title = f"RESOLVED: {transition.rule.name}"
+        elif sev == "critical":
+            theme_color = "E01E5A"  # Red
+            title = f"CRITICAL ALERT: {transition.rule.name}"
+        else:
+            theme_color = "ECB22E"  # Amber
+            title = f"WARNING ALERT: {transition.rule.name}"
+
+        val_str = f"{transition.value:.4f}" if transition.value is not None else "N/A"
+        facts = [
+            {"name": "Rule", "value": transition.rule.name},
+            {"name": "Severity", "value": sev.upper() if is_firing else "RESOLVED"},
+            {
+                "name": "Metric",
+                "value": (
+                    f"{transition.rule.metric} {transition.rule.comparator} "
+                    f"{transition.rule.threshold}"
+                ),
+            },
+            {"name": "Current Value", "value": val_str},
+            {"name": "Timestamp", "value": transition.timestamp},
+        ]
+
+        payload: dict[str, Any] = {
+            "@type": "MessageCard",
+            "@context": "https://schema.org/extensions",
+            "summary": f"{title} - {transition.rule.summary}",
+            "themeColor": theme_color,
+            "title": title,
+            "sections": [
+                {
+                    "activityTitle": transition.rule.summary,
+                    "facts": facts,
+                    "markdown": True,
+                }
+            ],
+        }
+
+        if self.dashboard_url:
+            payload["potentialAction"] = [
+                {
+                    "@type": "OpenUri",
+                    "name": "Open Dashboard",
+                    "targets": [{"os": "default", "uri": self.dashboard_url}],
+                }
+            ]
+
+        return payload
+
+    def send(self, transition: AlertTransition) -> tuple[bool, int, str]:
+        """Dispatch an alert transition to Microsoft Teams webhook."""
+        payload = self.build_payload(transition)
+        body = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        status, response_text = self._sender(
+            self.webhook_url, body, headers, self.timeout_seconds, "POST"
+        )
+        success = 200 <= status < 300
+        return success, status, response_text
+
+
 class MultiChannelDispatcher:
     """Coordinates dispatching alert transitions across multiple gateways
     and channels.
@@ -2417,6 +3153,9 @@ class MultiChannelDispatcher:
         | None = None,
         throttler: AlertNotificationThrottler | None = None,
         escalation_engine: AlertEscalationEngine | None = None,
+        circuit_breakers: dict[str, CircuitBreaker] | None = None,
+        circuit_breaker_config: CircuitBreakerConfig | None = None,
+        silencing_engine: AlertSilencingEngine | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._channels: dict[
@@ -2424,8 +3163,41 @@ class MultiChannelDispatcher:
         ] = dict(channels or {})
         self.throttler = throttler or AlertNotificationThrottler()
         self.escalation_engine = escalation_engine or AlertEscalationEngine()
+        self._circuit_breakers: dict[str, CircuitBreaker] = dict(circuit_breakers or {})
+        self._cb_config = circuit_breaker_config or CircuitBreakerConfig()
+        self.silencing_engine = silencing_engine
         self._dispatch_count: int = 0
         self._error_count: int = 0
+
+    def register_slack(
+        self,
+        name: str = "slack",
+        webhook_url: str = "",
+        channel: str | None = None,
+        dashboard_url: str = "http://localhost:8501",
+    ) -> SlackWebhookAdapter:
+        """Register a Slack Block Kit webhook adapter on this dispatcher."""
+        adapter = SlackWebhookAdapter(
+            webhook_url=webhook_url,
+            channel=channel,
+            dashboard_url=dashboard_url,
+        )
+        self.register_channel(name, adapter.send)
+        return adapter
+
+    def register_teams(
+        self,
+        name: str = "teams",
+        webhook_url: str = "",
+        dashboard_url: str = "http://localhost:8501",
+    ) -> TeamsWebhookAdapter:
+        """Register a Microsoft Teams Connector Card adapter on this dispatcher."""
+        adapter = TeamsWebhookAdapter(
+            webhook_url=webhook_url,
+            dashboard_url=dashboard_url,
+        )
+        self.register_channel(name, adapter.send)
+        return adapter
 
     def register_channel(
         self,
@@ -2436,6 +3208,15 @@ class MultiChannelDispatcher:
         with self._lock:
             self._channels[name] = handler
 
+    def get_circuit_breaker(self, channel: str) -> CircuitBreaker:
+        """Get or initialize the circuit breaker for a channel."""
+        with self._lock:
+            if channel not in self._circuit_breakers:
+                self._circuit_breakers[channel] = CircuitBreaker(
+                    name=channel, config=self._cb_config
+                )
+            return self._circuit_breakers[channel]
+
     def dispatch(
         self,
         transition: AlertTransition,
@@ -2443,6 +3224,22 @@ class MultiChannelDispatcher:
         now: float | None = None,
     ) -> dict[str, tuple[bool, int, str]]:
         """Dispatch transition across channels with throttling and escalation checks."""
+        if self.silencing_engine is not None:
+            silence_dec, silence_target = self.silencing_engine.evaluate(
+                rule_name=transition.rule.name,
+                severity=str(transition.rule.severity).lower(),
+                labels=transition.to_dict().get("labels"),
+                now=now,
+            )
+            if silence_dec != SilenceDecision.ACTIVE:
+                return {
+                    "silenced": (
+                        False,
+                        204,
+                        f"Suppressed by {silence_dec.value} ({silence_target})",
+                    )
+                }
+
         allowed, decision, reason = self.throttler.should_dispatch(transition, now=now)
         if not allowed:
             return {
@@ -2477,18 +3274,31 @@ class MultiChannelDispatcher:
         with self._lock:
             self._dispatch_count += 1
 
-        for ch in target_channels:
+        for ch in sorted(target_channels):
             handler = self._channels.get(ch)
             if handler is None:
                 results[ch] = (False, 404, f"Unknown channel '{ch}'")
                 continue
+
+            cb = self.get_circuit_breaker(ch)
+            cb_allowed, cb_reason = cb.allow_request(now=now)
+            if not cb_allowed:
+                results[ch] = (False, 503, f"Circuit open: {cb_reason}")
+                with self._lock:
+                    self._error_count += 1
+                continue
+
             try:
                 ok, code, msg = handler(transition)
                 results[ch] = (ok, code, msg)
-                if not ok:
+                if ok:
+                    cb.record_success(now=now)
+                else:
+                    cb.record_failure(f"HTTP {code}: {msg}", now=now)
                     with self._lock:
                         self._error_count += 1
             except Exception as exc:
+                cb.record_failure(str(exc), now=now)
                 with self._lock:
                     self._error_count += 1
                 results[ch] = (False, 500, str(exc))
@@ -2498,7 +3308,7 @@ class MultiChannelDispatcher:
     def get_stats(self) -> dict[str, Any]:
         """Return multi-channel dispatch metrics."""
         with self._lock:
-            return {
+            stats: dict[str, Any] = {
                 "dispatch_count": self._dispatch_count,
                 "error_count": self._error_count,
                 "registered_channels": sorted(self._channels.keys()),
@@ -2506,7 +3316,25 @@ class MultiChannelDispatcher:
                 "active_firing_durations": (
                     self.escalation_engine.get_active_firing_durations()
                 ),
+                "circuit_breakers": {
+                    ch: cb.get_stats()
+                    for ch, cb in sorted(self._circuit_breakers.items())
+                },
             }
+            if self.silencing_engine is not None:
+                stats["silencing"] = {
+                    "active_silences": len(
+                        self.silencing_engine.list_silences(active_only=True)
+                    ),
+                    "total_silences": len(self.silencing_engine.list_silences()),
+                    "active_maintenance_windows": len(
+                        self.silencing_engine.list_maintenance_windows(active_only=True)
+                    ),
+                    "total_maintenance_windows": len(
+                        self.silencing_engine.list_maintenance_windows()
+                    ),
+                }
+            return stats
 
     def reset(self) -> None:
         """Clear dispatcher counters, throttler, and escalation engine."""
@@ -2515,6 +3343,8 @@ class MultiChannelDispatcher:
             self._error_count = 0
             self.throttler.reset()
             self.escalation_engine.reset()
+            for cb in self._circuit_breakers.values():
+                cb.reset()
 
 
 def _format_number(value: float) -> str:

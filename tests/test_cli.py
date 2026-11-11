@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -4128,3 +4128,169 @@ def test_cli_test_gateway_command(monkeypatch: pytest.MonkeyPatch) -> None:
     data_og = json.loads(res_og.output)
     assert data_og["gateway"] == "opsgenie"
     assert data_og["success"] is True
+
+
+def test_remediation_history_cli() -> None:
+    runner = CliRunner()
+    res_empty = runner.invoke(cli.app, ["remediation-history"])
+    assert res_empty.exit_code == 0
+
+    res_json = runner.invoke(cli.app, ["remediation-history", "--json"])
+    assert res_json.exit_code == 0
+    data = json.loads(res_json.output)
+    assert isinstance(data, list)
+
+
+def test_trigger_action_cli() -> None:
+    runner = CliRunner()
+
+    # Invalid JSON parameters
+    res_bad_params = runner.invoke(
+        cli.app, ["trigger-action", "flush_feedback_queue", "-p", "not_json"]
+    )
+    assert res_bad_params.exit_code == 1
+
+    # Dry run
+    res_dry = runner.invoke(
+        cli.app,
+        ["trigger-action", "flush_feedback_queue", "--dry-run", "--json"],
+    )
+    assert res_dry.exit_code == 0
+    data_dry = json.loads(res_dry.output)
+    assert data_dry["status"] == "dry_run"
+    assert data_dry["action_type"] == "flush_feedback_queue"
+
+    # Executed
+    res_exec = runner.invoke(
+        cli.app,
+        [
+            "trigger-action",
+            "trip_circuit_breaker",
+            "-r",
+            "test-rule",
+            "-p",
+            '{"channel": "webhook", "reason": "cli test"}',
+            "--json",
+        ],
+    )
+    assert res_exec.exit_code == 0
+    data_exec = json.loads(res_exec.output)
+    assert data_exec["status"] == "executed"
+    assert data_exec["rule_name"] == "test-rule"
+
+
+def test_circuit_stats_cli() -> None:
+    runner = CliRunner()
+
+    # Reset circuit breakers
+    res_reset = runner.invoke(cli.app, ["circuit-stats", "--reset", "--json"])
+    assert res_reset.exit_code == 0
+    assert "ok" in res_reset.output
+
+    # Inspect stats
+    res_stats = runner.invoke(cli.app, ["circuit-stats", "--json"])
+    assert res_stats.exit_code == 0
+    stats = json.loads(res_stats.output)
+    assert isinstance(stats, dict)
+
+    # Human-readable format
+    res_human = runner.invoke(cli.app, ["circuit-stats"])
+    assert res_human.exit_code == 0
+
+
+def test_silence_alert_cli() -> None:
+    runner = CliRunner()
+
+    # Create silence with JSON output
+    res_create = runner.invoke(
+        cli.app,
+        [
+            "silence-alert",
+            "HighLatency",
+            "--duration",
+            "1800",
+            "--severity",
+            "warning",
+            "--author",
+            "cli-tester",
+            "--comment",
+            "deploying patch",
+            "--json",
+        ],
+    )
+    assert res_create.exit_code == 0
+    data = json.loads(res_create.output)
+    silence_id = data["silence_id"]
+    assert data["author"] == "cli-tester"
+    assert len(data["matchers"]) == 2
+
+    # Human-readable list
+    res_list_human = runner.invoke(cli.app, ["list-silences"])
+    assert res_list_human.exit_code == 0
+    assert silence_id in res_list_human.output
+
+    # JSON list
+    res_list_json = runner.invoke(cli.app, ["list-silences", "--json"])
+    assert res_list_json.exit_code == 0
+    silences = json.loads(res_list_json.output)
+    assert any(s["silence_id"] == silence_id for s in silences)
+
+    # Expire silence
+    res_expire = runner.invoke(cli.app, ["expire-silence", silence_id, "--json"])
+    assert res_expire.exit_code == 0
+    assert json.loads(res_expire.output)["removed"] is True
+
+    # Expire nonexistent fails
+    res_expire_bad = runner.invoke(cli.app, ["expire-silence", "nonexistent"])
+    assert res_expire_bad.exit_code != 0
+
+    p = Path("data/alerts/silences.json")
+    if p.exists():
+        with suppress(OSError):
+            p.unlink()
+
+
+def test_maintenance_window_cli() -> None:
+    runner = CliRunner()
+
+    # Schedule maintenance with JSON output
+    res_sched = runner.invoke(
+        cli.app,
+        [
+            "schedule-maintenance",
+            "--name",
+            "Cluster Upgrade",
+            "--duration",
+            "3600",
+            "--rules",
+            "HighLatency,HighErrors",
+            "--author",
+            "sre-cli",
+            "--description",
+            "upgrading node pool",
+            "--json",
+        ],
+    )
+    assert res_sched.exit_code == 0
+    data = json.loads(res_sched.output)
+    window_id = data["window_id"]
+    assert data["name"] == "Cluster Upgrade"
+    assert data["suppress_all"] is False
+    assert len(data["affected_rules"]) == 2
+
+    # Human readable list
+    res_list_human = runner.invoke(cli.app, ["list-maintenance"])
+    assert res_list_human.exit_code == 0
+    assert window_id in res_list_human.output
+
+    # JSON list
+    res_list_json = runner.invoke(cli.app, ["list-maintenance", "--json"])
+    assert res_list_json.exit_code == 0
+    windows = json.loads(res_list_json.output)
+    assert any(w["window_id"] == window_id for w in windows)
+
+    # Clean up test maintenance window
+    p = Path("data/alerts/silences.json")
+    if p.exists():
+        with suppress(OSError):
+            p.unlink()

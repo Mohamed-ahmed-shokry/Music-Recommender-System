@@ -1552,6 +1552,70 @@ def render_dashboard(service: RecommenderService) -> None:
                 except Exception:
                     pass
 
+            if hasattr(service, "get_remediation_history"):
+                remediation_history = service.get_remediation_history(limit=5)
+                if remediation_history:
+                    st.divider()
+                    st.markdown("**Automated Self-Healing**")
+                    for act in remediation_history:
+                        act_stat = act.get("status", "executed")
+                        act_badge = "🔧" if act_stat == "executed" else "⏳"
+                        st.write(
+                            f"{act_badge} **{act.get('action_type')}** ({act_stat})"
+                        )
+                        if act.get("message"):
+                            st.caption(str(act["message"]))
+
+            if hasattr(service, "get_circuit_breaker_stats"):
+                cb_stats = service.get_circuit_breaker_stats()
+                if cb_stats:
+                    st.divider()
+                    st.markdown("**Outbound Circuit Breakers**")
+                    for ch_name, cb_data in sorted(cb_stats.items()):
+                        st_name = cb_data.get("state", "closed")
+                        st_icon = (
+                            "🟢"
+                            if st_name == "closed"
+                            else ("🟡" if st_name == "half_open" else "🔴")
+                        )
+                        st.write(f"{st_icon} `{ch_name}`: {st_name.upper()}")
+                        trips = cb_data.get("total_trips", 0)
+                        rejected = cb_data.get("total_rejected", 0)
+                        if trips > 0 or rejected > 0:
+                            st.caption(f"Trips: {trips} | Rejected calls: {rejected}")
+
+            if hasattr(service, "get_silence_rules"):
+                active_silences = service.get_silence_rules(active_only=True)
+                if active_silences:
+                    st.divider()
+                    st.markdown("**Active Alert Silences**")
+                    for s in active_silences:
+                        m_desc = (
+                            ", ".join(
+                                f"{m['name']}={m['value']}"
+                                for m in s.get("matchers", [])
+                            )
+                            or "all alerts"
+                        )
+                        st.write(f"🔇 **{s.get('silence_id')}**: `{m_desc}`")
+                        if s.get("comment"):
+                            st.caption(str(s["comment"]))
+
+            if hasattr(service, "get_maintenance_windows"):
+                active_windows = service.get_maintenance_windows(active_only=True)
+                if active_windows:
+                    st.divider()
+                    st.markdown("**Active Maintenance Windows**")
+                    for mw in active_windows:
+                        rules_scope = (
+                            "All alerts"
+                            if mw.get("suppress_all", True)
+                            else ", ".join(mw.get("affected_rules", []))
+                        )
+                        st.write(f"🚧 **{mw.get('name')}**: `{rules_scope}`")
+                        if mw.get("description"):
+                            st.caption(str(mw["description"]))
+
     tabs = st.tabs(
         [
             "For You",

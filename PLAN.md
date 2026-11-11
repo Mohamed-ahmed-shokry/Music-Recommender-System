@@ -3,30 +3,30 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.39.0) — in progress (branch `phase/171-remediation-and-circuit-breaker`)
-
-Automated Incident Remediation, Circuit Breaking, and Self-Healing Maintenance Triggers.
-The 0.38.0 release delivered sliding-window notification throttling, tiered escalation policies, and PagerDuty/Opsgenie gateways.
-This milestone introduces automated self-healing actions and outbound fault isolation:
-an automated incident remediation action runner (`IncidentRemediationRunner`, `RemediationRule`) that executes
-targeted healing operations (queue flushes, worker restarts, storage rotation, online folds) upon alert firing
-with cooldown protection and attempt budgets; an outbound webhook circuit breaker (`CircuitBreaker`, `CircuitBreakerConfig`)
-that protects external notification gateways during outages by shedding traffic and auto-recovering;
-FastAPI endpoints (`/alerts/remediation/*`, `/alerts/circuit-breaker/stats`), operator CLI commands (`remediation-history`,
-`trigger-action`, `circuit-stats`), and Streamlit dashboard visibility.
-
-- Phase 171 — Automated self-healing action runner for active firing alert remediation:
-  `RemediationActionType`, `RemediationRule`, `RemediationActionResult`, and `IncidentRemediationRunner` in `alerting.py`.
-- Phase 172 — Outbound webhook circuit breaking, adaptive rate regulation, and 0.39.0 release:
-  `CircuitBreakerState`, `CircuitBreakerConfig`, `CircuitBreaker`, dispatcher integration, service integration, API endpoints, CLI commands, dashboard indicators, clean CI.
-
-## Next milestone (0.40.0) — planned
+## Current milestone (0.40.0) — completed & verified (branch `phase/173-silencing-and-chat-adapters`, PR #35)
 
 Alert Silencing, Maintenance Window Schedules, and Slack/Teams Webhook Adapters.
-- Phase 173 — Dynamic alert silencing rules and scheduled maintenance window suppression.
-- Phase 174 — Slack and Microsoft Teams rich card notification adapters.
+The 0.39.0 release introduced automated incident remediation and outbound circuit breaking.
+This milestone delivers dynamic alert silencing and team collaboration integrations:
+an Alert Silencing & Maintenance Window Engine (`AlertSilenceRule`, `SilenceMatcher`, `MaintenanceWindow`, `AlertSilencingEngine`)
+that matches active alerts against targeted silence criteria (rule name, severity, labels) and scheduled maintenance windows;
+Slack and Microsoft Teams rich card adapters (`SlackWebhookAdapter`, `TeamsWebhookAdapter`) delivering interactive,
+structured notification cards integrated into `MultiChannelDispatcher`;
+FastAPI endpoints (`/alerts/silences/*`, `/alerts/maintenance/*`), operator CLI commands (`silence-alert`, `list-silences`,
+`expire-silence`, `schedule-maintenance`, `list-maintenance`), and Streamlit dashboard controls.
 
-## Previous milestone (0.38.0) — shipped (branch `phase/169-alert-throttling-and-gateways`, PR #32)
+- Phase 173 — Dynamic alert silencing rules and scheduled maintenance window suppression:
+  `AlertSilenceRule`, `SilenceMatcher`, `MaintenanceWindow`, `AlertSilencingEngine` in `alerting.py` (completed). ✅
+- Phase 174 — Slack and Microsoft Teams rich card notification adapters:
+  `SlackWebhookAdapter`, `TeamsWebhookAdapter`, dispatcher integration, service integration, API endpoints, CLI commands, dashboard indicators, clean CI (completed). ✅
+
+## Next milestone (0.41.0) — planned
+
+Alert Analytics, Mean Time to Detect/Resolve (MTTD/MTTR) Reporting, and Prometheus Alert Exporter.
+- Phase 175 — Incident metrics aggregation, MTTD/MTTR telemetry calculation, and historical SLO compliance.
+- Phase 176 — Export of alerting telemetry and incident state to Prometheus gauge/histogram metrics.
+
+## Previous milestone (0.39.0) — shipped (branch `phase/171-remediation-and-circuit-breaker`, PR #34)
 
 Alert Notification Throttling, Escalation Policies, and Multi-Channel Incident Gateways.
 The 0.37.0 release hardened persistent alert storage with size-capped log rotation, age retention, DLQ backoff retries, and archive bundles.

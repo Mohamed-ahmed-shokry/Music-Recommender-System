@@ -8,7 +8,13 @@ from starlette.types import Message, Receive, Scope, Send
 
 import api.main as api_main
 from api.middleware import RequestSafetyMiddleware
-from music_recommender.alerting import AlertEvaluator, AlertHistoryBuffer
+from music_recommender.alerting import (
+    AlertEvaluator,
+    AlertHistoryBuffer,
+    AlertSilenceRule,
+    AlertSilencingEngine,
+    MaintenanceWindow,
+)
 
 
 class FakeService:
@@ -20,6 +26,7 @@ class FakeService:
         ]
         self.cold_start_policy: dict[str, float] = {"popular": 1.0}
         self.alert_history = AlertHistoryBuffer()
+        self.alert_silencing_engine = AlertSilencingEngine()
         self.closed: bool = False
 
     def close(self, timeout: float | None = 5.0) -> None:
@@ -735,6 +742,97 @@ class FakeService:
             "has_more": offset + len(page) < len(tracks),
             "tracks": page,
         }
+
+    def get_remediation_rules(self) -> list[dict[str, object]]:
+        return [
+            {
+                "rule_name": "StreamingQueueHighUtilization",
+                "action_type": "flush_feedback_queue",
+                "cooldown_seconds": 60.0,
+                "max_attempts": 3,
+                "enabled": True,
+            }
+        ]
+
+    def get_remediation_history(self, limit: int = 50) -> list[dict[str, object]]:
+        return [
+            {
+                "rule_name": "StreamingQueueHighUtilization",
+                "action_type": "flush_feedback_queue",
+                "status": "executed",
+                "message": "Flushed",
+                "timestamp": "2026-11-10T12:00:00Z",
+                "duration_ms": 1.5,
+                "details": {"flushed": True},
+            }
+        ][:limit]
+
+    def trigger_remediation_action(
+        self,
+        rule_name: str,
+        action_type: str,
+        parameters: dict[str, object] | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "rule_name": rule_name,
+            "action_type": action_type,
+            "status": "dry_run" if dry_run else "executed",
+            "message": "Triggered via fake service",
+            "timestamp": "2026-11-10T12:00:00Z",
+            "duration_ms": 1.2,
+            "details": parameters or {},
+        }
+
+    def get_circuit_breaker_stats(self) -> dict[str, object]:
+        return {
+            "webhook": {
+                "name": "webhook",
+                "state": "closed",
+                "consecutive_failures": 0,
+                "consecutive_successes": 0,
+                "total_trips": 0,
+                "total_rejected": 0,
+                "total_calls": 0,
+            }
+        }
+
+    def reset_circuit_breakers(self) -> None:
+        pass
+
+    def add_silence_rule(self, rule: AlertSilenceRule) -> AlertSilenceRule:
+        return self.alert_silencing_engine.add_silence(rule)
+
+    def remove_silence_rule(self, silence_id: str) -> bool:
+        return self.alert_silencing_engine.remove_silence(silence_id)
+
+    def get_silence_rules(
+        self, active_only: bool = False, now: float | None = None
+    ) -> list[dict[str, object]]:
+        return [
+            r.to_dict()
+            for r in self.alert_silencing_engine.list_silences(
+                active_only=active_only, now=now
+            )
+        ]
+
+    def schedule_maintenance_window(
+        self, window: MaintenanceWindow
+    ) -> MaintenanceWindow:
+        return self.alert_silencing_engine.add_maintenance_window(window)
+
+    def cancel_maintenance_window(self, window_id: str) -> bool:
+        return self.alert_silencing_engine.remove_maintenance_window(window_id)
+
+    def get_maintenance_windows(
+        self, active_only: bool = False, now: float | None = None
+    ) -> list[dict[str, object]]:
+        return [
+            w.to_dict()
+            for w in self.alert_silencing_engine.list_maintenance_windows(
+                active_only=active_only, now=now
+            )
+        ]
 
 
 def test_health_route_uses_loaded_service() -> None:
@@ -2875,3 +2973,184 @@ def test_alerts_gateway_test_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
         data_og = res_og.json()
         assert data_og["gateway"] == "opsgenie"
         assert data_og["success"] is True
+
+
+def test_alerts_remediation_and_circuit_breaker_routes() -> None:
+    with TestClient(api_main.app) as client:
+        # 1. Test with FakeService loaded
+        api_main.service = FakeService()
+        api_main.service_load_error = None
+
+        # GET /alerts/remediation/rules
+        res_rules = client.get("/alerts/remediation/rules")
+        assert res_rules.status_code == 200
+        data_rules = res_rules.json()
+        assert data_rules["count"] >= 1
+        assert any(
+            r["rule_name"] == "StreamingQueueHighUtilization"
+            for r in data_rules["rules"]
+        )
+
+        # GET /alerts/remediation/history
+        res_hist = client.get("/alerts/remediation/history?limit=10")
+        assert res_hist.status_code == 200
+        data_hist = res_hist.json()
+        assert data_hist["count"] >= 1
+        assert data_hist["history"][0]["action_type"] == "flush_feedback_queue"
+
+        # POST /alerts/remediation/trigger (dry run)
+        res_trig_dry = client.post(
+            "/alerts/remediation/trigger",
+            json={
+                "rule_name": "test-manual",
+                "action_type": "flush_feedback_queue",
+                "parameters": {"timeout": 2.5},
+                "dry_run": True,
+            },
+        )
+        assert res_trig_dry.status_code == 200
+        assert res_trig_dry.json()["result"]["status"] == "dry_run"
+
+        # POST /alerts/remediation/trigger (executed)
+        res_trig = client.post(
+            "/alerts/remediation/trigger",
+            json={
+                "rule_name": "test-manual",
+                "action_type": "rotate_alert_storage",
+            },
+        )
+        assert res_trig.status_code == 200
+        assert res_trig.json()["result"]["status"] == "executed"
+
+        # GET /alerts/circuit-breaker/stats
+        res_cb = client.get("/alerts/circuit-breaker/stats")
+        assert res_cb.status_code == 200
+        assert "circuit_breakers" in res_cb.json()
+        assert "webhook" in res_cb.json()["circuit_breakers"]
+
+        # POST /alerts/circuit-breaker/reset
+        res_cb_reset = client.post("/alerts/circuit-breaker/reset")
+        assert res_cb_reset.status_code == 200
+        assert res_cb_reset.json()["status"] == "ok"
+
+        # 2. Test fallback mode when service is None
+        api_main.service = None
+        api_main.service_load_error = "Service offline"
+
+        res_rules_fallback = client.get("/alerts/remediation/rules")
+        assert res_rules_fallback.status_code == 200
+        assert res_rules_fallback.json()["count"] >= 1
+
+        res_hist_fallback = client.get("/alerts/remediation/history")
+        assert res_hist_fallback.status_code == 200
+
+        res_trig_fallback = client.post(
+            "/alerts/remediation/trigger",
+            json={
+                "rule_name": "fallback-test",
+                "action_type": "flush_feedback_queue",
+            },
+        )
+        assert res_trig_fallback.status_code == 200
+
+        res_cb_fallback = client.get("/alerts/circuit-breaker/stats")
+        assert res_cb_fallback.status_code == 200
+
+        res_reset_fallback = client.post("/alerts/circuit-breaker/reset")
+        assert res_reset_fallback.status_code == 200
+
+
+def test_api_alert_silences_and_maintenance_endpoints() -> None:
+    service = FakeService()
+    with TestClient(api_main.app) as client:
+        api_main.service = service
+        api_main.service_load_error = None
+
+        # 1. Silences with service
+        res_list = client.get("/alerts/silences")
+        assert res_list.status_code == 200
+        assert res_list.json()["count"] == 0
+
+        res_create = client.post(
+            "/alerts/silences",
+            json={
+                "silence_id": "sil-api-1",
+                "matchers": [{"name": "alertname", "value": "HighLatency"}],
+                "duration_seconds": 3600.0,
+                "author": "api-tester",
+                "comment": "Testing silences API",
+            },
+        )
+        assert res_create.status_code == 200
+        assert res_create.json()["status"] == "ok"
+        assert res_create.json()["silence"]["silence_id"] == "sil-api-1"
+
+        res_list_active = client.get("/alerts/silences?active_only=true")
+        assert res_list_active.status_code == 200
+        assert res_list_active.json()["count"] == 1
+
+        res_del = client.delete("/alerts/silences/sil-api-1")
+        assert res_del.status_code == 200
+        assert res_del.json()["removed"] is True
+
+        res_del_404 = client.delete("/alerts/silences/sil-api-1")
+        assert res_del_404.status_code == 404
+
+        # 2. Maintenance windows with service
+        res_mw_list = client.get("/alerts/maintenance")
+        assert res_mw_list.status_code == 200
+        assert res_mw_list.json()["count"] == 0
+
+        res_mw_create = client.post(
+            "/alerts/maintenance",
+            json={
+                "window_id": "mw-api-1",
+                "name": "DB Migration",
+                "duration_seconds": 7200.0,
+                "suppress_all": True,
+                "author": "sre",
+                "description": "Database schema migration",
+            },
+        )
+        assert res_mw_create.status_code == 200
+        assert res_mw_create.json()["status"] == "ok"
+        assert res_mw_create.json()["maintenance_window"]["window_id"] == "mw-api-1"
+
+        res_mw_list_active = client.get("/alerts/maintenance?active_only=true")
+        assert res_mw_list_active.status_code == 200
+        assert res_mw_list_active.json()["count"] == 1
+
+        res_mw_del = client.delete("/alerts/maintenance/mw-api-1")
+        assert res_mw_del.status_code == 200
+        assert res_mw_del.json()["cancelled"] is True
+
+        res_mw_del_404 = client.delete("/alerts/maintenance/mw-api-1")
+        assert res_mw_del_404.status_code == 404
+
+        # 3. Fallback mode tests (when service is None)
+        api_main.service = None
+        api_main.service_load_error = "Service offline"
+
+        res_fallback_create = client.post(
+            "/alerts/silences",
+            json={
+                "silence_id": "sil-fb-1",
+                "matchers": [{"name": "severity", "value": "warning"}],
+                "duration_seconds": 600.0,
+            },
+        )
+        assert res_fallback_create.status_code == 200
+        assert client.get("/alerts/silences").json()["count"] >= 1
+        assert client.delete("/alerts/silences/sil-fb-1").status_code == 200
+
+        res_mw_fb = client.post(
+            "/alerts/maintenance",
+            json={
+                "window_id": "mw-fb-1",
+                "name": "Fallback Maintenance",
+                "duration_seconds": 1800.0,
+            },
+        )
+        assert res_mw_fb.status_code == 200
+        assert client.get("/alerts/maintenance").json()["count"] >= 1
+        assert client.delete("/alerts/maintenance/mw-fb-1").status_code == 200
