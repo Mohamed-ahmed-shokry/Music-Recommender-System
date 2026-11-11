@@ -1,78 +1,41 @@
-# Phase 171 & 172 Progress Record & Decision Log
+# Milestone 0.40.0 Progress Record — Phase 173 & 174
 
-## Phase 171 & 172: Automated Incident Remediation and Outbound Webhook Circuit Breaking (0.39.0)
+## 1. Micro-Task Checklist
+- [ ] Task 1: Define Phase 173 & 174 roadmap, update plan, and initialize progress record.
+- [ ] Task 2: Implement `SilenceMatcher`, `AlertSilenceRule`, `MaintenanceWindow`, and `SilenceDecision` in `src/music_recommender/alerting.py`.
+- [ ] Task 3: Implement `AlertSilencingEngine` in `src/music_recommender/alerting.py`.
+- [ ] Task 4: Add unit tests for `AlertSilenceRule`, `MaintenanceWindow`, and `AlertSilencingEngine` in `tests/test_alerting.py`.
+- [ ] Task 5: Implement `SlackWebhookAdapter` Block Kit formatter and dispatcher in `src/music_recommender/alerting.py`.
+- [ ] Task 6: Implement `TeamsWebhookAdapter` Adaptive Card formatter and dispatcher in `src/music_recommender/alerting.py`.
+- [ ] Task 7: Add unit tests for `SlackWebhookAdapter` and `TeamsWebhookAdapter` in `tests/test_alerting.py`.
+- [ ] Task 8: Integrate silencing engine and chat webhook adapters into `MultiChannelDispatcher` in `src/music_recommender/alerting.py`.
+- [ ] Task 9: Add unit tests for dispatcher silencing and chat adapters in `tests/test_alerting.py`.
+- [ ] Task 10: Integrate silencing and maintenance windows into `RecommenderService` in `src/music_recommender/service.py`.
+- [ ] Task 11: Add service integration tests in `tests/test_service.py`.
+- [ ] Task 12: Implement endpoints `/alerts/silences/*` and `/alerts/maintenance/*` in `api/main.py`.
+- [ ] Task 13: Add API integration tests in `tests/test_api.py`.
+- [ ] Task 14: Implement CLI commands `silence-alert`, `list-silences`, `expire-silence`, `schedule-maintenance`, and `list-maintenance` in `src/music_recommender/cli.py`.
+- [ ] Task 15: Add CLI tests in `tests/test_cli.py`.
+- [ ] Task 16: Add silencing management and maintenance window status to Streamlit dashboard in `src/music_recommender/dashboard.py`.
+- [ ] Task 17: Add dashboard tests in `tests/test_dashboard.py`.
+- [ ] Task 18: Update `README.md` and `CHANGELOG.md` with 0.40.0 documentation.
+- [ ] Task 19: Bump package version to `0.40.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [ ] Task 20: Verify local CI parity, push to remote, monitor remote CI to 100% green.
 
-- **Milestone**: 0.39.0
-- **Status**: In Progress
-- **Branch**: `phase/171-remediation-and-circuit-breaker`
-- **Draft PR**: PR #33
+## 2. Acceptance Criteria Tracking
+| Criterion | Status | Verification Evidence |
+| :--- | :---: | :--- |
+| AC-1: AlertSilencingEngine evaluates AlertSilenceRule matchers against alert transitions | `Pending` | Task 2-4 |
+| AC-2: MaintenanceWindow suppresses notifications during active maintenance intervals | `Pending` | Task 2-4 |
+| AC-3: SlackWebhookAdapter formats Block Kit payloads with severity colors and buttons | `Pending` | Task 5, 7 |
+| AC-4: TeamsWebhookAdapter formats Adaptive Card payloads with facts and details | `Pending` | Task 6, 7 |
+| AC-5: MultiChannelDispatcher dispatches to Slack and Teams channels and honors silencing | `Pending` | Task 8, 9 |
+| AC-6: RecommenderService provides complete management of silences and maintenance windows | `Pending` | Task 10, 11 |
+| AC-7: FastAPI endpoints /alerts/silences/* and /alerts/maintenance/* return validated schema responses | `Pending` | Task 12, 13 |
+| AC-8: Operator CLI commands operate cleanly in table and JSON formats | `Pending` | Task 14, 15 |
+| AC-9: Streamlit dashboard renders silence rules and maintenance window controls | `Pending` | Task 16, 17 |
+| AC-10: 100% green CI parity locally and remotely | `Pending` | Task 20 |
 
----
-
-## 1. Task Status
-
-| Task ID | Task Description | Status | Commit |
-|---|---|---|---|
-| Task 1 | Roadmap, Plan & Progress initialization | Completed | `4f33396`, `9346be1` |
-| Task 2 | `RemediationActionType`, `RemediationRule`, `RemediationActionResult`, and `IncidentRemediationRunner` in `alerting.py` | Completed | `60d09de` |
-| Task 3 | Unit tests for `IncidentRemediationRunner` in `tests/test_alerting.py` | Completed | `8abfa26` |
-| Task 4 | `CircuitBreakerState`, `CircuitBreakerConfig`, and `CircuitBreaker` in `alerting.py` | Completed | `efb6bf1` |
-| Task 5 | Unit tests for `CircuitBreaker` in `tests/test_alerting.py` | Completed | `27bdbec` |
-| Task 6 | Integrate circuit breaking into `WebhookDispatcher` and `MultiChannelDispatcher` in `alerting.py` | Completed | `7105b59` |
-| Task 7 | Unit tests for circuit-breaker protected dispatching in `tests/test_alerting.py` | Completed | `9157c3a` |
-| Task 8 | Integrate `IncidentRemediationRunner` into `RecommenderService` in `src/music_recommender/service.py` | Completed | `0acaf99` |
-| Task 9 | Service integration tests in `tests/test_service.py` | Completed | `8a97dae` |
-| Task 10 | Endpoints `/alerts/remediation/rules`, `/alerts/remediation/history`, `/alerts/remediation/trigger`, `/alerts/circuit-breaker/stats` in `api/main.py` | Completed | `3f35c36` |
-| Task 11 | API integration tests in `tests/test_api.py` | Completed | `2b0e925` |
-| Task 12 | CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` in `src/music_recommender/cli.py` | Completed | `0568ae1` |
-| Task 13 | CLI tests in `tests/test_cli.py` | Completed | `9d63048` |
-| Task 14 | Add self-healing remediation and circuit-breaker status indicators to Streamlit sidebar in `dashboard.py` | Completed | `b6bbc32` |
-| Task 15 | Dashboard tests in `tests/test_dashboard.py` | Completed | `69001cb` |
-| Task 16 | Documentation updates in `README.md` and `CHANGELOG.md` | Completed | `bd4f1d0` |
-| Task 17 | Bump package version to `0.39.0` in `pyproject.toml`, run `uv lock`, and `uv build` | Completed | `e6d3eda` |
-| Task 18 | Verify local CI parity, push to remote, open draft PR, monitor remote CI to green | Completed | `d901c89` (PR #34) |
-
----
-
-## 2. Decision Log
-
-| Decision | Options Considered | Rationale & Evidence |
-|---|---|---|
-| Remediation execution model | (a) Unrestricted shell scripts, (b) Typed static registry of callable handlers with cooldowns | (b) Statically registered Python callables prevent command injection vulnerabilities, enforce strict parameter types, and allow thread-safe cooldowns. |
-| Circuit breaker state transitions | (a) Error percentage over fixed windows, (b) Consecutive failure threshold with half-open recovery probes | (b) Consecutive failures fail fast immediately during outages, while half-open probes prevent full traffic release until downstream health is verified. |
-| Remediation thrashing protection | (a) Global lock, (b) Per-action cooldown timestamps (`time.time() - last_run >= cooldown`) plus max attempt counter | (b) Cooldown windows allow other independent actions to proceed while protecting any single component from thrashing loops. |
-
----
-
-## 3. CI & Validation Log
-
-| Command | Result |
-|---|---|
-| `uv run ruff format --check .` | Passed (65 files formatted) |
-| `uv run ruff check .` | Passed (All checks passed) |
-| `uv run mypy` | Passed (30 source files checked) |
-| `uv run --extra dashboard --extra tracking --extra spotify pytest -q` | Passed (1289 passed) |
-| `uv build` | Passed (built sdist and wheel) |
-| Remote CI (Build and smoke test container) | Passed (Run 42833718431, Job 129890343305) |
-| Remote CI (Test, lint, and build) | Passed (Run 42833718431, Job 129890343958) |
-
----
-
-## 4. Acceptance Criteria
-
-| Criterion | Status | Evidence |
-|---|---|---|
-| AC-1: IncidentRemediationRunner with cooldown and attempt limits | Completed | `8abfa26` |
-| AC-2: CircuitBreaker state transitions (CLOSED/OPEN/HALF_OPEN) | Completed | `27bdbec` |
-| AC-3: Outbound dispatchers reject traffic when circuit is OPEN | Completed | `9157c3a` |
-| AC-4: RecommenderService self-healing handler integration | Completed | `0acaf99` |
-| AC-5: FastAPI endpoints `/alerts/remediation/*` and `/alerts/circuit-breaker/stats` | Completed | `3f35c36` |
-| AC-6: Operator CLI commands `remediation-history`, `trigger-action`, and `circuit-stats` | Completed | `0568ae1` |
-| AC-7: Streamlit dashboard sidebar remediation and circuit status | Completed | `b6bbc32` |
-| AC-8: 100% green CI parity locally and remotely | Completed | Run `42833718431` (100% green) |
-
----
-
-## 5. Blockers
-
-None.
+## 3. Autonomous Decisions Log
+- **Decision 1 (In-Memory Silencing Engine with Optional Persistence)**: `AlertSilencingEngine` maintains thread-safe active silences and maintenance windows in memory with optional JSON file serialization for restart survival.
+- **Decision 2 (Block Kit & Adaptive Cards Schemas)**: Use official Slack Block Kit specification (`type: "section"`, `type: "actions"`, colored attachments for severity) and Microsoft Teams Office 365 Connector / Adaptive Card payload structures.
