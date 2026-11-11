@@ -1584,6 +1584,38 @@ def render_dashboard(service: RecommenderService) -> None:
                         if trips > 0 or rejected > 0:
                             st.caption(f"Trips: {trips} | Rejected calls: {rejected}")
 
+            if hasattr(service, "get_silence_rules"):
+                active_silences = service.get_silence_rules(active_only=True)
+                if active_silences:
+                    st.divider()
+                    st.markdown("**Active Alert Silences**")
+                    for s in active_silences:
+                        m_desc = (
+                            ", ".join(
+                                f"{m['name']}={m['value']}"
+                                for m in s.get("matchers", [])
+                            )
+                            or "all alerts"
+                        )
+                        st.write(f"🔇 **{s.get('silence_id')}**: `{m_desc}`")
+                        if s.get("comment"):
+                            st.caption(str(s["comment"]))
+
+            if hasattr(service, "get_maintenance_windows"):
+                active_windows = service.get_maintenance_windows(active_only=True)
+                if active_windows:
+                    st.divider()
+                    st.markdown("**Active Maintenance Windows**")
+                    for mw in active_windows:
+                        rules_scope = (
+                            "All alerts"
+                            if mw.get("suppress_all", True)
+                            else ", ".join(mw.get("affected_rules", []))
+                        )
+                        st.write(f"🚧 **{mw.get('name')}**: `{rules_scope}`")
+                        if mw.get("description"):
+                            st.caption(str(mw["description"]))
+
     tabs = st.tabs(
         [
             "For You",
