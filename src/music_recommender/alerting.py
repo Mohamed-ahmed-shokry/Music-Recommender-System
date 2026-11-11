@@ -3274,7 +3274,7 @@ class MultiChannelDispatcher:
         with self._lock:
             self._dispatch_count += 1
 
-        for ch in target_channels:
+        for ch in sorted(target_channels):
             handler = self._channels.get(ch)
             if handler is None:
                 results[ch] = (False, 404, f"Unknown channel '{ch}'")

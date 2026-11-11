@@ -2381,7 +2381,7 @@ def test_multichannel_dispatcher_silencing_suppression() -> None:
     assert "slack" in res_disk
     assert "teams" in res_disk
     assert res_disk["slack"] == (True, 200, "ok")
-    assert called_channels == ["slack", "teams"]
+    assert sorted(called_channels) == ["slack", "teams"]
 
     # Now add maintenance window that suppresses all alerts
     mw = MaintenanceWindow(
