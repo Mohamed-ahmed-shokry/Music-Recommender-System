@@ -16,10 +16,10 @@
 - [x] Task 13: Add API integration tests in `tests/test_api.py`.
 - [x] Task 14: Implement CLI commands `silence-alert`, `list-silences`, `expire-silence`, `schedule-maintenance`, and `list-maintenance` in `src/music_recommender/cli.py`.
 - [x] Task 15: Add CLI tests in `tests/test_cli.py`.
-- [ ] Task 16: Add silencing management and maintenance window status to Streamlit dashboard in `src/music_recommender/dashboard.py`.
-- [ ] Task 17: Add dashboard tests in `tests/test_dashboard.py`.
-- [ ] Task 18: Update `README.md` and `CHANGELOG.md` with 0.40.0 documentation.
-- [ ] Task 19: Bump package version to `0.40.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [x] Task 16: Add silencing management and maintenance window status to Streamlit dashboard in `src/music_recommender/dashboard.py`.
+- [x] Task 17: Add dashboard tests in `tests/test_dashboard.py`.
+- [x] Task 18: Update `README.md` and `CHANGELOG.md` with 0.40.0 documentation.
+- [x] Task 19: Bump package version to `0.40.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
 - [ ] Task 20: Verify local CI parity, push to remote, monitor remote CI to 100% green.
 
 ## 2. Acceptance Criteria Tracking
