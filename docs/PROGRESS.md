@@ -1,10 +1,10 @@
 # Milestone 0.40.0 Progress Record — Phase 173 & 174
 
 ## 1. Micro-Task Checklist
-- [ ] Task 1: Define Phase 173 & 174 roadmap, update plan, and initialize progress record.
-- [ ] Task 2: Implement `SilenceMatcher`, `AlertSilenceRule`, `MaintenanceWindow`, and `SilenceDecision` in `src/music_recommender/alerting.py`.
-- [ ] Task 3: Implement `AlertSilencingEngine` in `src/music_recommender/alerting.py`.
-- [ ] Task 4: Add unit tests for `AlertSilenceRule`, `MaintenanceWindow`, and `AlertSilencingEngine` in `tests/test_alerting.py`.
+- [x] Task 1: Define Phase 173 & 174 roadmap, update plan, and initialize progress record.
+- [x] Task 2: Implement `SilenceMatcher`, `AlertSilenceRule`, `MaintenanceWindow`, and `SilenceDecision` in `src/music_recommender/alerting.py`.
+- [x] Task 3: Implement `AlertSilencingEngine` in `src/music_recommender/alerting.py`.
+- [x] Task 4: Add unit tests for `AlertSilenceRule`, `MaintenanceWindow`, and `AlertSilencingEngine` in `tests/test_alerting.py`.
 - [ ] Task 5: Implement `SlackWebhookAdapter` Block Kit formatter and dispatcher in `src/music_recommender/alerting.py`.
 - [ ] Task 6: Implement `TeamsWebhookAdapter` Adaptive Card formatter and dispatcher in `src/music_recommender/alerting.py`.
 - [ ] Task 7: Add unit tests for `SlackWebhookAdapter` and `TeamsWebhookAdapter` in `tests/test_alerting.py`.
