@@ -27,6 +27,8 @@ from music_recommender.alerting import (
     ReceivedAlertEvent,
     SilenceDecision,
     SilenceMatcher,
+    SlackWebhookAdapter,
+    TeamsWebhookAdapter,
     WebhookDispatcher,
     lookup_metric_value,
     parse_alert_payload,
@@ -2202,3 +2204,135 @@ def test_alert_silencing_engine_evaluation_and_persistence(tmp_path: Path) -> No
     assert engine.remove_maintenance_window("mw-global")
     dec, target = engine.evaluate("HighErrorRate", "critical", now=now)
     assert dec == SilenceDecision.ACTIVE
+
+
+def test_slack_webhook_adapter_payload_and_send() -> None:
+    sent_requests: list[tuple[str, bytes, dict[str, str], float, str]] = []
+
+    def mock_sender(
+        url: str, body: bytes, headers: dict[str, str], timeout: float, method: str
+    ) -> tuple[int, str]:
+        sent_requests.append((url, body, headers, timeout, method))
+        return 200, "ok"
+
+    adapter = SlackWebhookAdapter(
+        webhook_url="https://hooks.slack.com/services/T00/B00/X00",
+        channel="#incidents",
+        dashboard_url="https://dash.example.com",
+        sender=mock_sender,
+    )
+
+    crit_rule = _rule(
+        name="DiskFull",
+        metric="node_disk_avail",
+        threshold=10,
+        comparator="<",
+        severity="critical",
+        summary="Disk space low",
+    )
+    t_crit = AlertTransition(
+        rule=crit_rule,
+        event="firing",
+        value=5.0,
+        timestamp="2026-11-11T12:00:00Z",
+    )
+
+    payload_crit = adapter.build_payload(t_crit)
+    assert payload_crit["channel"] == "#incidents"
+    assert payload_crit["attachments"][0]["color"] == "#E01E5A"
+    blocks = payload_crit["attachments"][0]["blocks"]
+    assert blocks[0]["type"] == "header"
+    assert "CRITICAL" in blocks[0]["text"]["text"]
+    assert blocks[1]["type"] == "section"
+    assert "DiskFull" in payload_crit["text"]
+    assert blocks[2]["type"] == "actions"
+    assert blocks[2]["elements"][0]["url"] == "https://dash.example.com"
+
+    # Send critical
+    ok, code, msg = adapter.send(t_crit)
+    assert ok is True
+    assert code == 200
+    assert len(sent_requests) == 1
+    assert sent_requests[0][0] == "https://hooks.slack.com/services/T00/B00/X00"
+    assert sent_requests[0][4] == "POST"
+
+    # Warning severity
+    warn_rule = _rule(name="HighLatency", severity="warning", summary="Latency warning")
+    t_warn = AlertTransition(
+        rule=warn_rule,
+        event="firing",
+        value=1.5,
+        timestamp="2026-11-11T12:05:00Z",
+    )
+    payload_warn = adapter.build_payload(t_warn)
+    assert payload_warn["attachments"][0]["color"] == "#ECB22E"
+
+    # Resolved state
+    t_res = AlertTransition(
+        rule=crit_rule,
+        event="resolved",
+        value=50.0,
+        timestamp="2026-11-11T12:10:00Z",
+    )
+    payload_res = adapter.build_payload(t_res)
+    assert payload_res["attachments"][0]["color"] == "#2EB886"
+    assert "RESOLVED" in payload_res["attachments"][0]["blocks"][0]["text"]["text"]
+
+
+def test_teams_webhook_adapter_payload_and_send() -> None:
+    sent_requests: list[tuple[str, bytes, dict[str, str], float, str]] = []
+
+    def mock_sender(
+        url: str, body: bytes, headers: dict[str, str], timeout: float, method: str
+    ) -> tuple[int, str]:
+        sent_requests.append((url, body, headers, timeout, method))
+        return 200, "ok"
+
+    adapter = TeamsWebhookAdapter(
+        webhook_url="https://outlook.office.com/webhook/xxx",
+        dashboard_url="https://dash.example.com",
+        sender=mock_sender,
+    )
+
+    crit_rule = _rule(
+        name="ServiceDown",
+        metric="up",
+        threshold=1,
+        comparator="==",
+        severity="critical",
+        summary="Service is unreachable",
+    )
+    t_crit = AlertTransition(
+        rule=crit_rule,
+        event="firing",
+        value=0.0,
+        timestamp="2026-11-11T12:00:00Z",
+    )
+
+    payload_crit = adapter.build_payload(t_crit)
+    assert payload_crit["@type"] == "MessageCard"
+    assert payload_crit["themeColor"] == "E01E5A"
+    assert "CRITICAL" in payload_crit["title"]
+    facts = payload_crit["sections"][0]["facts"]
+    assert any(f["name"] == "Rule" and f["value"] == "ServiceDown" for f in facts)
+    assert any(f["name"] == "Current Value" and f["value"] == "0.0000" for f in facts)
+    assert payload_crit["potentialAction"][0]["targets"][0]["uri"] == (
+        "https://dash.example.com"
+    )
+
+    # Send critical
+    ok, code, msg = adapter.send(t_crit)
+    assert ok is True
+    assert code == 200
+    assert len(sent_requests) == 1
+
+    # Resolved transition
+    t_res = AlertTransition(
+        rule=crit_rule,
+        event="resolved",
+        value=1.0,
+        timestamp="2026-11-11T12:15:00Z",
+    )
+    payload_res = adapter.build_payload(t_res)
+    assert payload_res["themeColor"] == "2EB886"
+    assert "RESOLVED" in payload_res["title"]

@@ -2985,6 +2985,7 @@ class SlackWebhookAdapter:
             color = "#ECB22E"  # Slack warning/yellow
             status_title = f":warning: WARNING ALERT: {transition.rule.name}"
 
+        val_str = f"{transition.value:.4f}" if transition.value is not None else "N/A"
         blocks: list[dict[str, Any]] = [
             {
                 "type": "header",
@@ -3002,7 +3003,7 @@ class SlackWebhookAdapter:
                         f"*{transition.rule.summary}*\n"
                         f"> *Metric:* `{transition.rule.metric}` "
                         f"{transition.rule.comparator} `{transition.rule.threshold}`\n"
-                        f"> *Current Value:* `{transition.value:.4f}`\n"
+                        f"> *Current Value:* `{val_str}`\n"
                         f"> *Time:* `{transition.timestamp}`"
                     ),
                 },
@@ -3088,6 +3089,7 @@ class TeamsWebhookAdapter:
             theme_color = "ECB22E"  # Amber
             title = f"WARNING ALERT: {transition.rule.name}"
 
+        val_str = f"{transition.value:.4f}" if transition.value is not None else "N/A"
         facts = [
             {"name": "Rule", "value": transition.rule.name},
             {"name": "Severity", "value": sev.upper() if is_firing else "RESOLVED"},
@@ -3098,7 +3100,7 @@ class TeamsWebhookAdapter:
                     f"{transition.rule.threshold}"
                 ),
             },
-            {"name": "Current Value", "value": f"{transition.value:.4f}"},
+            {"name": "Current Value", "value": val_str},
             {"name": "Timestamp", "value": transition.timestamp},
         ]
 
