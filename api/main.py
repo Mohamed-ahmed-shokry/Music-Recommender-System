@@ -813,9 +813,7 @@ class CreateMaintenanceWindowRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    window_id: str | None = Field(
-        None, description="Optional custom window identifier"
-    )
+    window_id: str | None = Field(None, description="Optional custom window identifier")
     name: str = Field(
         "scheduled_maintenance", description="Name of the maintenance window"
     )
