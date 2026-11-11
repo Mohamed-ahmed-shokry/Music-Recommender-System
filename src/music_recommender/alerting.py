@@ -2949,6 +2949,197 @@ class OpsgenieGateway:
         return success, status, response
 
 
+class SlackWebhookAdapter:
+    """Delivers rich Slack notifications using Block Kit and attachments."""
+
+    def __init__(
+        self,
+        webhook_url: str,
+        channel: str | None = None,
+        username: str = "Music Recommender Alerting",
+        icon_emoji: str = ":musical_note:",
+        dashboard_url: str = "http://localhost:8501",
+        timeout_seconds: float = 5.0,
+        sender: Callable[[str, bytes, dict[str, str], float, str], tuple[int, str]]
+        | None = None,
+    ) -> None:
+        self.webhook_url = webhook_url
+        self.channel = channel
+        self.username = username
+        self.icon_emoji = icon_emoji
+        self.dashboard_url = dashboard_url
+        self.timeout_seconds = timeout_seconds
+        self._sender = sender or _send_http_request
+
+    def build_payload(self, transition: AlertTransition) -> dict[str, Any]:
+        """Build Slack Block Kit payload with color bar and action buttons."""
+        is_firing = transition.is_firing
+        sev = str(transition.rule.severity).lower()
+        if not is_firing:
+            color = "#2EB886"  # Slack green (resolved)
+            status_title = f":white_check_mark: RESOLVED: {transition.rule.name}"
+        elif sev == "critical":
+            color = "#E01E5A"  # Slack danger/red
+            status_title = f":rotating_light: CRITICAL ALERT: {transition.rule.name}"
+        else:
+            color = "#ECB22E"  # Slack warning/yellow
+            status_title = f":warning: WARNING ALERT: {transition.rule.name}"
+
+        blocks: list[dict[str, Any]] = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": status_title[:150],
+                    "emoji": True,
+                },
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"*{transition.rule.summary}*\n"
+                        f"> *Metric:* `{transition.rule.metric}` "
+                        f"{transition.rule.comparator} `{transition.rule.threshold}`\n"
+                        f"> *Current Value:* `{transition.value:.4f}`\n"
+                        f"> *Time:* `{transition.timestamp}`"
+                    ),
+                },
+            },
+        ]
+
+        if self.dashboard_url:
+            blocks.append(
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {
+                                "type": "plain_text",
+                                "text": "View Dashboard",
+                                "emoji": True,
+                            },
+                            "url": self.dashboard_url,
+                            "style": "primary" if is_firing else "default",
+                        }
+                    ],
+                }
+            )
+
+        payload: dict[str, Any] = {
+            "text": (
+                f"[{'RESOLVED' if not is_firing else sev.upper()}] "
+                f"{transition.rule.name}: {transition.rule.summary}"
+            ),
+            "username": self.username,
+            "icon_emoji": self.icon_emoji,
+            "attachments": [
+                {
+                    "color": color,
+                    "blocks": blocks,
+                }
+            ],
+        }
+        if self.channel:
+            payload["channel"] = self.channel
+        return payload
+
+    def send(self, transition: AlertTransition) -> tuple[bool, int, str]:
+        """Dispatch an alert transition to Slack via Incoming Webhook."""
+        payload = self.build_payload(transition)
+        body = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        status, response_text = self._sender(
+            self.webhook_url, body, headers, self.timeout_seconds, "POST"
+        )
+        success = 200 <= status < 300
+        return success, status, response_text
+
+
+class TeamsWebhookAdapter:
+    """Delivers Microsoft Teams notifications via Office 365 Connector Cards."""
+
+    def __init__(
+        self,
+        webhook_url: str,
+        dashboard_url: str = "http://localhost:8501",
+        timeout_seconds: float = 5.0,
+        sender: Callable[[str, bytes, dict[str, str], float, str], tuple[int, str]]
+        | None = None,
+    ) -> None:
+        self.webhook_url = webhook_url
+        self.dashboard_url = dashboard_url
+        self.timeout_seconds = timeout_seconds
+        self._sender = sender or _send_http_request
+
+    def build_payload(self, transition: AlertTransition) -> dict[str, Any]:
+        """Build Office 365 Connector Card payload for Microsoft Teams."""
+        is_firing = transition.is_firing
+        sev = str(transition.rule.severity).lower()
+        if not is_firing:
+            theme_color = "2EB886"  # Green
+            title = f"RESOLVED: {transition.rule.name}"
+        elif sev == "critical":
+            theme_color = "E01E5A"  # Red
+            title = f"CRITICAL ALERT: {transition.rule.name}"
+        else:
+            theme_color = "ECB22E"  # Amber
+            title = f"WARNING ALERT: {transition.rule.name}"
+
+        facts = [
+            {"name": "Rule", "value": transition.rule.name},
+            {"name": "Severity", "value": sev.upper() if is_firing else "RESOLVED"},
+            {
+                "name": "Metric",
+                "value": (
+                    f"{transition.rule.metric} {transition.rule.comparator} "
+                    f"{transition.rule.threshold}"
+                ),
+            },
+            {"name": "Current Value", "value": f"{transition.value:.4f}"},
+            {"name": "Timestamp", "value": transition.timestamp},
+        ]
+
+        payload: dict[str, Any] = {
+            "@type": "MessageCard",
+            "@context": "https://schema.org/extensions",
+            "summary": f"{title} - {transition.rule.summary}",
+            "themeColor": theme_color,
+            "title": title,
+            "sections": [
+                {
+                    "activityTitle": transition.rule.summary,
+                    "facts": facts,
+                    "markdown": True,
+                }
+            ],
+        }
+
+        if self.dashboard_url:
+            payload["potentialAction"] = [
+                {
+                    "@type": "OpenUri",
+                    "name": "Open Dashboard",
+                    "targets": [{"os": "default", "uri": self.dashboard_url}],
+                }
+            ]
+
+        return payload
+
+    def send(self, transition: AlertTransition) -> tuple[bool, int, str]:
+        """Dispatch an alert transition to Microsoft Teams webhook."""
+        payload = self.build_payload(transition)
+        body = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        status, response_text = self._sender(
+            self.webhook_url, body, headers, self.timeout_seconds, "POST"
+        )
+        success = 200 <= status < 300
+        return success, status, response_text
+
+
 class MultiChannelDispatcher:
     """Coordinates dispatching alert transitions across multiple gateways
     and channels.
