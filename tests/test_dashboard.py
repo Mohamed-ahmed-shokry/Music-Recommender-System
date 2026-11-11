@@ -589,6 +589,14 @@ class FakeDashboardService:
             {},
         )
 
+    def get_silence_rules(self, active_only: bool = False) -> list[dict[str, Any]]:
+        return getattr(self, "_fake_silence_rules", [])
+
+    def get_maintenance_windows(
+        self, active_only: bool = False
+    ) -> list[dict[str, Any]]:
+        return getattr(self, "_fake_maintenance_windows", [])
+
     def correlate_alert_history(self, **kwargs: Any) -> Any:
         from music_recommender.alerting import AlertCorrelationReport
 
@@ -1899,3 +1907,35 @@ def test_dashboard_sidebar_remediation_and_circuit_breaker_rendering() -> None:
     assert any("Outbound Circuit Breakers" in m.value for m in app.markdown)
     assert any("webhook" in m.value for m in app.markdown)
     assert any("Trips: 1" in c.value for c in app.caption)
+
+
+def test_dashboard_sidebar_silences_and_maintenance_rendering() -> None:
+    service = FakeDashboardService()
+    service._fake_silence_rules = [
+        {
+            "silence_id": "sil-dash-1",
+            "matchers": [{"name": "alertname", "value": "HighLatency"}],
+            "comment": "Silenced during deployment",
+        }
+    ]
+    service._fake_maintenance_windows = [
+        {
+            "window_id": "mw-dash-1",
+            "name": "Database Reindex",
+            "suppress_all": True,
+            "description": "Routine database maintenance",
+        }
+    ]
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("Active Alert Silences" in m.value for m in app.markdown)
+    assert any("sil-dash-1" in m.value for m in app.markdown)
+    assert any("Silenced during deployment" in c.value for c in app.caption)
+    assert any("Active Maintenance Windows" in m.value for m in app.markdown)
+    assert any("Database Reindex" in m.value for m in app.markdown)
+    assert any("Routine database maintenance" in c.value for c in app.caption)
