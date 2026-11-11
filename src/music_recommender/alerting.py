@@ -3155,6 +3155,7 @@ class MultiChannelDispatcher:
         escalation_engine: AlertEscalationEngine | None = None,
         circuit_breakers: dict[str, CircuitBreaker] | None = None,
         circuit_breaker_config: CircuitBreakerConfig | None = None,
+        silencing_engine: AlertSilencingEngine | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._channels: dict[
@@ -3164,8 +3165,39 @@ class MultiChannelDispatcher:
         self.escalation_engine = escalation_engine or AlertEscalationEngine()
         self._circuit_breakers: dict[str, CircuitBreaker] = dict(circuit_breakers or {})
         self._cb_config = circuit_breaker_config or CircuitBreakerConfig()
+        self.silencing_engine = silencing_engine
         self._dispatch_count: int = 0
         self._error_count: int = 0
+
+    def register_slack(
+        self,
+        name: str = "slack",
+        webhook_url: str = "",
+        channel: str | None = None,
+        dashboard_url: str = "http://localhost:8501",
+    ) -> SlackWebhookAdapter:
+        """Register a Slack Block Kit webhook adapter on this dispatcher."""
+        adapter = SlackWebhookAdapter(
+            webhook_url=webhook_url,
+            channel=channel,
+            dashboard_url=dashboard_url,
+        )
+        self.register_channel(name, adapter.send)
+        return adapter
+
+    def register_teams(
+        self,
+        name: str = "teams",
+        webhook_url: str = "",
+        dashboard_url: str = "http://localhost:8501",
+    ) -> TeamsWebhookAdapter:
+        """Register a Microsoft Teams Connector Card adapter on this dispatcher."""
+        adapter = TeamsWebhookAdapter(
+            webhook_url=webhook_url,
+            dashboard_url=dashboard_url,
+        )
+        self.register_channel(name, adapter.send)
+        return adapter
 
     def register_channel(
         self,
@@ -3192,6 +3224,22 @@ class MultiChannelDispatcher:
         now: float | None = None,
     ) -> dict[str, tuple[bool, int, str]]:
         """Dispatch transition across channels with throttling and escalation checks."""
+        if self.silencing_engine is not None:
+            silence_dec, silence_target = self.silencing_engine.evaluate(
+                rule_name=transition.rule.name,
+                severity=str(transition.rule.severity).lower(),
+                labels=transition.to_dict().get("labels"),
+                now=now,
+            )
+            if silence_dec != SilenceDecision.ACTIVE:
+                return {
+                    "silenced": (
+                        False,
+                        204,
+                        f"Suppressed by {silence_dec.value} ({silence_target})",
+                    )
+                }
+
         allowed, decision, reason = self.throttler.should_dispatch(transition, now=now)
         if not allowed:
             return {
@@ -3260,7 +3308,7 @@ class MultiChannelDispatcher:
     def get_stats(self) -> dict[str, Any]:
         """Return multi-channel dispatch metrics."""
         with self._lock:
-            return {
+            stats: dict[str, Any] = {
                 "dispatch_count": self._dispatch_count,
                 "error_count": self._error_count,
                 "registered_channels": sorted(self._channels.keys()),
@@ -3273,6 +3321,22 @@ class MultiChannelDispatcher:
                     for ch, cb in sorted(self._circuit_breakers.items())
                 },
             }
+            if self.silencing_engine is not None:
+                stats["silencing"] = {
+                    "active_silences": len(
+                        self.silencing_engine.list_silences(active_only=True)
+                    ),
+                    "total_silences": len(self.silencing_engine.list_silences()),
+                    "active_maintenance_windows": len(
+                        self.silencing_engine.list_maintenance_windows(
+                            active_only=True
+                        )
+                    ),
+                    "total_maintenance_windows": len(
+                        self.silencing_engine.list_maintenance_windows()
+                    ),
+                }
+            return stats
 
     def reset(self) -> None:
         """Clear dispatcher counters, throttler, and escalation engine."""
