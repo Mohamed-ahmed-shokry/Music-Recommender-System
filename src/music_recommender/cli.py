@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
@@ -21,12 +22,16 @@ from music_recommender.alerting import (
     AlertReplayEngine,
     AlertRule,
     AlertSeverity,
+    AlertSilenceRule,
+    AlertSilencingEngine,
     AlertSpilloverStorage,
     AlertTransition,
     DLQRetryPolicy,
     IncidentRemediationRunner,
+    MaintenanceWindow,
     OpsgenieGateway,
     PagerDutyGateway,
+    SilenceMatcher,
     WebhookDispatcher,
 )
 from music_recommender.bandit import (
@@ -5359,6 +5364,306 @@ def circuit_stats_cmd(
         typer.echo(f"  Total Trips:            {cb.get('total_trips', 0)}")
         typer.echo(f"  Total Rejected:         {cb.get('total_rejected', 0)}")
         typer.echo(f"  Total Calls:            {cb.get('total_calls', 0)}")
+
+
+_DEFAULT_SILENCING_STORAGE = Path("data/alerts/silences.json")
+
+
+def _get_silencing_engine_or_service() -> (
+    tuple[RecommenderService | None, AlertSilencingEngine]
+):
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable: %s", exc)
+
+    if service is not None:
+        return service, service.alert_silencing_engine
+    engine = AlertSilencingEngine(storage_path=_DEFAULT_SILENCING_STORAGE)
+    return None, engine
+
+
+@app.command("silence-alert")
+def silence_alert_cmd(
+    rule_name: Annotated[
+        str,
+        typer.Argument(help="Alert rule name to silence (or '*' for all)."),
+    ],
+    duration: Annotated[
+        float,
+        typer.Option("--duration", "-d", help="Silence duration in seconds."),
+    ] = 3600.0,
+    severity: Annotated[
+        str | None,
+        typer.Option(
+            "--severity",
+            "-s",
+            help="Optional severity to match (critical/warning).",
+        ),
+    ] = None,
+    author: Annotated[
+        str,
+        typer.Option("--author", "-a", help="Author creating the silence."),
+    ] = "operator",
+    comment: Annotated[
+        str,
+        typer.Option("--comment", "-c", help="Reason for the silence."),
+    ] = "",
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output silence rule as JSON."),
+    ] = False,
+) -> None:
+    """Create a temporary silencing rule to suppress alert notifications."""
+    service, engine = _get_silencing_engine_or_service()
+    now = time.time()
+    matchers: list[SilenceMatcher] = []
+    if rule_name != "*":
+        matchers.append(SilenceMatcher(name="alertname", value=rule_name))
+    if severity:
+        matchers.append(SilenceMatcher(name="severity", value=severity.lower()))
+
+    rule = AlertSilenceRule(
+        matchers=matchers,
+        starts_at=now,
+        ends_at=now + duration,
+        author=author,
+        comment=comment,
+    )
+    if service is not None:
+        service.add_silence_rule(rule)
+    else:
+        engine.add_silence(rule)
+
+    if json_output:
+        typer.echo(json.dumps(rule.to_dict(), indent=2))
+        return
+
+    typer.secho(
+        f"Alert silence created successfully: ID {rule.silence_id}",
+        fg=typer.colors.GREEN,
+        bold=True,
+    )
+    typer.echo(f"Rule:     {rule_name}")
+    if severity:
+        typer.echo(f"Severity: {severity.lower()}")
+    typer.echo(f"Duration: {duration:.0f}s")
+    typer.echo(f"Author:   {author}")
+    if comment:
+        typer.echo(f"Comment:  {comment}")
+
+
+@app.command("list-silences")
+def list_silences_cmd(
+    active_only: Annotated[
+        bool,
+        typer.Option(
+            "--active-only", help="List only currently active silences."
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output silences as JSON."),
+    ] = False,
+) -> None:
+    """List registered alert silencing rules."""
+    service, engine = _get_silencing_engine_or_service()
+    if service is not None:
+        silences = service.get_silence_rules(active_only=active_only)
+    else:
+        raw = engine.list_silences(active_only=active_only)
+        silences = [r.to_dict() for r in raw]
+
+    if json_output:
+        typer.echo(json.dumps(silences, indent=2))
+        return
+
+    if not silences:
+        typer.echo("No alert silences found.")
+        return
+
+    typer.secho("=== Alert Silences ===", bold=True)
+    for s in silences:
+        matchers_str = (
+            ", ".join(
+                f"{m['name']}={m['value']}" for m in s.get("matchers", [])
+            )
+            or "all"
+        )
+        active = (
+            s.get("enabled", True)
+            and s.get("starts_at", 0) <= time.time() <= s.get("ends_at", 0)
+        )
+        status_color = typer.colors.GREEN if active else typer.colors.YELLOW
+        status_label = "ACTIVE" if active else "EXPIRED/INACTIVE"
+        typer.secho(
+            f"ID: {s.get('silence_id')} | [{status_label}] | Matchers: {matchers_str}",
+            fg=status_color,
+            bold=True,
+        )
+        typer.echo(f"  Author:  {s.get('author')}")
+        if s.get("comment"):
+            typer.echo(f"  Comment: {s.get('comment')}")
+
+
+@app.command("expire-silence")
+def expire_silence_cmd(
+    silence_id: Annotated[
+        str,
+        typer.Argument(help="Silence identifier to expire or remove."),
+    ],
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output result as JSON."),
+    ] = False,
+) -> None:
+    """Expire or remove an active alert silence rule."""
+    service, engine = _get_silencing_engine_or_service()
+    if service is not None:
+        removed = service.remove_silence_rule(silence_id)
+    else:
+        removed = engine.remove_silence(silence_id)
+
+    if json_output:
+        typer.echo(json.dumps({"silence_id": silence_id, "removed": removed}))
+        return
+
+    if removed:
+        typer.secho(
+            f"Silence rule '{silence_id}' expired/removed.",
+            fg=typer.colors.GREEN,
+        )
+    else:
+        typer.secho(
+            f"Silence rule '{silence_id}' not found.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+
+@app.command("schedule-maintenance")
+def schedule_maintenance_cmd(
+    name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Name of the maintenance window."),
+    ] = "scheduled_maintenance",
+    duration: Annotated[
+        float,
+        typer.Option("--duration", "-d", help="Window duration in seconds."),
+    ] = 7200.0,
+    rules: Annotated[
+        str,
+        typer.Option(
+            "--rules",
+            "-r",
+            help="Comma-separated rule names to suppress (empty for all).",
+        ),
+    ] = "",
+    author: Annotated[
+        str,
+        typer.Option(
+            "--author", "-a", help="Author of the maintenance window."
+        ),
+    ] = "operator",
+    description: Annotated[
+        str,
+        typer.Option("--description", help="Description of maintenance tasks."),
+    ] = "",
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output maintenance window as JSON."),
+    ] = False,
+) -> None:
+    """Schedule a maintenance window to suppress alert notifications."""
+    service, engine = _get_silencing_engine_or_service()
+    now = time.time()
+    affected = [r.strip() for r in rules.split(",") if r.strip()]
+    window = MaintenanceWindow(
+        name=name,
+        starts_at=now,
+        ends_at=now + duration,
+        suppress_all=len(affected) == 0,
+        affected_rules=affected,
+        author=author,
+        description=description,
+    )
+    if service is not None:
+        service.schedule_maintenance_window(window)
+    else:
+        engine.add_maintenance_window(window)
+
+    if json_output:
+        typer.echo(json.dumps(window.to_dict(), indent=2))
+        return
+
+    typer.secho(
+        f"Maintenance window scheduled: ID {window.window_id}",
+        fg=typer.colors.GREEN,
+        bold=True,
+    )
+    typer.echo(f"Name:         {name}")
+    typer.echo(f"Duration:     {duration:.0f}s")
+    typer.echo(f"Suppress All: {window.suppress_all}")
+    if affected:
+        typer.echo(f"Rules:        {', '.join(affected)}")
+    if description:
+        typer.echo(f"Description:  {description}")
+
+
+@app.command("list-maintenance")
+def list_maintenance_cmd(
+    active_only: Annotated[
+        bool,
+        typer.Option(
+            "--active-only",
+            help="List only currently active maintenance windows.",
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output maintenance windows as JSON."),
+    ] = False,
+) -> None:
+    """List scheduled maintenance windows."""
+    service, engine = _get_silencing_engine_or_service()
+    if service is not None:
+        windows = service.get_maintenance_windows(active_only=active_only)
+    else:
+        raw = engine.list_maintenance_windows(active_only=active_only)
+        windows = [w.to_dict() for w in raw]
+
+    if json_output:
+        typer.echo(json.dumps(windows, indent=2))
+        return
+
+    if not windows:
+        typer.echo("No maintenance windows found.")
+        return
+
+    typer.secho("=== Scheduled Maintenance Windows ===", bold=True)
+    for w in windows:
+        active = (
+            w.get("enabled", True)
+            and w.get("starts_at", 0) <= time.time() <= w.get("ends_at", 0)
+        )
+        status_color = typer.colors.GREEN if active else typer.colors.YELLOW
+        status_label = "ACTIVE" if active else "EXPIRED/INACTIVE"
+        rules_str = (
+            "ALL"
+            if w.get("suppress_all", True)
+            else ", ".join(w.get("affected_rules", []))
+        )
+        typer.secho(
+            f"ID: {w.get('window_id')} | [{status_label}] | Name: {w.get('name')}",
+            fg=status_color,
+            bold=True,
+        )
+        typer.echo(f"  Suppressing: {rules_str}")
+        typer.echo(f"  Author:      {w.get('author')}")
+        if w.get("description"):
+            typer.echo(f"  Description: {w.get('description')}")
 
 
 if __name__ == "__main__":
