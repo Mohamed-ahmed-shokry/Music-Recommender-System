@@ -5369,9 +5369,9 @@ def circuit_stats_cmd(
 _DEFAULT_SILENCING_STORAGE = Path("data/alerts/silences.json")
 
 
-def _get_silencing_engine_or_service() -> (
-    tuple[RecommenderService | None, AlertSilencingEngine]
-):
+def _get_silencing_engine_or_service() -> tuple[
+    RecommenderService | None, AlertSilencingEngine
+]:
     service: RecommenderService | None = None
     try:
         service = RecommenderService.from_artifacts()
@@ -5458,9 +5458,7 @@ def silence_alert_cmd(
 def list_silences_cmd(
     active_only: Annotated[
         bool,
-        typer.Option(
-            "--active-only", help="List only currently active silences."
-        ),
+        typer.Option("--active-only", help="List only currently active silences."),
     ] = False,
     json_output: Annotated[
         bool,
@@ -5486,15 +5484,12 @@ def list_silences_cmd(
     typer.secho("=== Alert Silences ===", bold=True)
     for s in silences:
         matchers_str = (
-            ", ".join(
-                f"{m['name']}={m['value']}" for m in s.get("matchers", [])
-            )
+            ", ".join(f"{m['name']}={m['value']}" for m in s.get("matchers", []))
             or "all"
         )
-        active = (
-            s.get("enabled", True)
-            and s.get("starts_at", 0) <= time.time() <= s.get("ends_at", 0)
-        )
+        active = s.get("enabled", True) and s.get(
+            "starts_at", 0
+        ) <= time.time() <= s.get("ends_at", 0)
         status_color = typer.colors.GREEN if active else typer.colors.YELLOW
         status_label = "ACTIVE" if active else "EXPIRED/INACTIVE"
         typer.secho(
@@ -5563,9 +5558,7 @@ def schedule_maintenance_cmd(
     ] = "",
     author: Annotated[
         str,
-        typer.Option(
-            "--author", "-a", help="Author of the maintenance window."
-        ),
+        typer.Option("--author", "-a", help="Author of the maintenance window."),
     ] = "operator",
     description: Annotated[
         str,
@@ -5644,10 +5637,9 @@ def list_maintenance_cmd(
 
     typer.secho("=== Scheduled Maintenance Windows ===", bold=True)
     for w in windows:
-        active = (
-            w.get("enabled", True)
-            and w.get("starts_at", 0) <= time.time() <= w.get("ends_at", 0)
-        )
+        active = w.get("enabled", True) and w.get(
+            "starts_at", 0
+        ) <= time.time() <= w.get("ends_at", 0)
         status_color = typer.colors.GREEN if active else typer.colors.YELLOW
         status_label = "ACTIVE" if active else "EXPIRED/INACTIVE"
         rules_str = (

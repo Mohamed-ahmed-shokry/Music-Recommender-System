@@ -483,7 +483,16 @@ class RecommenderService:
             alert_escalation_engine or AlertEscalationEngine()
         )
         self.circuit_breaker_config = circuit_breaker_config or CircuitBreakerConfig()
-        self.alert_silencing_engine = alert_silencing_engine or AlertSilencingEngine()
+        if alert_silencing_engine is not None:
+            self.alert_silencing_engine = alert_silencing_engine
+        elif alert_storage_dir is not None:
+            self.alert_silencing_engine = AlertSilencingEngine(
+                storage_path=Path(alert_storage_dir) / "silences.json"
+            )
+        else:
+            self.alert_silencing_engine = AlertSilencingEngine(
+                storage_path=Path("data/alerts/silences.json")
+            )
         if alert_multichannel_dispatcher is not None:
             self.alert_multichannel_dispatcher = alert_multichannel_dispatcher
             if self.alert_multichannel_dispatcher.silencing_engine is None:
