@@ -15,6 +15,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -684,6 +685,179 @@ class CircuitBreakerConfig:
             failure_threshold=int(data.get("failure_threshold", 5)),
             recovery_timeout_seconds=float(data.get("recovery_timeout_seconds", 30.0)),
             half_open_success_threshold=int(data.get("half_open_success_threshold", 2)),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
+class SilenceDecision(StrEnum):
+    """Decision indicating whether an alert is active or silenced."""
+
+    ACTIVE = "active"
+    SUPPRESSED_SILENCE_RULE = "suppressed_silence_rule"
+    SUPPRESSED_MAINTENANCE_WINDOW = "suppressed_maintenance_window"
+
+
+@dataclass
+class SilenceMatcher:
+    """Criteria matching alert properties for silencing."""
+
+    name: str
+    value: str
+    is_regex: bool = False
+
+    def matches(
+        self,
+        rule_name: str,
+        severity: str,
+        labels: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Check whether the matcher satisfies the given alert attributes."""
+        candidate: str | None = None
+        if self.name in ("alertname", "rule_name"):
+            candidate = rule_name
+        elif self.name == "severity":
+            candidate = severity
+        elif labels and self.name in labels:
+            candidate = str(labels[self.name])
+
+        if candidate is None:
+            return False
+
+        if self.is_regex:
+            try:
+                return bool(re.search(self.value, candidate))
+            except re.error:
+                return False
+        return candidate == self.value
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "value": self.value,
+            "is_regex": self.is_regex,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SilenceMatcher:
+        return cls(
+            name=str(data.get("name", "")),
+            value=str(data.get("value", "")),
+            is_regex=bool(data.get("is_regex", False)),
+        )
+
+
+@dataclass
+class AlertSilenceRule:
+    """Rule defining a temporary silence window for matching alerts."""
+
+    silence_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    matchers: list[SilenceMatcher] = field(default_factory=list)
+    starts_at: float = field(default_factory=time.time)
+    ends_at: float = field(default_factory=lambda: time.time() + 3600.0)
+    author: str = "operator"
+    comment: str = ""
+    enabled: bool = True
+
+    def is_active(self, now: float | None = None) -> bool:
+        """Return True if this silence rule is currently active."""
+        if not self.enabled:
+            return False
+        t = time.time() if now is None else now
+        return self.starts_at <= t <= self.ends_at
+
+    def matches(
+        self,
+        rule_name: str,
+        severity: str,
+        labels: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Return True if all matchers match the alert (AND condition)."""
+        if not self.matchers:
+            return True
+        return all(m.matches(rule_name, severity, labels) for m in self.matchers)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "silence_id": self.silence_id,
+            "matchers": [m.to_dict() for m in self.matchers],
+            "starts_at": self.starts_at,
+            "ends_at": self.ends_at,
+            "author": self.author,
+            "comment": self.comment,
+            "enabled": self.enabled,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AlertSilenceRule:
+        matchers = [
+            SilenceMatcher.from_dict(m)
+            for m in data.get("matchers", [])
+            if isinstance(m, dict)
+        ]
+        return cls(
+            silence_id=str(data.get("silence_id", str(uuid.uuid4())[:8])),
+            matchers=matchers,
+            starts_at=float(data.get("starts_at", time.time())),
+            ends_at=float(data.get("ends_at", time.time() + 3600.0)),
+            author=str(data.get("author", "operator")),
+            comment=str(data.get("comment", "")),
+            enabled=bool(data.get("enabled", True)),
+        )
+
+
+@dataclass
+class MaintenanceWindow:
+    """Scheduled maintenance window that suppresses notifications."""
+
+    window_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    name: str = "scheduled_maintenance"
+    starts_at: float = field(default_factory=time.time)
+    ends_at: float = field(default_factory=lambda: time.time() + 7200.0)
+    suppress_all: bool = True
+    affected_rules: list[str] = field(default_factory=list)
+    author: str = "operator"
+    description: str = ""
+    enabled: bool = True
+
+    def is_active(self, now: float | None = None) -> bool:
+        """Return True if this maintenance window is currently active."""
+        if not self.enabled:
+            return False
+        t = time.time() if now is None else now
+        return self.starts_at <= t <= self.ends_at
+
+    def suppresses(self, rule_name: str, now: float | None = None) -> bool:
+        """Return True if this maintenance window suppresses the given rule."""
+        if not self.is_active(now=now):
+            return False
+        if self.suppress_all:
+            return True
+        return rule_name in self.affected_rules
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "window_id": self.window_id,
+            "name": self.name,
+            "starts_at": self.starts_at,
+            "ends_at": self.ends_at,
+            "suppress_all": self.suppress_all,
+            "affected_rules": list(self.affected_rules),
+            "author": self.author,
+            "description": self.description,
+            "enabled": self.enabled,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MaintenanceWindow:
+        return cls(
+            window_id=str(data.get("window_id", str(uuid.uuid4())[:8])),
+            name=str(data.get("name", "scheduled_maintenance")),
+            starts_at=float(data.get("starts_at", time.time())),
+            ends_at=float(data.get("ends_at", time.time() + 7200.0)),
+            suppress_all=bool(data.get("suppress_all", True)),
+            affected_rules=list(data.get("affected_rules", [])),
+            author=str(data.get("author", "operator")),
+            description=str(data.get("description", "")),
             enabled=bool(data.get("enabled", True)),
         )
 
