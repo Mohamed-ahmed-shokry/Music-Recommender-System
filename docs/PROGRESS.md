@@ -10,12 +10,12 @@
 - [x] Task 7: Add unit tests for `SlackWebhookAdapter` and `TeamsWebhookAdapter` in `tests/test_alerting.py`.
 - [x] Task 8: Integrate silencing engine and chat webhook adapters into `MultiChannelDispatcher` in `src/music_recommender/alerting.py`.
 - [x] Task 9: Add unit tests for dispatcher silencing and chat adapters in `tests/test_alerting.py`.
-- [ ] Task 10: Integrate silencing and maintenance windows into `RecommenderService` in `src/music_recommender/service.py`.
-- [ ] Task 11: Add service integration tests in `tests/test_service.py`.
-- [ ] Task 12: Implement endpoints `/alerts/silences/*` and `/alerts/maintenance/*` in `api/main.py`.
-- [ ] Task 13: Add API integration tests in `tests/test_api.py`.
-- [ ] Task 14: Implement CLI commands `silence-alert`, `list-silences`, `expire-silence`, `schedule-maintenance`, and `list-maintenance` in `src/music_recommender/cli.py`.
-- [ ] Task 15: Add CLI tests in `tests/test_cli.py`.
+- [x] Task 10: Integrate silencing and maintenance windows into `RecommenderService` in `src/music_recommender/service.py`.
+- [x] Task 11: Add service integration tests in `tests/test_service.py`.
+- [x] Task 12: Implement endpoints `/alerts/silences/*` and `/alerts/maintenance/*` in `api/main.py`.
+- [x] Task 13: Add API integration tests in `tests/test_api.py`.
+- [x] Task 14: Implement CLI commands `silence-alert`, `list-silences`, `expire-silence`, `schedule-maintenance`, and `list-maintenance` in `src/music_recommender/cli.py`.
+- [x] Task 15: Add CLI tests in `tests/test_cli.py`.
 - [ ] Task 16: Add silencing management and maintenance window status to Streamlit dashboard in `src/music_recommender/dashboard.py`.
 - [ ] Task 17: Add dashboard tests in `tests/test_dashboard.py`.
 - [ ] Task 18: Update `README.md` and `CHANGELOG.md` with 0.40.0 documentation.
