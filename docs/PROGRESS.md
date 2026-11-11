@@ -5,11 +5,11 @@
 - [x] Task 2: Implement `SilenceMatcher`, `AlertSilenceRule`, `MaintenanceWindow`, and `SilenceDecision` in `src/music_recommender/alerting.py`.
 - [x] Task 3: Implement `AlertSilencingEngine` in `src/music_recommender/alerting.py`.
 - [x] Task 4: Add unit tests for `AlertSilenceRule`, `MaintenanceWindow`, and `AlertSilencingEngine` in `tests/test_alerting.py`.
-- [ ] Task 5: Implement `SlackWebhookAdapter` Block Kit formatter and dispatcher in `src/music_recommender/alerting.py`.
-- [ ] Task 6: Implement `TeamsWebhookAdapter` Adaptive Card formatter and dispatcher in `src/music_recommender/alerting.py`.
-- [ ] Task 7: Add unit tests for `SlackWebhookAdapter` and `TeamsWebhookAdapter` in `tests/test_alerting.py`.
-- [ ] Task 8: Integrate silencing engine and chat webhook adapters into `MultiChannelDispatcher` in `src/music_recommender/alerting.py`.
-- [ ] Task 9: Add unit tests for dispatcher silencing and chat adapters in `tests/test_alerting.py`.
+- [x] Task 5: Implement `SlackWebhookAdapter` Block Kit formatter and dispatcher in `src/music_recommender/alerting.py`.
+- [x] Task 6: Implement `TeamsWebhookAdapter` Adaptive Card formatter and dispatcher in `src/music_recommender/alerting.py`.
+- [x] Task 7: Add unit tests for `SlackWebhookAdapter` and `TeamsWebhookAdapter` in `tests/test_alerting.py`.
+- [x] Task 8: Integrate silencing engine and chat webhook adapters into `MultiChannelDispatcher` in `src/music_recommender/alerting.py`.
+- [x] Task 9: Add unit tests for dispatcher silencing and chat adapters in `tests/test_alerting.py`.
 - [ ] Task 10: Integrate silencing and maintenance windows into `RecommenderService` in `src/music_recommender/service.py`.
 - [ ] Task 11: Add service integration tests in `tests/test_service.py`.
 - [ ] Task 12: Implement endpoints `/alerts/silences/*` and `/alerts/maintenance/*` in `api/main.py`.
