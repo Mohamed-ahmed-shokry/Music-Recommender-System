@@ -597,6 +597,20 @@ class FakeDashboardService:
     ) -> list[dict[str, Any]]:
         return getattr(self, "_fake_maintenance_windows", [])
 
+    def get_incident_analytics(self, **kwargs: Any) -> dict[str, Any]:
+        return getattr(
+            self,
+            "_fake_incident_analytics",
+            {
+                "total_incidents": 0,
+                "active_incidents": 0,
+                "resolved_incidents": 0,
+                "overall_mttd_seconds": 0.0,
+                "overall_mttr_seconds": 0.0,
+                "overall_slo_compliance_pct": 100.0,
+            },
+        )
+
     def correlate_alert_history(self, **kwargs: Any) -> Any:
         from music_recommender.alerting import AlertCorrelationReport
 
@@ -1939,3 +1953,29 @@ def test_dashboard_sidebar_silences_and_maintenance_rendering() -> None:
     assert any("Active Maintenance Windows" in m.value for m in app.markdown)
     assert any("Database Reindex" in m.value for m in app.markdown)
     assert any("Routine database maintenance" in c.value for c in app.caption)
+
+
+def test_dashboard_sidebar_incident_analytics_rendering() -> None:
+    service = FakeDashboardService()
+    service._fake_incident_analytics = {
+        "total_incidents": 2,
+        "active_incidents": 0,
+        "resolved_incidents": 2,
+        "overall_mttd_seconds": 12.5,
+        "overall_mttr_seconds": 55.0,
+        "overall_slo_compliance_pct": 99.95,
+    }
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(
+        "Incident Analytics & Reliability" in m.value for m in app.markdown
+    )
+    metric_values = [metric.value for metric in app.metric]
+    assert any("12.5s" in str(v) for v in metric_values)
+    assert any("55.0s" in str(v) for v in metric_values)
+    assert any("99.95%" in str(v) for v in metric_values)
