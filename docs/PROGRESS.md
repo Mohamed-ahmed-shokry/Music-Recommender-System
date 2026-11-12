@@ -21,7 +21,7 @@
 - [x] Task 18: Add trace viewer to Streamlit dashboard in `src/music_recommender/dashboard.py` and test in `tests/test_dashboard.py`.
 - [x] Task 19: Update `README.md` and `CHANGELOG.md` with 0.42.0 documentation.
 - [x] Task 20: Bump package version to `0.42.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
-- [ ] Task 21: Verify local CI parity, push to remote, open draft PR, monitor remote CI to 100% green.
+- [x] Task 21: Verify local CI parity, push to remote, open draft PR, monitor remote CI to 100% green.
 
 ## 2. Acceptance Criteria Tracking
 | Criterion | Status | Verification Evidence |
@@ -34,7 +34,7 @@
 | AC-6: FastAPI endpoints /traces/* return validated schemas | `Passed` | `tests/test_api.py::test_traces_api_endpoints` |
 | AC-7: Operator CLI commands trace-inspect and list-traces operate cleanly | `Passed` | `tests/test_cli.py::test_list_traces_and_trace_inspect_cli` |
 | AC-8: Streamlit dashboard renders live trace inspection and timeline breakdowns | `Passed` | `tests/test_dashboard.py::test_dashboard_traces_tab_rendering` |
-| AC-9: All local CI-parity checks and remote CI workflow runs pass 100% | `Pending` | Local checks + GitHub Actions runs |
+| AC-9: All local CI-parity checks and remote CI workflow runs pass 100% | `Passed` | Local suite + GitHub Actions CI green |
 
 ## 3. Autonomous Decisions Log
 - **Decision 1 (W3C Trace Context Standard)**: Implement canonical W3C `traceparent` specification (`version-trace_id-span_id-trace_flags` formatted as `00-{32hex}-{16hex}-{01|00}`) and optional `tracestate` comma-separated vendor pairs.
