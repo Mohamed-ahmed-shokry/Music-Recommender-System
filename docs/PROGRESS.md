@@ -1,38 +1,42 @@
-# Milestone 0.41.0 Progress Record — Phase 175 & 176
+# Milestone 0.42.0 Progress Record — Phase 177 & 178
 
 ## 1. Micro-Task Checklist
-- [x] Task 1: Define Phase 175 & 176 roadmap, update plan, and initialize progress record.
-- [x] Task 2: Implement `IncidentLifecycleRecord`, `RuleIncidentStats`, and `AlertIncidentAnalytics` in `src/music_recommender/alerting.py`.
-- [x] Task 3: Add unit tests for `IncidentLifecycleRecord` and `AlertIncidentAnalytics` in `tests/test_alerting.py`.
-- [x] Task 4: Implement `AlertIncidentTracker` in `src/music_recommender/alerting.py`.
-- [x] Task 5: Add unit tests for `AlertIncidentTracker` in `tests/test_alerting.py`.
-- [x] Task 6: Implement Prometheus alerting metrics export in `src/music_recommender/telemetry.py` and `alerting.py`.
-- [x] Task 7: Add unit tests for Prometheus alert metrics in `tests/test_telemetry.py` and `tests/test_alerting.py`.
-- [x] Task 8: Integrate `AlertIncidentTracker` into `RecommenderService` in `src/music_recommender/service.py`.
-- [x] Task 9: Add service integration tests in `tests/test_service.py`.
-- [x] Task 10: Implement endpoints `/alerts/analytics/*` in `api/main.py`.
-- [x] Task 11: Add API integration tests in `tests/test_api.py`.
-- [x] Task 12: Implement CLI commands `alert-analytics` and `incident-history` in `src/music_recommender/cli.py`.
-- [x] Task 13: Add CLI tests in `tests/test_cli.py`.
-- [x] Task 14: Add incident analytics and MTTD/MTTR status to Streamlit dashboard in `src/music_recommender/dashboard.py`.
-- [x] Task 15: Add dashboard tests in `tests/test_dashboard.py`.
-- [x] Task 16: Update `README.md` and `CHANGELOG.md` with 0.41.0 documentation.
-- [x] Task 17: Bump package version to `0.41.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
-- [x] Task 18: Verify local CI parity, push to remote, open draft PR, monitor remote CI to 100% green.
+- [x] Task 1: Define Phase 177 & 178 roadmap, update plan, and initialize progress record.
+- [x] Task 2: Implement `TraceContext` with W3C `traceparent`/`tracestate` in `src/music_recommender/tracing.py`.
+- [x] Task 3: Add unit tests for `TraceContext` in `tests/test_tracing.py`.
+- [x] Task 4: Implement `SpanRecord`, `SpanKind`, and `SpanStatus` in `src/music_recommender/tracing.py`.
+- [x] Task 5: Add unit tests for `SpanRecord` and OTLP format conversion in `tests/test_tracing.py`.
+- [x] Task 6: Implement `DistributedTracer` with context propagation and span buffer in `src/music_recommender/tracing.py`.
+- [x] Task 7: Add unit tests for `DistributedTracer` in `tests/test_tracing.py`.
+- [x] Task 8: Implement `AlertTraceCorrelator` in `src/music_recommender/tracing.py`.
+- [x] Task 9: Add unit tests for `AlertTraceCorrelator` in `tests/test_tracing.py`.
+- [x] Task 10: Implement `TraceContextMiddleware` in `api/middleware.py`.
+- [x] Task 11: Add unit tests for `TraceContextMiddleware` in `tests/test_api.py`.
+- [x] Task 12: Instrument `RecommenderService` with distributed tracer and span queries in `src/music_recommender/service.py`.
+- [x] Task 13: Add service integration tests for tracing in `tests/test_service.py`.
+- [x] Task 14: Implement `/traces/*` endpoints in `api/main.py`.
+- [x] Task 15: Add API integration tests for `/traces/*` in `tests/test_api.py`.
+- [x] Task 16: Implement CLI commands `trace-inspect` and `list-traces` in `src/music_recommender/cli.py`.
+- [x] Task 17: Add CLI tests in `tests/test_cli.py`.
+- [x] Task 18: Add trace viewer to Streamlit dashboard in `src/music_recommender/dashboard.py` and test in `tests/test_dashboard.py`.
+- [x] Task 19: Update `README.md` and `CHANGELOG.md` with 0.42.0 documentation.
+- [x] Task 20: Bump package version to `0.42.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [x] Task 21: Verify local CI parity, push to remote, open draft PR, monitor remote CI to 100% green.
 
 ## 2. Acceptance Criteria Tracking
 | Criterion | Status | Verification Evidence |
 | :--- | :---: | :--- |
-| AC-1: AlertIncidentTracker tracks incident lifecycles on firing and resolved transitions | `Met` | `tests/test_alerting.py` (unit tests pass) |
-| AC-2: AlertIncidentAnalytics computes accurate MTTD, MTTR, MTBF, and SLO compliance | `Met` | `tests/test_alerting.py` (math tests pass) |
-| AC-3: Prometheus exposition exports alert gauge and metric families | `Met` | `tests/test_telemetry.py` (exposition tests pass) |
-| AC-4: RecommenderService coordinates incident lifecycle tracking and query methods | `Met` | `tests/test_service.py` (integration tests pass) |
-| AC-5: FastAPI endpoints /alerts/analytics/* return validated schemas | `Met` | `tests/test_api.py` (TestClient tests pass) |
-| AC-6: Operator CLI commands alert-analytics and incident-history function cleanly | `Met` | `tests/test_cli.py` (CliRunner tests pass) |
-| AC-7: Streamlit dashboard renders live MTTD/MTTR indicators and SLO availability | `Met` | `tests/test_dashboard.py` (AppTest tests pass) |
-| AC-8: 100% green CI parity locally and remotely | `Met` | Local checks + GitHub Actions runs |
+| AC-1: TraceContext parses and formats W3C traceparent and tracestate headers | `Passed` | `tests/test_tracing.py` (5 tests passing) |
+| AC-2: DistributedTracer manages thread/task context, records spans, converts to OTLP JSON | `Passed` | `tests/test_tracing.py` (15 tests passing) |
+| AC-3: AlertTraceCorrelator correlates alert incidents with candidate traces | `Passed` | `tests/test_tracing.py` (17 tests passing) |
+| AC-4: TraceContextMiddleware propagates trace context in HTTP headers | `Passed` | `tests/test_api.py::test_trace_context_middleware_lifecycle` |
+| AC-5: RecommenderService instruments internal pipeline operations and exposes queries | `Passed` | `tests/test_service.py::test_service_distributed_tracing_integration` |
+| AC-6: FastAPI endpoints /traces/* return validated schemas | `Passed` | `tests/test_api.py::test_traces_api_endpoints` |
+| AC-7: Operator CLI commands trace-inspect and list-traces operate cleanly | `Passed` | `tests/test_cli.py::test_list_traces_and_trace_inspect_cli` |
+| AC-8: Streamlit dashboard renders live trace inspection and timeline breakdowns | `Passed` | `tests/test_dashboard.py::test_dashboard_traces_tab_rendering` |
+| AC-9: All local CI-parity checks and remote CI workflow runs pass 100% | `Passed` | Local suite + GitHub Actions CI green |
 
 ## 3. Autonomous Decisions Log
-- **Decision 1 (Incident Lifecycle Correlation)**: Correlate incidents by `rule_name` and severity transition. When an alert transitions from OK -> FIRING, create a new `IncidentLifecycleRecord`. If remediations or repeat transitions occur while active, append events. When it transitions FIRING -> RESOLVED, compute final `duration_seconds` and close the record.
-- **Decision 2 (Telemetry Export Standard)**: OpenMetrics/Prometheus conventions: metric names `music_recommender_alert_active`, `music_recommender_alert_mttd_seconds`, `music_recommender_alert_mttr_seconds` labeled by `rule`.
-- **Decision 3 (SLO Mathematical Model)**: Service Level Objective availability computed as `max(0.0, min(100.0, (1.0 - (total_downtime_seconds / window_seconds)) * 100.0))`.
+- **Decision 1 (W3C Trace Context Standard)**: Implement canonical W3C `traceparent` specification (`version-trace_id-span_id-trace_flags` formatted as `00-{32hex}-{16hex}-{01|00}`) and optional `tracestate` comma-separated vendor pairs.
+- **Decision 2 (OpenTelemetry Span Compatibility)**: Provide `to_otlp_dict()` serializer on `SpanRecord` mapping nanosecond timestamps (`startTimeUnixNano`, `endTimeUnixNano`), numeric span kinds, and typed attributes for OTLP/HTTP collector interoperability.
+- **Decision 3 (Context Propagation)**: Use Python `contextvars.ContextVar` to achieve seamless async and multithreaded trace context propagation without explicit variable passing across function call boundaries.

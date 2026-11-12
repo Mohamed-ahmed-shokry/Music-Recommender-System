@@ -135,6 +135,14 @@ from music_recommender.recommend import (
     get_similar_artists,
     recommend_artists_for_user,
 )
+from music_recommender.tracing import (
+    AlertTraceCorrelator,
+    DistributedTracer,
+    SpanKind,
+    SpanRecord,
+    TraceCorrelationResult,
+    get_global_tracer,
+)
 from music_recommender.tracks import (
     TrackServingResources,
     artist_affinity_to_track_scores,
@@ -186,6 +194,7 @@ class RecommenderService:
         alert_remediation_runner: IncidentRemediationRunner | None = None,
         alert_silencing_engine: AlertSilencingEngine | None = None,
         incident_tracker: AlertIncidentTracker | None = None,
+        tracer: DistributedTracer | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -536,6 +545,12 @@ class RecommenderService:
                 storage_dir=Path("data/alerts")
             )
 
+        if tracer is not None:
+            self.tracer = tracer
+        else:
+            self.tracer = get_global_tracer()
+        self.trace_correlator = AlertTraceCorrelator(self.tracer)
+
     def _register_default_remediation_handlers(self) -> None:
         """Register built-in self-healing remediation handlers and fallback rules."""
 
@@ -719,6 +734,7 @@ class RecommenderService:
         auto_rollback_on_drift: bool | None = None,
         champion_snapshot_path: Path | str | None = None,
         drift_thresholds: DriftSafetyThresholds | None = None,
+        tracer: DistributedTracer | None = None,
     ) -> RecommenderService:
         """Load a service from a saved artifact bundle.
 
@@ -746,6 +762,7 @@ class RecommenderService:
             auto_rollback_on_drift=auto_rollback_on_drift,
             champion_snapshot_path=champion_snapshot_path,
             drift_thresholds=drift_thresholds,
+            tracer=tracer,
         )
         if cold_start_policy_path is not None and Path(cold_start_policy_path).exists():
             service.cold_start_policy = load_cold_start_policy(cold_start_policy_path)
@@ -1025,57 +1042,69 @@ class RecommenderService:
         When ``remediate`` is true, matching automated self-healing remediation
         rules are triggered for firing transitions.
         """
-        from music_recommender.telemetry import collect_service_metric_families
+        with self.tracer.span(
+            "service.evaluate_alerts",
+            attributes={
+                "dispatch": dispatch,
+                "remediate": remediate,
+                "dry_run": dry_run,
+            },
+            kind=SpanKind.INTERNAL,
+        ) as span:
+            from music_recommender.telemetry import collect_service_metric_families
 
-        transitions = self.alert_evaluator.evaluate(
-            collect_service_metric_families(self)
-        )
-        delivered = 0
-        if dispatch and self.alert_dispatcher is not None and transitions:
-            delivered = self.alert_dispatcher.dispatch(transitions)
+            transitions = self.alert_evaluator.evaluate(
+                collect_service_metric_families(self)
+            )
+            delivered = 0
+            if dispatch and self.alert_dispatcher is not None and transitions:
+                delivered = self.alert_dispatcher.dispatch(transitions)
 
-        remediations: list[dict[str, Any]] = []
-        if remediate and transitions:
+            remediations: list[dict[str, Any]] = []
+            if remediate and transitions:
+                for t in transitions:
+                    action_results = self.alert_remediation_runner.handle_transition(
+                        t, now=now, dry_run=dry_run
+                    )
+                    for r in action_results:
+                        remediations.append(r.to_dict())
+
+            # Correlate and track incident lifecycle
             for t in transitions:
-                action_results = self.alert_remediation_runner.handle_transition(
-                    t, now=now, dry_run=dry_run
+                severity_str = (
+                    t.rule.severity.value
+                    if hasattr(t.rule.severity, "value")
+                    else str(t.rule.severity)
                 )
-                for r in action_results:
-                    remediations.append(r.to_dict())
+                decision, _ = self.alert_silencing_engine.evaluate(
+                    rule_name=t.rule.name,
+                    severity=severity_str,
+                    labels=t.rule.labels,
+                    now=now,
+                )
+                is_silenced = decision is not SilenceDecision.ACTIVE
+                t_rem_count = sum(
+                    1 for r in remediations if r.get("rule_name") == t.rule.name
+                )
+                self.incident_tracker.record_transition(
+                    t,
+                    now=now,
+                    remediations=t_rem_count,
+                    silenced=is_silenced,
+                )
 
-        # Correlate and track incident lifecycle
-        for t in transitions:
-            severity_str = (
-                t.rule.severity.value
-                if hasattr(t.rule.severity, "value")
-                else str(t.rule.severity)
-            )
-            decision, _ = self.alert_silencing_engine.evaluate(
-                rule_name=t.rule.name,
-                severity=severity_str,
-                labels=t.rule.labels,
-                now=now,
-            )
-            is_silenced = decision is not SilenceDecision.ACTIVE
-            t_rem_count = sum(
-                1 for r in remediations if r.get("rule_name") == t.rule.name
-            )
-            self.incident_tracker.record_transition(
-                t,
-                now=now,
-                remediations=t_rem_count,
-                silenced=is_silenced,
-            )
-
-        alerts = self.alert_evaluator.states()
-        return {
-            "alerts": alerts,
-            "firing_count": sum(1 for a in alerts if a["status"] == "firing"),
-            "transitions": [t.to_dict() for t in transitions],
-            "webhook_configured": self.alert_dispatcher is not None,
-            "notifications_delivered": delivered,
-            "remediations_triggered": remediations,
-        }
+            alerts = self.alert_evaluator.states()
+            firing_count = sum(1 for a in alerts if a["status"] == "firing")
+            span.set_attribute("alert.transition_count", len(transitions))
+            span.set_attribute("alert.firing_count", firing_count)
+            return {
+                "alerts": alerts,
+                "firing_count": firing_count,
+                "transitions": [t.to_dict() for t in transitions],
+                "webhook_configured": self.alert_dispatcher is not None,
+                "notifications_delivered": delivered,
+                "remediations_triggered": remediations,
+            }
 
     def alert_states(self) -> list[dict[str, Any]]:
         """Return the current evaluation state for each configured alert rule."""
@@ -1448,6 +1477,48 @@ class RecommenderService:
         rules = custom_rules or DEFAULT_ALERT_CORRELATION_RULES
         graph = AlertCorrelationGraph(rules=rules)
         return graph.correlate(history, window_seconds=window_seconds)
+
+    def get_trace(self, trace_id: str) -> list[SpanRecord]:
+        """Retrieve all spans belonging to a trace, ordered chronologically."""
+        return self.tracer.get_trace(trace_id)
+
+    def search_spans(
+        self,
+        trace_id: str | None = None,
+        name: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[SpanRecord]:
+        """Search buffered spans by trace ID, operation name, or status."""
+        return self.tracer.get_spans(
+            trace_id=trace_id,
+            name=name,
+            status=status,
+            limit=limit,
+        )
+
+    def correlate_alert_traces(
+        self,
+        alert_name: str,
+        timestamp: float | str | None = None,
+        window_seconds: float = 300.0,
+        incident_id: str | None = None,
+    ) -> TraceCorrelationResult:
+        """Correlate an alert or incident with candidate traces and error spans."""
+        return self.trace_correlator.correlate(
+            alert_name=alert_name,
+            timestamp=timestamp,
+            window_seconds=window_seconds,
+            incident_id=incident_id,
+        )
+
+    def export_otlp_traces(
+        self,
+        trace_id: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Export traces in standard OpenTelemetry JSON format."""
+        return self.tracer.to_otlp_export(trace_id=trace_id, limit=limit)
 
     def record_request(
         self,
@@ -1928,17 +1999,52 @@ class RecommenderService:
         feedback_journal_path: str | Path = BANDIT_FEEDBACK_PATH,
         context: Sequence[float] | None = None,
     ) -> dict[str, Any]:
-        """Recommend artists for a user, with a popularity fallback if unknown.
+        """Recommend artists for a user, with a popularity fallback if unknown."""
+        with self.tracer.span(
+            "service.recommend_user",
+            attributes={
+                "user_id": str(user_id),
+                "top_k": int(top_k),
+                "explain": bool(explain),
+            },
+            kind=SpanKind.INTERNAL,
+        ) as span:
+            res = self._recommend_user_internal(
+                user_id=user_id,
+                top_k=top_k,
+                include_listened=include_listened,
+                popularity_penalty=popularity_penalty,
+                diversity=diversity,
+                novelty_weight=novelty_weight,
+                content_weight=content_weight,
+                explain=explain,
+                record_feedback=record_feedback,
+                feedback_journal_path=feedback_journal_path,
+                context=context,
+            )
+            span.set_attribute("recommendation.strategy", str(res.get("strategy", "")))
+            recs = res.get("recommendations", [])
+            span.set_attribute(
+                "recommendation.count",
+                len(recs) if isinstance(recs, list) else 0,
+            )
+            return res
 
-        When ``record_feedback`` is set and the unknown user is served through
-        the cold-start bandit policy, the served context, and one feedback
-        record per positive-weight policy arm (rewarded by the serve's fidelity
-        to each arm's own ranking), are appended to the feedback journal so
-        ``bandit-update`` can fold live traffic into the next prior. ``context``
-        supplies the observed observation window (the cold-start feature
-        vector) for that request; it is validated against the service's
-        resolved context feature set, and a missing context stays neutral.
-        """
+    def _recommend_user_internal(
+        self,
+        user_id: str,
+        top_k: int,
+        include_listened: bool | None = None,
+        popularity_penalty: float | None = None,
+        diversity: float | None = None,
+        novelty_weight: float | None = None,
+        content_weight: float | None = None,
+        explain: bool = False,
+        record_feedback: bool = False,
+        feedback_journal_path: str | Path = BANDIT_FEEDBACK_PATH,
+        context: Sequence[float] | None = None,
+    ) -> dict[str, Any]:
+        """Internal artist recommendation implementation."""
         content_weight = self._content_weight(content_weight)
         (
             include_listened,
@@ -2371,6 +2477,38 @@ class RecommenderService:
         explain: bool = False,
     ) -> dict[str, Any]:
         """Find artists similar to a selected artist."""
+        with self.tracer.span(
+            "service.similar_artists",
+            attributes={
+                "artist_id": str(artist_id),
+                "top_k": int(top_k),
+                "method": str(method),
+            },
+            kind=SpanKind.INTERNAL,
+        ) as span:
+            res = self._similar_artists_internal(
+                artist_id=artist_id,
+                top_k=top_k,
+                method=method,
+                content_weight=content_weight,
+                explain=explain,
+            )
+            recs = res.get("recommendations", [])
+            span.set_attribute(
+                "recommendation.count",
+                len(recs) if isinstance(recs, list) else 0,
+            )
+            return res
+
+    def _similar_artists_internal(
+        self,
+        artist_id: str,
+        top_k: int,
+        method: Literal["als", "content", "hybrid"] = "als",
+        content_weight: float | None = None,
+        explain: bool = False,
+    ) -> dict[str, Any]:
+        """Internal artist similarity implementation."""
         if method == "als":
             recommendations = get_similar_artists(
                 model=self.artifact.model,
@@ -2475,14 +2613,50 @@ class RecommenderService:
         content_weight: float | None = None,
         ltr: bool = False,
     ) -> dict[str, Any]:
-        """Recommend tracks for a user with audio-feature similarity.
+        """Recommend tracks for a user with audio-feature similarity."""
+        with self.tracer.span(
+            "service.recommend_tracks",
+            attributes={
+                "user_id": str(user_id),
+                "top_k": int(top_k),
+                "method": str(method),
+                "ltr": bool(ltr),
+            },
+            kind=SpanKind.INTERNAL,
+        ) as span:
+            res = self._recommend_tracks_internal(
+                user_id=user_id,
+                top_k=top_k,
+                include_listened=include_listened,
+                popularity_penalty=popularity_penalty,
+                diversity=diversity,
+                novelty_weight=novelty_weight,
+                explain=explain,
+                method=method,
+                content_weight=content_weight,
+                ltr=ltr,
+            )
+            recs = res.get("recommendations", [])
+            span.set_attribute(
+                "recommendation.count",
+                len(recs) if isinstance(recs, list) else 0,
+            )
+            return res
 
-        The ``hybrid`` method blends collaborative artist taste (ALS) with the
-        audio-feature content scores. Ranking knobs fall back to the champion
-        settings stored on the artifact, matching the artist recommendation
-        surfaces. Users with no track listening history fall back to popular
-        tracks instead of receiving an empty list.
-        """
+    def _recommend_tracks_internal(
+        self,
+        user_id: str,
+        top_k: int,
+        include_listened: bool | None = None,
+        popularity_penalty: float | None = None,
+        diversity: float | None = None,
+        novelty_weight: float | None = None,
+        explain: bool = False,
+        method: str = "similarity",
+        content_weight: float | None = None,
+        ltr: bool = False,
+    ) -> dict[str, Any]:
+        """Internal track recommendation implementation."""
         if method not in ("similarity", "hybrid"):
             raise ValueError("method must be one of: similarity, hybrid.")
         if type(ltr) is not bool:

@@ -2607,3 +2607,58 @@ def test_service_incident_analytics_integration(tmp_path: Path) -> None:
     assert "music_recommender_alert_mttr_seconds" in metrics_text
     assert "music_recommender_alert_silences_active" in metrics_text
     service.incident_tracker.clear()
+
+
+def test_service_distributed_tracing_integration(tmp_path: Path) -> None:
+    from music_recommender.tracing import DistributedTracer
+
+    service = create_service(tmp_path)
+    tracer = DistributedTracer()
+    service.tracer = tracer
+    service.trace_correlator.tracer = tracer
+    tracer.clear()
+
+    # 1. Traced recommendation call
+    res_rec = service.recommend_user("unknown_u_999", top_k=3)
+    assert res_rec["strategy"] == "popular_fallback"
+
+    user_spans = service.search_spans(name="service.recommend_user")
+    assert len(user_spans) == 1
+    span_rec = user_spans[0]
+    assert span_rec.attributes["user_id"] == "unknown_u_999"
+    assert span_rec.attributes["top_k"] == 3
+    assert span_rec.attributes["recommendation.strategy"] == "popular_fallback"
+    assert span_rec.duration_seconds >= 0.0
+
+    # 2. Traced similar_artists call
+    first_artist = next(iter(service.artifact.artist_stats.keys()))
+    service.similar_artists(first_artist, top_k=2)
+
+    sim_spans = service.search_spans(name="service.similar_artists")
+    assert len(sim_spans) == 1
+    assert sim_spans[0].attributes["artist_id"] == first_artist
+
+    # 3. Trace lookup by trace_id
+    trace_id = span_rec.trace_id
+    trace_spans = service.get_trace(trace_id)
+    assert len(trace_spans) >= 1
+    assert trace_spans[0].span_id == span_rec.span_id
+
+    # 4. Alert correlation with candidate traces
+    corr = service.correlate_alert_traces(
+        alert_name="RecommendationStall",
+        window_seconds=300.0,
+    )
+    assert corr.alert_name == "RecommendationStall"
+    assert corr.matched_spans_count >= 2
+    assert corr.matched_traces_count >= 1
+
+    # 5. OTLP traces export
+    otlp = service.export_otlp_traces(trace_id=trace_id)
+    assert "resourceSpans" in otlp
+    assert len(otlp["resourceSpans"]) == 1
+    spans = otlp["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    assert len(spans) >= 1
+    assert spans[0]["name"] == "service.recommend_user"
+
+    tracer.clear()

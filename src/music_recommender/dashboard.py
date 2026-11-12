@@ -1413,6 +1413,96 @@ def _render_bandit_tab(service: RecommenderService) -> None:
                 st.info("Service does not support bandit_observability.")
 
 
+def _render_traces_tab(service: RecommenderService) -> None:
+    """Render distributed execution trace inspector and timeline breakdown."""
+    st.header("Distributed Tracing & OpenTelemetry Explorer")
+    st.caption(
+        "Inspect live pipeline execution spans, W3C trace contexts, "
+        "and latency bottlenecks."
+    )
+
+    tracer = getattr(service, "tracer", None)
+    if tracer is None:
+        from music_recommender.tracing import get_global_tracer
+
+        tracer = get_global_tracer()
+
+    col_filter1, col_filter2, col_filter3 = st.columns([2, 1, 1])
+    with col_filter1:
+        trace_id_input = st.text_input(
+            "Filter by Trace ID",
+            placeholder="32-hex character ID",
+            key="traces_tid_filter",
+        ).strip()
+    with col_filter2:
+        status_filter = st.selectbox(
+            "Status",
+            ["All", "ok", "error", "unset"],
+            key="traces_status_filter",
+        )
+    with col_filter3:
+        limit_val = st.number_input(
+            "Limit",
+            min_value=5,
+            max_value=200,
+            value=25,
+            key="traces_limit_filter",
+        )
+
+    status_arg = None if status_filter == "All" else status_filter
+    trace_id_arg = trace_id_input if trace_id_input else None
+
+    if trace_id_arg:
+        spans = tracer.get_trace(trace_id_arg)
+    else:
+        spans = tracer.get_spans(
+            trace_id=trace_id_arg, status=status_arg, limit=int(limit_val)
+        )
+
+    if not spans:
+        st.info(
+            "No execution spans match the selected filters. "
+            "Trigger recommendations or API calls to generate traces."
+        )
+    else:
+        st.subheader(f"Captured Spans ({len(spans)})")
+        span_rows = []
+        for s in spans:
+            span_rows.append(
+                {
+                    "Name": s.name,
+                    "Kind": s.kind.value,
+                    "Status": s.status.value.upper(),
+                    "Duration (ms)": round(s.duration_seconds * 1000.0, 2),
+                    "Trace ID": s.trace_id,
+                    "Span ID": s.span_id,
+                    "Parent Span ID": s.parent_span_id or "-",
+                    "Start Time": s.start_time,
+                }
+            )
+        st.dataframe(pd.DataFrame(span_rows), use_container_width=True)
+
+    if hasattr(service, "trace_correlator"):
+        st.divider()
+        st.subheader("Alert Incident-to-Trace Correlator")
+        alert_name = st.text_input(
+            "Alert Rule to Correlate",
+            value="RecommendationErrorSpike",
+            key="traces_correlate_rule",
+        )
+        if st.button("Correlate Traces for Alert", key="traces_correlate_btn"):
+            corr_res = service.correlate_alert_traces(
+                alert_name=alert_name, window_seconds=600.0
+            )
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Matched Traces", corr_res.matched_traces_count)
+            c2.metric("Matched Spans", corr_res.matched_spans_count)
+            c3.metric("Error Spans", corr_res.error_spans_count)
+            if corr_res.candidate_root_cause_spans:
+                st.write("**Root Cause Candidates:**")
+                st.json(corr_res.candidate_root_cause_spans)
+
+
 def render_dashboard(service: RecommenderService) -> None:
     """Render the dashboard using an already loaded recommender service."""
     health = service.health()
@@ -1641,6 +1731,7 @@ def render_dashboard(service: RecommenderService) -> None:
             "Catalog",
             "Ablation Summary",
             "Cold-Start Bandit",
+            "Distributed Traces",
         ]
     )
     with tabs[0]:
@@ -1672,6 +1763,8 @@ def render_dashboard(service: RecommenderService) -> None:
         _render_ablation_summary_tab(service)
     with tabs[7]:
         _render_bandit_tab(service)
+    with tabs[8]:
+        _render_traces_tab(service)
 
 
 def main() -> None:

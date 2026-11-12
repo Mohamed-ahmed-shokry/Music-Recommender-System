@@ -1,3 +1,87 @@
+# Milestone 0.42.0 Roadmap — Phase 177 & 178
+
+## Phase 177 & 178: Distributed Trace Context Propagation, OpenTelemetry Span Ingestion, and Alert Trace Correlator (0.42.0)
+
+### 1. Objective
+Equip the platform with enterprise distributed tracing and alert-to-trace deep linking:
+1. A **Distributed Tracing Engine** (`TraceContext`, `SpanRecord`, `DistributedTracer`, `SpanKind`, `SpanStatus`) supporting the W3C Trace Context standard (`traceparent`, `tracestate`), thread/async context management via `contextvars`, and bounded in-memory ring buffering with OTLP JSON export capability.
+2. An **Alert-to-Trace Correlator** (`AlertTraceCorrelator`) linking firing/resolved alert incidents directly with candidate traces exhibiting errors or high latency within the anomaly window.
+3. Integration with HTTP middleware (`TraceContextMiddleware` in `api/middleware.py`), `RecommenderService` internal pipeline spans (`recommender.recommend`, `bandit.select_arm`, `alert.evaluate`), FastAPI endpoints (`/traces/*`), operator CLI tooling (`trace-inspect`, `list-traces`), and Streamlit dashboard timeline visualization, releasing Milestone 0.42.0 with 100% green CI.
+
+### 2. Scope
+1. **Tracing Models & Engine (`src/music_recommender/tracing.py`)**:
+   - `TraceContext`: W3C `traceparent` (`00-{trace_id}-{span_id}-{flags}`) parser, generator, and context propagation.
+   - `SpanRecord`: OpenTelemetry-compatible span with start/end time, duration, status, attributes, events, and `to_otlp_dict()` serializer.
+   - `DistributedTracer`: Thread-safe context manager for span lifecycles, active context propagation, and queryable ring buffer.
+   - `AlertTraceCorrelator`: Automated correlation between alert incidents and root-cause traces within time windows.
+2. **HTTP Middleware & Header Propagation (`api/middleware.py`)**:
+   - `TraceContextMiddleware`: Extract incoming `traceparent` / `tracestate` headers (or generate root trace), record HTTP server span, and inject `traceparent` and `x-trace-id` in response headers.
+3. **Service Layer Instrumentation (`src/music_recommender/service.py`)**:
+   - Instrument `recommend_user`, `recommend_similar_artists`, `recommend_tracks`, `evaluate_alerts`, and `sweep_bandit_feedback` with child spans.
+   - Expose service methods: `get_trace()`, `search_spans()`, `correlate_alert_traces()`.
+4. **FastAPI Endpoints (`api/main.py`)**:
+   - `GET /traces`: list/search recent spans with filtering by name, status, min duration.
+   - `GET /traces/{trace_id}`: retrieve complete span tree for a trace.
+   - `POST /traces/correlate/alert`: correlate an alert rule/incident with candidate traces.
+5. **Operator CLI Tooling (`src/music_recommender/cli.py`)**:
+   - `music-recommender trace-inspect <trace_id>`: inspect hierarchical span execution tree.
+   - `music-recommender list-traces`: list and filter recorded spans with table and JSON formatting.
+6. **Dashboard Visualization (`src/music_recommender/dashboard.py`)**:
+   - Streamlit tracing tab / sidebar inspector rendering span execution timelines and latency breakdowns.
+7. **Comprehensive Tests**:
+   - Unit tests in `tests/test_tracing.py`.
+   - Middleware and API tests in `tests/test_api.py`.
+   - Service integration tests in `tests/test_service.py`.
+   - CLI tests in `tests/test_cli.py`.
+   - Dashboard tests in `tests/test_dashboard.py`.
+8. **Documentation & Release 0.42.0**:
+   - Update `README.md`, `CHANGELOG.md`, `PLAN.md`, `docs/PROGRESS.md`.
+   - Bump version to `0.42.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+
+### 3. Acceptance Criteria
+- [ ] AC-1: `TraceContext` parses and formats W3C `traceparent` and `tracestate` headers correctly.
+- [ ] AC-2: `DistributedTracer` manages thread/task context, records spans with accurate duration and status, and converts to OTLP JSON format.
+- [ ] AC-3: `AlertTraceCorrelator` correlates alert incidents with candidate error/latency traces during anomaly windows.
+- [ ] AC-4: `TraceContextMiddleware` propagates trace context in HTTP request/response headers.
+- [ ] AC-5: `RecommenderService` creates child spans for core recommendation and evaluation operations and exposes trace query APIs.
+- [ ] AC-6: FastAPI endpoints `/traces/*` return validated schemas for trace trees, span search, and alert correlation.
+- [ ] AC-7: Operator CLI commands `trace-inspect` and `list-traces` function cleanly in human-readable and JSON modes.
+- [ ] AC-8: Streamlit dashboard renders live trace inspection and timeline breakdowns.
+- [ ] AC-9: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Validation & CI Plan
+- `uv run ruff format --check .`
+- `uv run ruff check .`
+- `uv run mypy`
+- `uv run --extra dashboard --extra tracking --extra spotify pytest -q`
+- `uv build`
+- Remote GitHub Actions CI on PR branch 100% green.
+
+### 5. Micro-Task Breakdown
+- [ ] Task 1: Define Phase 177 & 178 roadmap, update plan, and initialize progress record.
+- [ ] Task 2: Implement `TraceContext` with W3C `traceparent`/`tracestate` in `src/music_recommender/tracing.py`.
+- [ ] Task 3: Add unit tests for `TraceContext` in `tests/test_tracing.py`.
+- [ ] Task 4: Implement `SpanRecord`, `SpanKind`, and `SpanStatus` in `src/music_recommender/tracing.py`.
+- [ ] Task 5: Add unit tests for `SpanRecord` and OTLP format conversion in `tests/test_tracing.py`.
+- [ ] Task 6: Implement `DistributedTracer` with context propagation and span buffer in `src/music_recommender/tracing.py`.
+- [ ] Task 7: Add unit tests for `DistributedTracer` in `tests/test_tracing.py`.
+- [ ] Task 8: Implement `AlertTraceCorrelator` in `src/music_recommender/tracing.py`.
+- [ ] Task 9: Add unit tests for `AlertTraceCorrelator` in `tests/test_tracing.py`.
+- [ ] Task 10: Implement `TraceContextMiddleware` in `api/middleware.py`.
+- [ ] Task 11: Add unit tests for `TraceContextMiddleware` in `tests/test_api.py`.
+- [ ] Task 12: Instrument `RecommenderService` with distributed tracer and span queries in `src/music_recommender/service.py`.
+- [ ] Task 13: Add service integration tests for tracing in `tests/test_service.py`.
+- [ ] Task 14: Implement `/traces/*` endpoints in `api/main.py`.
+- [ ] Task 15: Add API integration tests for `/traces/*` in `tests/test_api.py`.
+- [ ] Task 16: Implement CLI commands `trace-inspect` and `list-traces` in `src/music_recommender/cli.py`.
+- [ ] Task 17: Add CLI tests in `tests/test_cli.py`.
+- [ ] Task 18: Add trace viewer to Streamlit dashboard in `src/music_recommender/dashboard.py` and test in `tests/test_dashboard.py`.
+- [ ] Task 19: Update `README.md` and `CHANGELOG.md` with 0.42.0 documentation.
+- [ ] Task 20: Bump package version to `0.42.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [ ] Task 21: Verify local CI parity, push to remote, open draft PR, monitor remote CI to 100% green.
+
+---
+
 # Milestone 0.41.0 Roadmap — Phase 175 & 176
 
 ## Phase 175 & 176: Alert Incident Analytics, MTTD/MTTR Telemetry, and Prometheus Alert Exporter (0.41.0)

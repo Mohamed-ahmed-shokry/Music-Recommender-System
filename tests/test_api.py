@@ -3263,3 +3263,119 @@ def test_alerts_analytics_routes() -> None:
 
         res_fb_slo = client.get("/alerts/analytics/slo")
         assert res_fb_slo.status_code == 200
+
+
+def test_trace_context_middleware_lifecycle() -> None:
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    from api.middleware import TraceContextMiddleware
+    from music_recommender.tracing import DistributedTracer, SpanStatus
+
+    tracer = DistributedTracer()
+
+    async def hello(request):
+        return JSONResponse({"message": "hello"})
+
+    async def fail(request):
+        return JSONResponse({"error": "server exploded"}, status_code=500)
+
+    app = Starlette(
+        routes=[
+            Route("/hello", hello),
+            Route("/fail", fail),
+        ]
+    )
+    app.add_middleware(TraceContextMiddleware, tracer=tracer)
+    client = TestClient(app)
+
+    # 1. Request without headers creates root trace
+    res1 = client.get("/hello")
+    assert res1.status_code == 200
+    assert "traceparent" in res1.headers
+    assert "x-trace-id" in res1.headers
+    assert "x-span-id" in res1.headers
+    trace_id_1 = res1.headers["x-trace-id"]
+    spans_1 = tracer.get_trace(trace_id_1)
+    assert len(spans_1) == 1
+    assert spans_1[0].name == "GET /hello"
+    assert spans_1[0].status == SpanStatus.OK
+
+    # 2. Request with W3C traceparent header propagates context
+    parent_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+    parent_span_id = "00f067aa0ba902b7"
+    header_val = f"00-{parent_trace_id}-{parent_span_id}-01"
+
+    res2 = client.get(
+        "/hello",
+        headers={"traceparent": header_val, "tracestate": "congo=test"},
+    )
+    assert res2.status_code == 200
+    assert res2.headers["x-trace-id"] == parent_trace_id
+    assert res2.headers["tracestate"] == "congo=test"
+    spans_2 = tracer.get_trace(parent_trace_id)
+    assert len(spans_2) == 1
+    assert spans_2[0].parent_span_id == parent_span_id
+
+    # 3. Request resulting in 500 records error status on span
+    res3 = client.get("/fail")
+    assert res3.status_code == 500
+    trace_id_3 = res3.headers["x-trace-id"]
+    spans_3 = tracer.get_trace(trace_id_3)
+    assert len(spans_3) == 1
+    assert spans_3[0].status == SpanStatus.ERROR
+    assert "HTTP 500" in (spans_3[0].status_message or "")
+
+
+def test_traces_api_endpoints() -> None:
+    client = TestClient(api_main.app)
+
+    # 1. Trigger request that generates a trace
+    res_root = client.get("/")
+    assert res_root.status_code == 200
+    assert "x-trace-id" in res_root.headers
+    trace_id = res_root.headers["x-trace-id"]
+    assert len(trace_id) == 32
+
+    # 2. Search traces
+    res_list = client.get("/traces")
+    assert res_list.status_code == 200
+    data_list = res_list.json()
+    assert data_list["count"] >= 1
+    assert any(s["trace_id"] == trace_id for s in data_list["spans"])
+
+    # 3. Retrieve specific trace
+    res_detail = client.get(f"/traces/{trace_id}")
+    assert res_detail.status_code == 200
+    data_detail = res_detail.json()
+    assert data_detail["trace_id"] == trace_id
+    assert data_detail["span_count"] >= 1
+
+    # 4. Non-existent trace returns 404
+    res_404 = client.get("/traces/00000000000000000000000000000000")
+    assert res_404.status_code == 404
+
+    # 5. OTLP traces export
+    res_otlp = client.get(f"/traces/export/otlp?trace_id={trace_id}")
+    assert res_otlp.status_code == 200
+    otlp_data = res_otlp.json()
+    assert "resourceSpans" in otlp_data
+    assert len(otlp_data["resourceSpans"]) >= 1
+
+    # 6. Correlate alert with traces
+    res_corr = client.post(
+        "/traces/correlate/alert",
+        json={"alert_name": "HealthCheckAnomaly", "window_seconds": 180.0},
+    )
+    assert res_corr.status_code == 200
+    corr_data = res_corr.json()
+    assert corr_data["alert_name"] == "HealthCheckAnomaly"
+    assert corr_data["matched_spans_count"] >= 1
+
+    # 7. Invalid correlation payload fails validation
+    res_bad = client.post(
+        "/traces/correlate/alert",
+        json={"alert_name": "", "window_seconds": -5.0},
+    )
+    assert res_bad.status_code == 422

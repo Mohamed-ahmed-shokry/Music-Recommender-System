@@ -19,6 +19,13 @@ from music_recommender.dashboard import (
 
 class FakeDashboardService:
     def __init__(self) -> None:
+        from music_recommender.tracing import (
+            AlertTraceCorrelator,
+            DistributedTracer,
+        )
+
+        self.tracer = DistributedTracer()
+        self.trace_correlator = AlertTraceCorrelator(self.tracer)
         self.context_features: tuple[str, ...] = (
             "log_plays",
             "log_unique_artists",
@@ -403,6 +410,34 @@ class FakeDashboardService:
     ) -> dict[str, float]:
         return {"popular": 0.65, "long_tail": 0.35}
 
+    def search_spans(
+        self,
+        trace_id: str | None = None,
+        name: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[Any]:
+        return self.tracer.get_spans(
+            trace_id=trace_id, name=name, status=status, limit=limit
+        )
+
+    def get_trace(self, trace_id: str) -> list[Any]:
+        return self.tracer.get_trace(trace_id)
+
+    def correlate_alert_traces(
+        self,
+        alert_name: str,
+        timestamp: float | None = None,
+        window_seconds: float = 300.0,
+        incident_id: str | None = None,
+    ) -> Any:
+        return self.trace_correlator.correlate(
+            alert_name=alert_name,
+            timestamp=timestamp,
+            window_seconds=window_seconds,
+            incident_id=incident_id,
+        )
+
     def browse_artists(
         self,
         *,
@@ -778,6 +813,7 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Catalog",
         "Ablation Summary",
         "Cold-Start Bandit",
+        "Distributed Traces",
     ]
     assert [metric.label for metric in app.metric] == [
         "Listeners",
@@ -1439,6 +1475,7 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
         "Catalog",
         "Ablation Summary",
         "Cold-Start Bandit",
+        "Distributed Traces",
     ]
 
 
@@ -1977,3 +2014,22 @@ def test_dashboard_sidebar_incident_analytics_rendering() -> None:
     assert any("12.5s" in str(v) for v in metric_values)
     assert any("55.0s" in str(v) for v in metric_values)
     assert any("99.95%" in str(v) for v in metric_values)
+
+
+def test_dashboard_traces_tab_rendering() -> None:
+    service = FakeDashboardService()
+    with service.tracer.span("dash.test_operation", attributes={"user": "u1"}):
+        pass
+
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(
+        "Distributed Tracing & OpenTelemetry Explorer" in h.value for h in app.header
+    )
+    assert any("Distributed Traces" in str(tab.label) for tab in app.tabs)
+    assert len(app.dataframe) >= 1

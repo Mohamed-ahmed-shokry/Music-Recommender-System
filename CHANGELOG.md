@@ -5,6 +5,24 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.0] - 2026-11-13
+
+### Added
+
+- **Distributed Trace Context Propagation & OpenTelemetry Span Ingestion (Phase 177):**
+  - Canonical W3C Trace Context specification implementation (`TraceContext`) supporting `traceparent` (`00-{trace_id}-{span_id}-{trace_flags}`) and `tracestate` comma-separated vendor state parsing and serialization with strict 16-byte/8-byte hex validation.
+  - Thread-safe and task-safe `DistributedTracer` utilizing Python's `contextvars.ContextVar` for ambient trace context propagation across async tasks and multithreaded operations without explicit parameter threading.
+  - Rich span data model (`SpanRecord`, `SpanKind`, `SpanStatus`, `SpanEvent`) with start/finish lifecycle tracking, nanosecond timestamps, exception capture, and in-memory ring-buffer storage (capacity 5,000).
+  - OpenTelemetry OTLP standard JSON serializer (`to_otlp_dict()` and `to_otlp_export()`) with typed attributes (`stringValue`, `intValue`, `doubleValue`, `boolValue`) for direct collector compatibility.
+  - `TraceContextMiddleware` in `api/middleware.py` automatically extracting incoming W3C traceparents, creating parent-linked server spans, and injecting response headers (`traceparent`, `x-trace-id`, `x-span-id`, `tracestate`).
+  - Traced instrumentation across core `RecommenderService` operations (`recommend_user`, `similar_artists`, `recommend_tracks`, `evaluate_alerts`).
+
+- **Alert-to-Trace Correlator & Operator Trace Inspection Tools (Phase 178):**
+  - Automated `AlertTraceCorrelator` linking alert firing transitions and `IncidentLifecycleRecord`s to candidate distributed traces and root-cause error spans within an anomaly time window.
+  - FastAPI endpoints `GET /traces`, `GET /traces/{trace_id}`, `GET /traces/export/otlp`, and `POST /traces/correlate/alert`.
+  - Operator CLI commands `music-recommender list-traces` (with `--limit`, `--name`, `--status`, `--trace-id`, and `--json`) and `music-recommender trace-inspect` (with `--json` and `--otlp`).
+  - Interactive Streamlit dashboard "Distributed Traces" explorer tab with live span search, timeline viewer, and incident-to-trace root cause correlation widget.
+
 ## [0.41.0] - 2026-11-12
 
 ### Added

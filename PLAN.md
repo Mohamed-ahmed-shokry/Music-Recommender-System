@@ -3,7 +3,27 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.41.0) — completed & verified (branch `phase/175-analytics-and-prometheus-alerts`, PR #36)
+## Current milestone (0.42.0) — active development (branch `phase/177-distributed-tracing`)
+
+Distributed Trace Context Propagation, OpenTelemetry Span Ingestion, and Alert-to-Trace Correlator.
+The 0.41.0 release delivered alert incident analytics, MTTD/MTTR telemetry calculation, and Prometheus alert exporter metrics.
+This milestone equips the platform with end-to-end distributed tracing, OpenTelemetry interoperability, and automated alert-to-trace correlation:
+a Distributed Tracing Engine (`TraceContext`, `SpanRecord`, `DistributedTracer`, `SpanKind`, `SpanStatus`) supporting the W3C Trace Context standard (`traceparent`, `tracestate`), thread/async context management via `contextvars`, and bounded in-memory ring buffering with OTLP JSON export capability;
+an Alert-to-Trace Correlator (`AlertTraceCorrelator`) linking firing/resolved alert incidents directly with candidate traces exhibiting errors or high latency within the anomaly window;
+HTTP middleware integration (`TraceContextMiddleware` in `api/middleware.py`), `RecommenderService` internal pipeline instrumentation (`service.recommend_user`, `service.similar_artists`, `service.recommend_tracks`, `service.evaluate_alerts`), FastAPI endpoints (`/traces/*`), operator CLI tooling (`trace-inspect`, `list-traces`), and Streamlit dashboard timeline visualization.
+
+- Phase 177 — Distributed trace context propagation across recommendation pipelines and background evaluators:
+  `TraceContext`, `SpanRecord`, `DistributedTracer`, `TraceContextMiddleware` in `tracing.py` and `middleware.py` (completed). ✅
+- Phase 178 — Alert-to-trace deep linking and OpenTelemetry span correlation:
+  `AlertTraceCorrelator`, service integration, API endpoints, CLI commands, dashboard timeline, clean CI (completed). ✅
+
+## Next milestone (0.43.0) — planned
+
+Distributed Rate Limiting, Token-Bucket Throttling, and Tenant Quota Governance.
+- Phase 179 — Token-bucket and sliding-window rate limiting engine with tiered tenant quotas.
+- Phase 180 — Redis/in-memory distributed rate limit synchronization and abuse detection guardrails.
+
+## Previous milestone (0.41.0) — shipped (branch `phase/175-analytics-and-prometheus-alerts`, PR #36)
 
 Alert Incident Analytics, MTTD/MTTR Telemetry, and Prometheus Alert Exporter.
 The 0.40.0 release introduced dynamic alert silencing, maintenance window schedules, and Slack/Teams webhook adapters.
@@ -16,15 +36,9 @@ active silence counts, maintenance window states, and circuit breaker health;
 FastAPI endpoints (`/alerts/analytics/*`), operator CLI commands (`alert-analytics`, `incident-history`), and Streamlit dashboard telemetry visualizations.
 
 - Phase 175 — Incident metrics aggregation, MTTD/MTTR telemetry calculation, and historical SLO compliance:
-  `IncidentLifecycleRecord`, `RuleIncidentStats`, `AlertIncidentTracker`, `AlertIncidentAnalytics` in `alerting.py` (completed). ✅
+  `IncidentLifecycleRecord`, `RuleIncidentStats`, `AlertIncidentTracker`, `AlertIncidentAnalytics` in `alerting.py` (shipped). ✅
 - Phase 176 — Export of alerting telemetry and incident state to Prometheus gauge/histogram metrics:
-  Prometheus metric exposition, service integration, API endpoints, CLI commands, dashboard indicators, clean CI (completed). ✅
-
-## Next milestone (0.42.0) — planned
-
-Distributed Trace Context Propagation, OpenTelemetry Span Ingestion, and Alert Trace Correlator.
-- Phase 177 — Distributed trace context propagation across recommendation pipelines and background evaluators.
-- Phase 178 — Alert-to-trace deep linking and OpenTelemetry span correlation.
+  Prometheus metric exposition, service integration, API endpoints, CLI commands, dashboard indicators, clean CI (shipped). ✅
 
 ## Previous milestone (0.40.0) — shipped (branch `phase/173-silencing-and-chat-adapters`, PR #35)
 

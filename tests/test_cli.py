@@ -4363,3 +4363,79 @@ def test_alert_analytics_and_incident_history_cli(tmp_path: Path) -> None:
 
     # Cleanup
     tracker.clear()
+
+
+def test_list_traces_and_trace_inspect_cli() -> None:
+    from typer.testing import CliRunner
+
+    from music_recommender.tracing import (
+        SpanKind,
+        SpanStatus,
+        get_global_tracer,
+    )
+
+    runner = CliRunner()
+    tracer = get_global_tracer()
+    tracer.clear()
+
+    # Empty state
+    res_empty = runner.invoke(cli.app, ["list-traces"])
+    assert res_empty.exit_code == 0
+    assert "No spans recorded" in res_empty.output
+
+    # Inject spans into tracer
+    with tracer.span(
+        "cli.root_op",
+        attributes={"user": "admin"},
+        kind=SpanKind.SERVER,
+    ) as s1:
+        trace_id = s1.trace_id
+        with tracer.span(
+            "cli.child_op",
+            attributes={"step": 2},
+            kind=SpanKind.INTERNAL,
+        ) as s2:
+            s2.finish(status=SpanStatus.ERROR, message="database timeout")
+
+    # 1. Test list-traces --json
+    res_list_json = runner.invoke(cli.app, ["list-traces", "--json"])
+    assert res_list_json.exit_code == 0
+    spans_data = json.loads(res_list_json.output)
+    assert len(spans_data) == 2
+    assert any(s["name"] == "cli.root_op" for s in spans_data)
+    assert any(s["name"] == "cli.child_op" for s in spans_data)
+
+    # 2. Test list-traces human-readable
+    res_list_human = runner.invoke(cli.app, ["list-traces", "--limit", "10"])
+    assert res_list_human.exit_code == 0
+    assert "Distributed Trace Spans" in res_list_human.output
+    assert "cli.root_op" in res_list_human.output
+
+    # 3. Test trace-inspect human-readable
+    res_inspect_human = runner.invoke(cli.app, ["trace-inspect", trace_id])
+    assert res_inspect_human.exit_code == 0
+    assert f"Distributed Trace Timeline: {trace_id}" in res_inspect_human.output
+    assert "cli.root_op" in res_inspect_human.output
+    assert "cli.child_op" in res_inspect_human.output
+
+    # 4. Test trace-inspect --json
+    res_inspect_json = runner.invoke(cli.app, ["trace-inspect", trace_id, "--json"])
+    assert res_inspect_json.exit_code == 0
+    trace_spans = json.loads(res_inspect_json.output)
+    assert len(trace_spans) == 2
+
+    # 5. Test trace-inspect --otlp
+    res_inspect_otlp = runner.invoke(cli.app, ["trace-inspect", trace_id, "--otlp"])
+    assert res_inspect_otlp.exit_code == 0
+    otlp_payload = json.loads(res_inspect_otlp.output)
+    assert "resourceSpans" in otlp_payload
+
+    # 6. Test trace-inspect non-existent trace
+    res_inspect_missing = runner.invoke(
+        cli.app, ["trace-inspect", "00000000000000000000000000000000"]
+    )
+    assert res_inspect_missing.exit_code == 1
+    assert "not found" in res_inspect_missing.output
+
+    # Cleanup
+    tracer.clear()

@@ -1136,6 +1136,15 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
 
 11. **Alert Incident Analytics, MTTD/MTTR Telemetry & Prometheus Exporter** — Comprehensive incident lifecycle tracking and quantitative reliability telemetry (`alert-analytics`, `incident-history`, `/alerts/analytics/*`). Evaluates Mean Time to Detect (MTTD), Mean Time to Resolve (MTTR), Mean Time Between Failures (MTBF), and Service Level Objective (SLO) availability compliance percentages per alert rule. Native Prometheus gauges export live alert status, MTTD, MTTR, active silence counts, maintenance window states, and circuit breaker health (`music_recommender_alert_active`, `music_recommender_alert_mttd_seconds`, `music_recommender_alert_mttr_seconds`, `music_recommender_alert_silences_active`, `music_recommender_alert_maintenance_active`, `music_recommender_alert_circuit_breaker_state`).
 
+12. **Distributed Tracing, W3C Trace Context & OpenTelemetry Interop** — Ambient trace context propagation across coroutines and threads via `contextvars.ContextVar`, adhering to W3C `traceparent` and `tracestate` standards. Operators can inspect buffered spans, timeline breakdowns, and OpenTelemetry OTLP JSON exports:
+
+    ```bash
+    uv run music-recommender list-traces                      # display recent buffered execution spans
+    uv run music-recommender list-traces --status error        # filter to failing spans
+    uv run music-recommender trace-inspect <trace_id>          # inspect complete span timeline breakdown
+    uv run music-recommender trace-inspect <trace_id> --otlp   # export canonical OpenTelemetry JSON payload
+    ```
+
 ## API Reference
 
 Train before starting the API:
@@ -1215,6 +1224,10 @@ uv run uvicorn api.main:app --reload
 | `POST` | `/recommend/session` | Short-term session recommendations from seeds, exclusions, and optional user taste |
 | `GET` | `/similar-artists/{artist_id}?method=hybrid&top_k=10` | ALS, content, or hybrid similar artists |
 | `GET` | `/content-similar-artists/{artist_id}?top_k=10` | Metadata-only similar artists |
+| `GET` | `/traces?limit=100&status=error` | Query buffered execution spans with optional status and name filtering |
+| `GET` | `/traces/{trace_id}` | Retrieve all execution spans belonging to a trace, ordered chronologically |
+| `GET` | `/traces/export/otlp?trace_id=...` | Export trace spans in canonical OpenTelemetry JSON format |
+| `POST` | `/traces/correlate/alert` | Correlate an alert or incident with candidate traces and error spans |
 
 Example requests:
 
@@ -1281,7 +1294,7 @@ Open the dashboard at:
 http://127.0.0.1:8501
 ```
 
-The dashboard provides eight workflows:
+The dashboard provides nine workflows:
 
 - personalized hybrid recommendations for known listeners (with optional LTR re-ranking);
 - cold-start recommendations from favorite artists, genres, and moods;
@@ -1290,7 +1303,8 @@ The dashboard provides eight workflows:
 - track recommendations, audio-feature track similarity, and searchable track catalog table;
 - responsive catalog search over artist metadata and popularity statistics;
 - aggregated ablation-importance summary for ranking knob analysis;
-- cold-start bandit operations: streaming health status, queue metrics & flush controls, maintenance daemon telemetry & sweep profiling, champion snapshot tagging & rollback, automated drift guardrail verification, policy derivation with temperature annealing, counterfactual OPE with 95% confidence intervals, and comparative benchmarking.
+- cold-start bandit operations: streaming health status, queue metrics & flush controls, maintenance daemon telemetry & sweep profiling, champion snapshot tagging & rollback, automated drift guardrail verification, policy derivation with temperature annealing, counterfactual OPE with 95% confidence intervals, and comparative benchmarking;
+- distributed tracing & OpenTelemetry explorer: live span inspection, trace timeline hierarchy, latency bottlenecks, and alert incident-to-trace root cause correlation.
 
 The trained `RecommenderService` is cached as a shared Streamlit resource, so
 widget reruns do not reload the model artifact. Catalog search uses the same
