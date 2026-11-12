@@ -414,6 +414,21 @@ _CURRENT_SPAN: ContextVar[SpanRecord | None] = ContextVar("_CURRENT_SPAN", defau
 _CURRENT_CONTEXT: ContextVar[TraceContext | None] = ContextVar(
     "_CURRENT_CONTEXT", default=None
 )
+_GLOBAL_TRACER: DistributedTracer | None = None
+
+
+def get_global_tracer() -> DistributedTracer:
+    """Return or lazily initialize the singleton distributed tracer."""
+    global _GLOBAL_TRACER
+    if _GLOBAL_TRACER is None:
+        _GLOBAL_TRACER = DistributedTracer()
+    return _GLOBAL_TRACER
+
+
+def set_global_tracer(tracer: DistributedTracer | None) -> None:
+    """Explicitly set or reset the singleton distributed tracer."""
+    global _GLOBAL_TRACER
+    _GLOBAL_TRACER = tracer
 
 
 class DistributedTracer:
