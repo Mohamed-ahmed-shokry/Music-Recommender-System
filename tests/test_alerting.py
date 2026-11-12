@@ -2579,3 +2579,147 @@ def test_alert_incident_analytics_calculations() -> None:
     assert "StreamingRecordsDropped" in summary["rules"]
     assert "ServiceDown" in summary["rules"]
 
+
+def test_alert_incident_tracker_lifecycle_and_queries() -> None:
+    from music_recommender.alerting import (
+        AlertIncidentTracker,
+        AlertRule,
+        AlertSeverity,
+        AlertTransition,
+    )
+
+    tracker = AlertIncidentTracker()
+    rule = AlertRule(
+        name="FeedbackQueueFull",
+        metric="queue_size",
+        comparator=">",
+        threshold=100.0,
+        severity=AlertSeverity.CRITICAL,
+        summary="Queue full",
+    )
+    t_firing = AlertTransition(
+        rule=rule,
+        event="firing",
+        value=150.0,
+        timestamp="2026-11-12T10:00:00Z",
+    )
+
+    # 1. First firing transition creates active incident
+    inc1 = tracker.record_transition(
+        t_firing,
+        now=100.0,
+        remediations=0,
+        root_causes=["StorageSlow"],
+    )
+    assert inc1 is not None
+    assert inc1.is_active is True
+    assert inc1.rule_name == "FeedbackQueueFull"
+    assert inc1.started_at == 100.0
+    assert inc1.root_causes == ["StorageSlow"]
+    assert len(tracker.get_active_incidents()) == 1
+
+    # 2. Duplicate firing transition updates existing active incident
+    inc2 = tracker.record_transition(
+        t_firing,
+        now=105.0,
+        remediations=1,
+        root_causes=["DatabaseLocked"],
+    )
+    assert inc2 is inc1
+    assert inc2.remediations_triggered == 1
+    assert "DatabaseLocked" in inc2.root_causes
+    assert len(tracker.get_active_incidents()) == 1
+
+    # 3. Record additional remediation
+    tracker.record_remediation("FeedbackQueueFull", count=2)
+    assert inc1.remediations_triggered == 3
+
+    # 4. Resolved transition closes incident and moves to history
+    t_resolved = AlertTransition(
+        rule=rule,
+        event="resolved",
+        value=50.0,
+        timestamp="2026-11-12T10:02:00Z",
+    )
+    resolved_inc = tracker.record_transition(t_resolved, now=220.0)
+    assert resolved_inc is not None
+    assert resolved_inc.is_active is False
+    assert resolved_inc.resolved_at == 220.0
+    assert resolved_inc.duration_seconds == 120.0
+    assert len(tracker.get_active_incidents()) == 0
+
+    history = tracker.get_history()
+    assert len(history) == 1
+    assert history[0].incident_id == inc1.incident_id
+
+    # 5. Check stats and analytics
+    stats = tracker.get_rule_stats("FeedbackQueueFull", window_seconds=1000.0)
+    assert stats.total_incidents == 1
+    assert stats.resolved_incidents == 1
+    assert stats.active_incidents == 0
+    assert stats.mttr_seconds == 120.0
+
+
+def test_alert_incident_tracker_persistence(tmp_path: Any) -> None:
+    from music_recommender.alerting import (
+        AlertIncidentTracker,
+        AlertRule,
+        AlertSeverity,
+        AlertTransition,
+    )
+
+    storage = tmp_path / "incidents_store"
+    tracker1 = AlertIncidentTracker(storage_dir=storage)
+
+    rule1 = AlertRule(
+        name="RuleOne",
+        metric="m1",
+        comparator=">",
+        threshold=1.0,
+        severity=AlertSeverity.WARNING,
+        summary="Rule one summary",
+    )
+    rule2 = AlertRule(
+        name="RuleTwo",
+        metric="m2",
+        comparator=">",
+        threshold=2.0,
+        severity=AlertSeverity.CRITICAL,
+        summary="Rule two summary",
+    )
+
+    t1_fire = AlertTransition(
+        rule=rule1, event="firing", value=2.0, timestamp="T1"
+    )
+    t1_resolve = AlertTransition(
+        rule=rule1, event="resolved", value=0.5, timestamp="T2"
+    )
+    t2_fire = AlertTransition(
+        rule=rule2, event="firing", value=5.0, timestamp="T3"
+    )
+
+    tracker1.record_transition(t1_fire, now=10.0)
+    tracker1.record_transition(t1_resolve, now=30.0)
+    tracker1.record_transition(t2_fire, now=50.0)
+
+    assert (storage / "incidents.json").exists()
+
+    # Create new tracker instance pointing to same storage
+    tracker2 = AlertIncidentTracker(storage_dir=storage)
+    active2 = tracker2.get_active_incidents()
+    history2 = tracker2.get_history()
+
+    assert len(active2) == 1
+    assert active2[0].rule_name == "RuleTwo"
+    assert active2[0].started_at == 50.0
+    assert len(history2) == 1
+    assert history2[0].rule_name == "RuleOne"
+    assert history2[0].duration_seconds == 20.0
+
+    # Clear should wipe memory and disk file
+    tracker2.clear()
+    assert len(tracker2.get_active_incidents()) == 0
+    assert len(tracker2.get_history()) == 0
+    assert not (storage / "incidents.json").exists()
+
+
