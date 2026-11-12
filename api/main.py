@@ -18,6 +18,7 @@ from music_recommender import __version__
 from music_recommender.alerting import (
     AlertEvaluator,
     AlertHistoryBuffer,
+    AlertIncidentTracker,
     AlertNotificationThrottler,
     AlertRule,
     AlertSilenceRule,
@@ -77,6 +78,7 @@ _fallback_alert_multichannel_dispatcher = MultiChannelDispatcher(
 _fallback_remediation_runner = IncidentRemediationRunner()
 _fallback_silencing_engine = AlertSilencingEngine()
 _fallback_alert_multichannel_dispatcher.silencing_engine = _fallback_silencing_engine
+_fallback_incident_tracker = AlertIncidentTracker()
 _fallback_remediation_runner.register_rule(
     RemediationRule(
         rule_name="StreamingQueueHighUtilization",
@@ -1047,6 +1049,82 @@ def alerts_maintenance_delete(window_id: str) -> dict[str, object]:
             status_code=404, detail=f"Maintenance window '{window_id}' not found"
         )
     return {"status": "ok", "cancelled": True, "window_id": window_id}
+
+
+@app.get("/alerts/analytics")
+def alerts_analytics_summary(
+    window_seconds: float = 86400.0,
+    slo_target_pct: float = 99.9,
+) -> dict[str, object]:
+    """Return aggregated incident analytics (MTTD, MTTR, MTBF, and SLO compliance)."""
+    if service is not None:
+        summary = service.get_incident_analytics(
+            window_seconds=window_seconds,
+            slo_target_pct=slo_target_pct,
+        )
+    else:
+        summary = _fallback_incident_tracker.get_analytics(
+            window_seconds=window_seconds,
+            slo_target_pct=slo_target_pct,
+        )
+    summary["window_seconds"] = window_seconds
+    summary["slo_target_pct"] = slo_target_pct
+    return summary
+
+
+@app.get("/alerts/analytics/incidents")
+def alerts_analytics_incidents(
+    limit: int = 50,
+    rule_name: str | None = None,
+    active_only: bool = False,
+) -> dict[str, object]:
+    """Return historical or active incident lifecycle records."""
+    if service is not None:
+        incidents = service.get_incident_history(
+            limit=limit,
+            rule_name=rule_name,
+            active_only=active_only,
+        )
+    else:
+        if active_only:
+            recs = _fallback_incident_tracker.get_active_incidents()
+            if rule_name:
+                recs = [r for r in recs if r.rule_name == rule_name]
+            incidents = [r.to_dict() for r in recs[:limit]]
+        else:
+            recs = _fallback_incident_tracker.get_history(
+                limit=limit, rule_name=rule_name
+            )
+            incidents = [r.to_dict() for r in recs]
+    return {
+        "incidents": incidents,
+        "count": len(incidents),
+        "active_only": active_only,
+    }
+
+
+@app.get("/alerts/analytics/slo")
+def alerts_analytics_slo(
+    window_seconds: float = 86400.0,
+    slo_target_pct: float = 99.9,
+) -> dict[str, object]:
+    """Return Service Level Objective (SLO) compliance percentages per alert rule."""
+    if service is not None:
+        report = service.get_slo_compliance_report(
+            window_seconds=window_seconds,
+            slo_target_pct=slo_target_pct,
+        )
+    else:
+        stats = _fallback_incident_tracker.get_all_rule_stats(
+            window_seconds=window_seconds,
+            slo_target_pct=slo_target_pct,
+        )
+        report = {
+            "window_seconds": window_seconds,
+            "slo_target_pct": slo_target_pct,
+            "rules": {name: s.to_dict() for name, s in stats.items()},
+        }
+    return report
 
 
 @app.post("/alerts/replay")

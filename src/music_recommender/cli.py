@@ -18,6 +18,7 @@ from music_recommender import __version__
 from music_recommender.alerting import (
     AlertCorrelationGraph,
     AlertEvaluator,
+    AlertIncidentTracker,
     AlertNotificationThrottler,
     AlertReplayEngine,
     AlertRule,
@@ -5656,6 +5657,163 @@ def list_maintenance_cmd(
         typer.echo(f"  Author:      {w.get('author')}")
         if w.get("description"):
             typer.echo(f"  Description: {w.get('description')}")
+
+
+_DEFAULT_INCIDENT_STORAGE = Path("data/alerts")
+
+
+def _get_incident_tracker_or_service() -> tuple[
+    RecommenderService | None, AlertIncidentTracker
+]:
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable: %s", exc)
+
+    if service is not None:
+        return service, service.incident_tracker
+    tracker = AlertIncidentTracker(storage_dir=_DEFAULT_INCIDENT_STORAGE)
+    return None, tracker
+
+
+@app.command("alert-analytics")
+def alert_analytics_cmd(
+    window: Annotated[
+        float,
+        typer.Option(
+            "--window",
+            "-w",
+            help="Analytics evaluation window in seconds.",
+        ),
+    ] = 86400.0,
+    slo_target: Annotated[
+        float,
+        typer.Option(
+            "--slo-target",
+            help="Target SLO availability percentage.",
+        ),
+    ] = 99.9,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output analytics as JSON."),
+    ] = False,
+) -> None:
+    """Display incident metrics, MTTD, MTTR, MTBF, and SLO compliance."""
+    service, tracker = _get_incident_tracker_or_service()
+    if service is not None:
+        analytics = service.get_incident_analytics(
+            window_seconds=window,
+            slo_target_pct=slo_target,
+        )
+    else:
+        analytics = tracker.get_analytics(
+            window_seconds=window,
+            slo_target_pct=slo_target,
+        )
+
+    if json_output:
+        typer.echo(json.dumps(analytics, indent=2))
+        return
+
+    typer.secho("=== Alert Incident Analytics & Reliability Summary ===", bold=True)
+    typer.echo(f"Evaluation Window:  {window:.0f}s ({window / 3600:.1f}h)")
+    typer.echo(f"Total Incidents:    {analytics.get('total_incidents', 0)}")
+    typer.echo(f"Active Incidents:   {analytics.get('active_incidents', 0)}")
+    typer.echo(f"Resolved Incidents: {analytics.get('resolved_incidents', 0)}")
+    typer.echo(f"Overall MTTD:       {analytics.get('overall_mttd_seconds', 0.0):.2f}s")
+    typer.echo(f"Overall MTTR:       {analytics.get('overall_mttr_seconds', 0.0):.2f}s")
+
+    overall_slo = float(analytics.get("overall_slo_compliance_pct", 100.0))
+    slo_color = typer.colors.GREEN if overall_slo >= slo_target else typer.colors.RED
+    typer.secho(
+        f"Overall SLO Availability: {overall_slo:.4f}% (Target: {slo_target}%)",
+        fg=slo_color,
+        bold=True,
+    )
+
+    rules = analytics.get("rules", {})
+    if rules:
+        typer.echo("\nPer-Rule Incident Breakdown:")
+        for rule_name, s in sorted(rules.items()):
+            r_slo = float(s.get("slo_compliance_pct", 100.0))
+            r_color = typer.colors.GREEN if r_slo >= slo_target else typer.colors.YELLOW
+            typer.secho(f"  • {rule_name}:", bold=True)
+            tot = s.get("total_incidents", 0)
+            act = s.get("active_incidents", 0)
+            mttd = s.get("mttd_seconds", 0.0)
+            mttr = s.get("mttr_seconds", 0.0)
+            typer.echo(
+                f"      Total: {tot} | Active: {act} | "
+                f"MTTD: {mttd:.1f}s | MTTR: {mttr:.1f}s"
+            )
+            typer.secho(f"      SLO Availability: {r_slo:.4f}%", fg=r_color)
+
+
+@app.command("incident-history")
+def incident_history_cmd(
+    limit: Annotated[
+        int,
+        typer.Option("--limit", "-l", help="Maximum incident records to display."),
+    ] = 20,
+    rule: Annotated[
+        str | None,
+        typer.Option("--rule", "-r", help="Filter by alert rule name."),
+    ] = None,
+    active_only: Annotated[
+        bool,
+        typer.Option("--active-only", help="Display only ongoing active incidents."),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output incident history as JSON."),
+    ] = False,
+) -> None:
+    """Display historical or active alert incident lifecycle records."""
+    service, tracker = _get_incident_tracker_or_service()
+    if service is not None:
+        incidents = service.get_incident_history(
+            limit=limit,
+            rule_name=rule,
+            active_only=active_only,
+        )
+    else:
+        if active_only:
+            recs = tracker.get_active_incidents()
+            if rule:
+                recs = [r for r in recs if r.rule_name == rule]
+            incidents = [r.to_dict() for r in recs[:limit]]
+        else:
+            recs = tracker.get_history(limit=limit, rule_name=rule)
+            incidents = [r.to_dict() for r in recs]
+
+    if json_output:
+        typer.echo(json.dumps(incidents, indent=2))
+        return
+
+    if not incidents:
+        typer.echo("No incidents recorded.")
+        return
+
+    typer.secho("=== Alert Incident Lifecycle History ===", bold=True)
+    for inc in incidents:
+        is_active = inc.get("is_active", False)
+        status_color = typer.colors.RED if is_active else typer.colors.GREEN
+        status_label = "ACTIVE" if is_active else "RESOLVED"
+        dur = float(inc.get("duration_seconds", 0.0))
+        rem = inc.get("remediations_triggered", 0)
+        inc_id = inc.get("incident_id")
+        r_name = inc.get("rule_name")
+        sev = inc.get("severity")
+        typer.secho(
+            f"ID: {inc_id} | [{status_label}] | Rule: {r_name} | Severity: {sev}",
+            fg=status_color,
+            bold=True,
+        )
+        sil = inc.get("silenced", False)
+        typer.echo(f"  Duration: {dur:.1f}s | Remediations: {rem} | Silenced: {sil}")
+        if inc.get("root_causes"):
+            typer.echo(f"  Root Causes: {', '.join(inc.get('root_causes', []))}")
 
 
 if __name__ == "__main__":

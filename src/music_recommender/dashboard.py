@@ -1616,6 +1616,21 @@ def render_dashboard(service: RecommenderService) -> None:
                         if mw.get("description"):
                             st.caption(str(mw["description"]))
 
+            if hasattr(service, "get_incident_analytics"):
+                analytics = service.get_incident_analytics()
+                if analytics and analytics.get("total_incidents", 0) > 0:
+                    st.divider()
+                    st.markdown(
+                        "**Incident Analytics & Reliability (MTTD / MTTR / SLO)**"
+                    )
+                    mttd_val = float(analytics.get("overall_mttd_seconds", 0.0))
+                    mttr_val = float(analytics.get("overall_mttr_seconds", 0.0))
+                    slo_val = float(analytics.get("overall_slo_compliance_pct", 100.0))
+                    col_m1, col_m2, col_m3 = st.columns(3)
+                    col_m1.metric("MTTD", f"{mttd_val:.1f}s")
+                    col_m2.metric("MTTR", f"{mttr_val:.1f}s")
+                    col_m3.metric("SLO Availability", f"{slo_val:.2f}%")
+
     tabs = st.tabs(
         [
             "For You",

@@ -2544,3 +2544,66 @@ def test_service_maintenance_windows_management(tmp_path: Path) -> None:
     # Cancel maintenance window
     assert service.cancel_maintenance_window("mw-svc-1") is True
     assert len(service.get_maintenance_windows()) == 0
+
+
+def test_service_incident_analytics_integration(tmp_path: Path) -> None:
+    from music_recommender.alerting import (
+        AlertRule,
+        AlertSeverity,
+        AlertTransition,
+    )
+
+    service = create_service(tmp_path)
+    service.incident_tracker.clear()
+
+    # Initially no incidents
+    assert service.get_incident_history() == []
+    analytics = service.get_incident_analytics(window_seconds=1000.0)
+    assert analytics["total_incidents"] == 0
+    assert analytics["overall_slo_compliance_pct"] == 100.0
+
+    # Inject alert transition
+    rule = AlertRule(
+        name="FeedbackQueueFull",
+        metric="queue_size",
+        comparator=">",
+        threshold=100.0,
+        severity=AlertSeverity.CRITICAL,
+        summary="Queue full",
+    )
+    t_fire = AlertTransition(rule, "firing", 150.0, "2026-11-12T10:00:00Z")
+    service.incident_tracker.record_transition(t_fire, now=100.0)
+
+    # Active incidents query
+    active = service.get_incident_history(active_only=True)
+    assert len(active) == 1
+    assert active[0]["rule_name"] == "FeedbackQueueFull"
+    assert active[0]["is_active"] is True
+
+    # Resolve incident
+    t_res = AlertTransition(rule, "resolved", 50.0, "2026-11-12T10:02:00Z")
+    service.incident_tracker.record_transition(t_res, now=180.0)
+
+    # History query
+    history = service.get_incident_history(active_only=False)
+    assert len(history) == 1
+    assert history[0]["duration_seconds"] == 80.0
+    assert history[0]["is_active"] is False
+
+    # Analytics query
+    summary = service.get_incident_analytics(window_seconds=1000.0, now=200.0)
+    assert summary["total_incidents"] == 1
+    assert summary["resolved_incidents"] == 1
+    assert summary["rules"]["FeedbackQueueFull"]["mttr_seconds"] == 80.0
+
+    # SLO report
+    slo = service.get_slo_compliance_report(window_seconds=1000.0, now=200.0)
+    assert "FeedbackQueueFull" in slo["rules"]
+    assert slo["rules"]["FeedbackQueueFull"]["slo_compliance_pct"] == 92.0
+
+    # Prometheus export includes alert telemetry
+    metrics_text = service.export_prometheus_metrics()
+    assert "music_recommender_alert_mttd_seconds" in metrics_text
+    assert "music_recommender_alert_mttr_seconds" in metrics_text
+    assert "music_recommender_alert_silences_active" in metrics_text
+    service.incident_tracker.clear()

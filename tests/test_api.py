@@ -11,6 +11,7 @@ from api.middleware import RequestSafetyMiddleware
 from music_recommender.alerting import (
     AlertEvaluator,
     AlertHistoryBuffer,
+    AlertIncidentTracker,
     AlertSilenceRule,
     AlertSilencingEngine,
     MaintenanceWindow,
@@ -27,6 +28,7 @@ class FakeService:
         self.cold_start_policy: dict[str, float] = {"popular": 1.0}
         self.alert_history = AlertHistoryBuffer()
         self.alert_silencing_engine = AlertSilencingEngine()
+        self.incident_tracker = AlertIncidentTracker()
         self.closed: bool = False
 
     def close(self, timeout: float | None = 5.0) -> None:
@@ -833,6 +835,49 @@ class FakeService:
                 active_only=active_only, now=now
             )
         ]
+
+    def get_incident_analytics(
+        self,
+        window_seconds: float = 86400.0,
+        slo_target_pct: float = 99.9,
+        now: float | None = None,
+    ) -> dict[str, object]:
+        return self.incident_tracker.get_analytics(
+            window_seconds=window_seconds,
+            slo_target_pct=slo_target_pct,
+            now=now,
+        )
+
+    def get_incident_history(
+        self,
+        limit: int = 100,
+        rule_name: str | None = None,
+        active_only: bool = False,
+    ) -> list[dict[str, object]]:
+        if active_only:
+            recs = self.incident_tracker.get_active_incidents()
+            if rule_name:
+                recs = [r for r in recs if r.rule_name == rule_name]
+            return [r.to_dict() for r in recs[:limit]]
+        recs = self.incident_tracker.get_history(limit=limit, rule_name=rule_name)
+        return [r.to_dict() for r in recs]
+
+    def get_slo_compliance_report(
+        self,
+        window_seconds: float = 86400.0,
+        slo_target_pct: float = 99.9,
+        now: float | None = None,
+    ) -> dict[str, object]:
+        stats = self.incident_tracker.get_all_rule_stats(
+            window_seconds=window_seconds,
+            slo_target_pct=slo_target_pct,
+            now=now,
+        )
+        return {
+            "window_seconds": window_seconds,
+            "slo_target_pct": slo_target_pct,
+            "rules": {name: s.to_dict() for name, s in stats.items()},
+        }
 
 
 def test_health_route_uses_loaded_service() -> None:
@@ -3154,3 +3199,67 @@ def test_api_alert_silences_and_maintenance_endpoints() -> None:
         assert res_mw_fb.status_code == 200
         assert client.get("/alerts/maintenance").json()["count"] >= 1
         assert client.delete("/alerts/maintenance/mw-fb-1").status_code == 200
+
+
+def test_alerts_analytics_routes() -> None:
+    from music_recommender.alerting import (
+        AlertRule,
+        AlertSeverity,
+        AlertTransition,
+    )
+
+    fake = FakeService()
+    rule = AlertRule(
+        name="LatencyHigh",
+        metric="http_latency",
+        comparator=">",
+        threshold=0.5,
+        severity=AlertSeverity.WARNING,
+        summary="Latency high",
+    )
+    t_fire = AlertTransition(rule, "firing", 0.8, "T1")
+    t_res = AlertTransition(rule, "resolved", 0.2, "T2")
+    fake.incident_tracker.record_transition(t_fire, now=100.0)
+    fake.incident_tracker.record_transition(t_res, now=160.0)
+
+    with TestClient(api_main.app) as client:
+        # 1. With active service
+        api_main.service = fake
+        api_main.service_load_error = None
+
+        res_analytics = client.get("/alerts/analytics")
+        assert res_analytics.status_code == 200
+        data_a = res_analytics.json()
+        assert data_a["total_incidents"] == 1
+        assert data_a["resolved_incidents"] == 1
+        assert "LatencyHigh" in data_a["rules"]
+        assert data_a["rules"]["LatencyHigh"]["mttr_seconds"] == 60.0
+
+        res_incidents = client.get("/alerts/analytics/incidents")
+        assert res_incidents.status_code == 200
+        data_i = res_incidents.json()
+        assert data_i["count"] == 1
+        assert data_i["incidents"][0]["rule_name"] == "LatencyHigh"
+
+        res_active_i = client.get("/alerts/analytics/incidents?active_only=true")
+        assert res_active_i.status_code == 200
+        assert res_active_i.json()["count"] == 0
+
+        res_slo = client.get("/alerts/analytics/slo")
+        assert res_slo.status_code == 200
+        data_slo = res_slo.json()
+        assert "LatencyHigh" in data_slo["rules"]
+        assert data_slo["rules"]["LatencyHigh"]["slo_target_pct"] == 99.9
+
+        # 2. In fallback mode (service is None)
+        api_main.service = None
+        api_main.service_load_error = "Offline"
+
+        res_fb_analytics = client.get("/alerts/analytics")
+        assert res_fb_analytics.status_code == 200
+
+        res_fb_incidents = client.get("/alerts/analytics/incidents")
+        assert res_fb_incidents.status_code == 200
+
+        res_fb_slo = client.get("/alerts/analytics/slo")
+        assert res_fb_slo.status_code == 200

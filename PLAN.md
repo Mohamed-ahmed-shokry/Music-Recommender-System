@@ -3,7 +3,30 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.40.0) — completed & verified (branch `phase/173-silencing-and-chat-adapters`, PR #35)
+## Current milestone (0.41.0) — completed & verified (branch `phase/175-analytics-and-prometheus-alerts`, PR #36)
+
+Alert Incident Analytics, MTTD/MTTR Telemetry, and Prometheus Alert Exporter.
+The 0.40.0 release introduced dynamic alert silencing, maintenance window schedules, and Slack/Teams webhook adapters.
+This milestone hardens production observability with incident lifecycle tracking and quantitative reliability metrics:
+an Alert Incident Analytics Engine (`IncidentLifecycleRecord`, `RuleIncidentStats`, `AlertIncidentTracker`, `AlertIncidentAnalytics`)
+that tracks full incident lifecycles (started_at, resolved_at, duration_seconds), computing quantitative reliability metrics
+including Mean Time to Detect (MTTD), Mean Time to Resolve (MTTR), Mean Time Between Failures (MTBF), and Service Level Objective (SLO) compliance percentages;
+a Prometheus Alert Metrics Exporter exposing native OpenMetrics/Prometheus gauge and histogram families for live alert status, MTTD, MTTR,
+active silence counts, maintenance window states, and circuit breaker health;
+FastAPI endpoints (`/alerts/analytics/*`), operator CLI commands (`alert-analytics`, `incident-history`), and Streamlit dashboard telemetry visualizations.
+
+- Phase 175 — Incident metrics aggregation, MTTD/MTTR telemetry calculation, and historical SLO compliance:
+  `IncidentLifecycleRecord`, `RuleIncidentStats`, `AlertIncidentTracker`, `AlertIncidentAnalytics` in `alerting.py` (completed). ✅
+- Phase 176 — Export of alerting telemetry and incident state to Prometheus gauge/histogram metrics:
+  Prometheus metric exposition, service integration, API endpoints, CLI commands, dashboard indicators, clean CI (completed). ✅
+
+## Next milestone (0.42.0) — planned
+
+Distributed Trace Context Propagation, OpenTelemetry Span Ingestion, and Alert Trace Correlator.
+- Phase 177 — Distributed trace context propagation across recommendation pipelines and background evaluators.
+- Phase 178 — Alert-to-trace deep linking and OpenTelemetry span correlation.
+
+## Previous milestone (0.40.0) — shipped (branch `phase/173-silencing-and-chat-adapters`, PR #35)
 
 Alert Silencing, Maintenance Window Schedules, and Slack/Teams Webhook Adapters.
 The 0.39.0 release introduced automated incident remediation and outbound circuit breaking.
@@ -16,15 +39,9 @@ FastAPI endpoints (`/alerts/silences/*`, `/alerts/maintenance/*`), operator CLI 
 `expire-silence`, `schedule-maintenance`, `list-maintenance`), and Streamlit dashboard controls.
 
 - Phase 173 — Dynamic alert silencing rules and scheduled maintenance window suppression:
-  `AlertSilenceRule`, `SilenceMatcher`, `MaintenanceWindow`, `AlertSilencingEngine` in `alerting.py` (completed). ✅
+  `AlertSilenceRule`, `SilenceMatcher`, `MaintenanceWindow`, `AlertSilencingEngine` in `alerting.py` (shipped). ✅
 - Phase 174 — Slack and Microsoft Teams rich card notification adapters:
-  `SlackWebhookAdapter`, `TeamsWebhookAdapter`, dispatcher integration, service integration, API endpoints, CLI commands, dashboard indicators, clean CI (completed). ✅
-
-## Next milestone (0.41.0) — planned
-
-Alert Analytics, Mean Time to Detect/Resolve (MTTD/MTTR) Reporting, and Prometheus Alert Exporter.
-- Phase 175 — Incident metrics aggregation, MTTD/MTTR telemetry calculation, and historical SLO compliance.
-- Phase 176 — Export of alerting telemetry and incident state to Prometheus gauge/histogram metrics.
+  `SlackWebhookAdapter`, `TeamsWebhookAdapter`, dispatcher integration, service integration, API endpoints, CLI commands, dashboard indicators, clean CI (shipped). ✅
 
 ## Previous milestone (0.39.0) — shipped (branch `phase/171-remediation-and-circuit-breaker`, PR #34)
 

@@ -5,6 +5,22 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.0] - 2026-11-12
+
+### Added
+
+- **Alert Incident Analytics & MTTD/MTTR Telemetry (Phase 175):**
+  - Thread-safe `IncidentLifecycleRecord`, `RuleIncidentStats`, `AlertIncidentTracker`, and `AlertIncidentAnalytics` evaluating alert firing/resolved lifecycles.
+  - Quantitative reliability metrics including Mean Time to Detect (MTTD), Mean Time to Resolve (MTTR), Mean Time Between Failures (MTBF), and Service Level Objective (SLO) availability compliance percentages.
+  - Automatic transition correlation and persistence in `data/alerts/incidents.json` with recovery across service restarts.
+  - Integration into `RecommenderService.evaluate_alerts()` recording incident transitions, remediations triggered, and silence status.
+
+- **Prometheus Alert Metrics Exporter & Operational Observability (Phase 176):**
+  - OpenMetrics/Prometheus gauge families: `music_recommender_alert_active` (labeled by rule and severity), `music_recommender_alert_mttd_seconds`, `music_recommender_alert_mttr_seconds`, `music_recommender_alert_silences_active`, `music_recommender_alert_maintenance_active`, and `music_recommender_alert_circuit_breaker_state` (labeled by channel).
+  - FastAPI endpoints `GET /alerts/analytics`, `GET /alerts/analytics/incidents`, and `GET /alerts/analytics/slo`.
+  - Operator CLI commands `music-recommender alert-analytics` (with `--window`, `--slo-target`, and `--json`) and `music-recommender incident-history` (with `--limit`, `--rule`, `--active-only`, and `--json`).
+  - Streamlit dashboard sidebar real-time indicators for MTTD, MTTR, and SLO availability compliance.
+
 ## [0.40.0] - 2026-11-11
 
 ### Added

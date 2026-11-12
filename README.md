@@ -1116,6 +1116,10 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
     uv run music-recommender list-silences              # list active alert silences
     uv run music-recommender schedule-maintenance -n "DB Upgrade" -d 7200 # schedule maintenance window
     uv run music-recommender list-maintenance           # inspect scheduled maintenance windows
+    uv run music-recommender alert-analytics            # display MTTD, MTTR, and SLO compliance
+    uv run music-recommender alert-analytics --json     # structured JSON telemetry payload
+    uv run music-recommender incident-history           # display historical incident lifecycles
+    uv run music-recommender incident-history --active-only # filter to ongoing incidents
     ```
 
 5. **Alertmanager webhook ingestion & history buffer** — The API provides a webhook receiver at `POST /alerts/webhook` that parses standard Prometheus/Alertmanager v4 webhook payloads as well as internal transitions, recording them in a thread-safe in-memory ring buffer (default capacity 500 events). Query recent events at `GET /alerts/history` or inspect them in the Streamlit dashboard sidebar.
@@ -1129,6 +1133,8 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
 9. **Automated Incident Remediation & Outbound Circuit Breaking** — Self-healing runner executes targeted remediation actions (`remediation-history`, `trigger-action`, `GET /alerts/remediation/rules`, `POST /alerts/remediation/trigger`) upon alert triggers with cooldown suppression, attempt bounding, and execution profiling. Resilient three-state circuit breakers (`circuit-stats`, `GET /alerts/circuit-breaker/stats`, `POST /alerts/circuit-breaker/reset`) guard outbound webhook and gateway calls, failing fast without thread or socket exhaustion during remote provider degradation.
 
 10. **Alert Silencing, Maintenance Windows & Chat Adapters** — Dynamic silence rules and scheduled maintenance windows suppress notification dispatch while preserving transition logs (`silence-alert`, `list-silences`, `schedule-maintenance`, `list-maintenance`, `/alerts/silences/*`, `/alerts/maintenance/*`). First-class Slack Block Kit and Microsoft Teams Adaptive Card adapters deliver formatted status indicators and interactive dashboard action buttons.
+
+11. **Alert Incident Analytics, MTTD/MTTR Telemetry & Prometheus Exporter** — Comprehensive incident lifecycle tracking and quantitative reliability telemetry (`alert-analytics`, `incident-history`, `/alerts/analytics/*`). Evaluates Mean Time to Detect (MTTD), Mean Time to Resolve (MTTR), Mean Time Between Failures (MTBF), and Service Level Objective (SLO) availability compliance percentages per alert rule. Native Prometheus gauges export live alert status, MTTD, MTTR, active silence counts, maintenance window states, and circuit breaker health (`music_recommender_alert_active`, `music_recommender_alert_mttd_seconds`, `music_recommender_alert_mttr_seconds`, `music_recommender_alert_silences_active`, `music_recommender_alert_maintenance_active`, `music_recommender_alert_circuit_breaker_state`).
 
 ## API Reference
 
@@ -1178,6 +1184,9 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/alerts/maintenance?active_only=false` | Query scheduled maintenance windows |
 | `POST` | `/alerts/maintenance` | Schedule a maintenance window for alert suppression |
 | `DELETE` | `/alerts/maintenance/{window_id}` | Cancel a scheduled maintenance window |
+| `GET` | `/alerts/analytics?window_seconds=86400&slo_target_pct=99.9` | Quantitative incident telemetry summary (MTTD, MTTR, MTBF, and SLO availability) |
+| `GET` | `/alerts/analytics/incidents?limit=50&active_only=false` | Paginated historical or active incident lifecycle records |
+| `GET` | `/alerts/analytics/slo?window_seconds=86400&slo_target_pct=99.9` | Service Level Objective (SLO) compliance audit per alert rule |
 | `GET` | `/metadata` | Training config, dataset fingerprint, artifact metadata |
 | `GET` | `/evaluation/ablation-summary` | Persisted aggregated knob-importance summary |
 | `GET` | `/catalog/artists?query=pop&limit=25` | Search and page through artists and metadata |
