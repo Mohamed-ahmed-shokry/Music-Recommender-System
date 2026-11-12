@@ -16,8 +16,8 @@
 - [x] Task 13: Add service integration tests for tracing in `tests/test_service.py`.
 - [x] Task 14: Implement `/traces/*` endpoints in `api/main.py`.
 - [x] Task 15: Add API integration tests for `/traces/*` in `tests/test_api.py`.
-- [ ] Task 16: Implement CLI commands `trace-inspect` and `list-traces` in `src/music_recommender/cli.py`.
-- [ ] Task 17: Add CLI tests in `tests/test_cli.py`.
+- [x] Task 16: Implement CLI commands `trace-inspect` and `list-traces` in `src/music_recommender/cli.py`.
+- [x] Task 17: Add CLI tests in `tests/test_cli.py`.
 - [ ] Task 18: Add trace viewer to Streamlit dashboard in `src/music_recommender/dashboard.py` and test in `tests/test_dashboard.py`.
 - [ ] Task 19: Update `README.md` and `CHANGELOG.md` with 0.42.0 documentation.
 - [ ] Task 20: Bump package version to `0.42.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
@@ -32,7 +32,7 @@
 | AC-4: TraceContextMiddleware propagates trace context in HTTP headers | `Passed` | `tests/test_api.py::test_trace_context_middleware_lifecycle` |
 | AC-5: RecommenderService instruments internal pipeline operations and exposes queries | `Passed` | `tests/test_service.py::test_service_distributed_tracing_integration` |
 | AC-6: FastAPI endpoints /traces/* return validated schemas | `Passed` | `tests/test_api.py::test_traces_api_endpoints` |
-| AC-7: Operator CLI commands trace-inspect and list-traces operate cleanly | `Pending` | `tests/test_cli.py` |
+| AC-7: Operator CLI commands trace-inspect and list-traces operate cleanly | `Passed` | `tests/test_cli.py::test_list_traces_and_trace_inspect_cli` |
 | AC-8: Streamlit dashboard renders live trace inspection and timeline breakdowns | `Pending` | `tests/test_dashboard.py` |
 | AC-9: All local CI-parity checks and remote CI workflow runs pass 100% | `Pending` | Local checks + GitHub Actions runs |
 
