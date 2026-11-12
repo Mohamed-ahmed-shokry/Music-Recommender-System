@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from music_recommender.tracing import (
+    DistributedTracer,
     SpanKind,
     SpanRecord,
     SpanStatus,
@@ -246,3 +247,94 @@ def test_span_otlp_dict_structure() -> None:
     # Verify event
     assert len(otlp["events"]) == 1
     assert otlp["events"][0]["name"] == "render_start"
+
+
+def test_distributed_tracer_nested_spans() -> None:
+    tracer = DistributedTracer()
+    with tracer.span("outer_op", {"level": "outer"}) as s_outer:
+        assert tracer.active_span is s_outer
+        assert tracer.active_context is not None
+        assert tracer.active_context.span_id == s_outer.span_id
+
+        with tracer.span("inner_op", {"level": "inner"}) as s_inner:
+            assert tracer.active_span is s_inner
+            assert s_inner.trace_id == s_outer.trace_id
+            assert s_inner.parent_span_id == s_outer.span_id
+
+        # Returned back to outer
+        assert tracer.active_span is s_outer
+
+    # Outside span context
+    assert tracer.active_span is None
+    assert tracer.active_context is None
+
+    trace_spans = tracer.get_trace(s_outer.trace_id)
+    assert len(trace_spans) == 2
+    span_names = [s.name for s in trace_spans]
+    assert "outer_op" in span_names
+    assert "inner_op" in span_names
+
+
+def test_distributed_tracer_custom_context() -> None:
+    tracer = DistributedTracer()
+    ctx = TraceContext.new_root()
+
+    with tracer.span("custom_op", context=ctx) as span:
+        assert span.trace_id == ctx.trace_id
+        assert span.parent_span_id == ctx.span_id
+
+    spans = tracer.get_spans(trace_id=ctx.trace_id)
+    assert len(spans) == 1
+    assert spans[0].name == "custom_op"
+
+
+def test_distributed_tracer_exception_handling() -> None:
+    tracer = DistributedTracer()
+
+    with (
+        pytest.raises(RuntimeError, match="pipeline breakdown"),
+        tracer.span("faulty_op"),
+    ):
+        raise RuntimeError("pipeline breakdown")
+
+    err_spans = tracer.get_spans(status=SpanStatus.ERROR)
+    assert len(err_spans) == 1
+    span = err_spans[0]
+    assert span.name == "faulty_op"
+    assert span.status == SpanStatus.ERROR
+    assert "RuntimeError: pipeline breakdown" in (span.status_message or "")
+    assert any(e.name == "exception" for e in span.events)
+
+
+def test_distributed_tracer_queries_and_clear() -> None:
+    tracer = DistributedTracer(max_spans=50)
+
+    for i in range(10):
+        with tracer.span(f"op_{i % 2}"):
+            pass
+
+    assert len(tracer.get_spans(name="op_0")) == 5
+    assert len(tracer.get_spans(name="op_1")) == 5
+    assert len(tracer.get_spans(limit=3)) == 3
+
+    tracer.clear()
+    assert len(tracer.get_spans()) == 0
+
+
+def test_distributed_tracer_otlp_export() -> None:
+    tracer = DistributedTracer()
+    with tracer.span("server_req", kind=SpanKind.SERVER):
+        pass
+
+    export = tracer.to_otlp_export(
+        service_name="test-service",
+        service_version="1.0.0",
+    )
+    assert "resourceSpans" in export
+    assert len(export["resourceSpans"]) == 1
+    resource_attrs = export["resourceSpans"][0]["resource"]["attributes"]
+    svc_attr = next(a for a in resource_attrs if a["key"] == "service.name")
+    assert svc_attr["value"]["stringValue"] == "test-service"
+    scope_spans = export["resourceSpans"][0]["scopeSpans"]
+    assert len(scope_spans[0]["spans"]) == 1
+    assert scope_spans[0]["spans"][0]["name"] == "server_req"
