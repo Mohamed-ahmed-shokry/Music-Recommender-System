@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import re
@@ -573,6 +574,146 @@ def collect_service_metric_families(
         except Exception:
             pass
 
+    # 7. Alerting & Incident Telemetry
+    evaluator = getattr(service, "alert_evaluator", None)
+    tracker = getattr(service, "incident_tracker", None)
+    silencing_engine = getattr(service, "silencing_engine", None)
+    dispatcher = getattr(service, "multi_channel_dispatcher", None) or getattr(
+        service, "dispatcher", None
+    )
+    if any(x is not None for x in (evaluator, tracker, silencing_engine, dispatcher)):
+        alert_families = collect_alerting_metric_families(
+            evaluator=evaluator,
+            tracker=tracker,
+            silencing_engine=silencing_engine,
+            dispatcher=dispatcher,
+            custom_labels=custom_labels,
+        )
+        families.extend(alert_families)
+
+    return families
+
+
+def collect_alerting_metric_families(
+    evaluator: Any | None = None,
+    tracker: Any | None = None,
+    silencing_engine: Any | None = None,
+    dispatcher: Any | None = None,
+    custom_labels: dict[str, str] | None = None,
+) -> list[MetricFamily]:
+    """Collect Prometheus metrics for alerts, incidents, and circuit breakers."""
+    families: list[MetricFamily] = []
+
+    # 1. Alert Active Gauge
+    if evaluator is not None and hasattr(evaluator, "rules"):
+        active_fam = MetricFamily(
+            name="music_recommender_alert_active",
+            help_text="Active alert rule state (1=firing, 0=inactive/pending).",
+            metric_type=MetricType.GAUGE,
+        )
+        firing_names: set[str] = set()
+        if hasattr(evaluator, "firing"):
+            with contextlib.suppress(Exception):
+                firing_names = {item["name"] for item in evaluator.firing()}
+        for rule in getattr(evaluator, "rules", ()):
+            rule_name = getattr(rule, "name", str(rule))
+            severity_val = (
+                rule.severity.value
+                if hasattr(rule, "severity") and hasattr(rule.severity, "value")
+                else str(getattr(rule, "severity", "warning"))
+            )
+            labels: dict[str, Any] = {"rule": rule_name, "severity": severity_val}
+            if custom_labels:
+                labels.update(custom_labels)
+            active_fam.add_sample(
+                value=1 if rule_name in firing_names else 0,
+                labels=labels,
+            )
+        families.append(active_fam)
+
+    # 2. MTTD and MTTR Metrics
+    if tracker is not None and hasattr(tracker, "get_all_rule_stats"):
+        with contextlib.suppress(Exception):
+            rule_stats = tracker.get_all_rule_stats()
+            mttd_fam = MetricFamily(
+                name="music_recommender_alert_mttd_seconds",
+                help_text="Mean Time to Detect (MTTD) in seconds per alert rule.",
+                metric_type=MetricType.GAUGE,
+            )
+            mttr_fam = MetricFamily(
+                name="music_recommender_alert_mttr_seconds",
+                help_text="Mean Time to Resolve (MTTR) in seconds per alert rule.",
+                metric_type=MetricType.GAUGE,
+            )
+            for rule_name, stats in sorted(rule_stats.items()):
+                labels = {"rule": rule_name}
+                if custom_labels:
+                    labels.update(custom_labels)
+                mttd_fam.add_sample(value=round(stats.mttd_seconds, 2), labels=labels)
+                mttr_fam.add_sample(value=round(stats.mttr_seconds, 2), labels=labels)
+            families.append(mttd_fam)
+            families.append(mttr_fam)
+
+    # 3. Silences & Maintenance Active Gauges
+    if silencing_engine is not None:
+        with contextlib.suppress(Exception):
+            silences_fam = MetricFamily(
+                name="music_recommender_alert_silences_active",
+                help_text="Total number of currently active alert silence rules.",
+                metric_type=MetricType.GAUGE,
+            )
+            active_silences = (
+                len(silencing_engine.list_silences(active_only=True))
+                if hasattr(silencing_engine, "list_silences")
+                else 0
+            )
+            sil_labels = dict(custom_labels) if custom_labels else {}
+            silences_fam.add_sample(value=active_silences, labels=sil_labels)
+            families.append(silences_fam)
+
+            maint_fam = MetricFamily(
+                name="music_recommender_alert_maintenance_active",
+                help_text="Whether any maintenance window is active (1=yes, 0=no).",
+                metric_type=MetricType.GAUGE,
+            )
+            active_maint = (
+                len(silencing_engine.list_maintenance_windows(active_only=True))
+                if hasattr(silencing_engine, "list_maintenance_windows")
+                else 0
+            )
+            maint_labels = dict(custom_labels) if custom_labels else {}
+            maint_fam.add_sample(
+                value=1 if active_maint > 0 else 0, labels=maint_labels
+            )
+            families.append(maint_fam)
+
+    # 4. Outbound Channel Circuit Breaker State
+    if dispatcher is not None:
+        with contextlib.suppress(Exception):
+            cb_fam = MetricFamily(
+                name="music_recommender_alert_circuit_breaker_state",
+                help_text="Circuit breaker state (0=closed, 1=half_open, 2=open).",
+                metric_type=MetricType.GAUGE,
+            )
+            state_map = {"closed": 0, "half_open": 1, "open": 2}
+            channels = getattr(dispatcher, "_channels", {})
+            for ch in sorted(channels.keys()):
+                cb = (
+                    dispatcher.get_circuit_breaker(ch)
+                    if hasattr(dispatcher, "get_circuit_breaker")
+                    else None
+                )
+                state_str = (
+                    cb.state.value
+                    if cb and hasattr(cb, "state") and hasattr(cb.state, "value")
+                    else str(getattr(cb, "state", "closed"))
+                )
+                labels = {"channel": ch}
+                if custom_labels:
+                    labels.update(custom_labels)
+                cb_fam.add_sample(value=state_map.get(state_str, 0), labels=labels)
+            families.append(cb_fam)
+
     return families
 
 
@@ -1010,6 +1151,12 @@ KNOWN_PROMETHEUS_METRIC_NAMES: frozenset[str] = frozenset(
         "music_recommender_http_request_duration_seconds_bucket",
         "music_recommender_http_request_duration_seconds_sum",
         "music_recommender_http_request_duration_seconds_count",
+        "music_recommender_alert_active",
+        "music_recommender_alert_mttd_seconds",
+        "music_recommender_alert_mttr_seconds",
+        "music_recommender_alert_silences_active",
+        "music_recommender_alert_maintenance_active",
+        "music_recommender_alert_circuit_breaker_state",
     }
 )
 
