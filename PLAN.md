@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.41.0) — active development (branch `phase/175-analytics-and-prometheus-alerts`)
+## Current milestone (0.41.0) — completed & verified (branch `phase/175-analytics-and-prometheus-alerts`, PR #36)
 
 Alert Incident Analytics, MTTD/MTTR Telemetry, and Prometheus Alert Exporter.
 The 0.40.0 release introduced dynamic alert silencing, maintenance window schedules, and Slack/Teams webhook adapters.
@@ -16,9 +16,9 @@ active silence counts, maintenance window states, and circuit breaker health;
 FastAPI endpoints (`/alerts/analytics/*`), operator CLI commands (`alert-analytics`, `incident-history`), and Streamlit dashboard telemetry visualizations.
 
 - Phase 175 — Incident metrics aggregation, MTTD/MTTR telemetry calculation, and historical SLO compliance:
-  `IncidentLifecycleRecord`, `RuleIncidentStats`, `AlertIncidentTracker`, `AlertIncidentAnalytics` in `alerting.py` (in progress).
+  `IncidentLifecycleRecord`, `RuleIncidentStats`, `AlertIncidentTracker`, `AlertIncidentAnalytics` in `alerting.py` (completed). ✅
 - Phase 176 — Export of alerting telemetry and incident state to Prometheus gauge/histogram metrics:
-  Prometheus metric exposition, service integration, API endpoints, CLI commands, dashboard indicators, clean CI.
+  Prometheus metric exposition, service integration, API endpoints, CLI commands, dashboard indicators, clean CI (completed). ✅
 
 ## Next milestone (0.42.0) — planned
 
