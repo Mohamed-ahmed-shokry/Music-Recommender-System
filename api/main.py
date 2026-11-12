@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from api.middleware import RequestSafetyMiddleware
+from api.middleware import RequestSafetyMiddleware, TraceContextMiddleware
 from music_recommender import __version__
 from music_recommender.alerting import (
     AlertEvaluator,
@@ -272,7 +272,17 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Request-ID", "X-Process-Time"],
+    expose_headers=[
+        "X-Request-ID",
+        "X-Process-Time",
+        "traceparent",
+        "tracestate",
+        "X-Trace-ID",
+        "X-Span-ID",
+    ],
+)
+app.add_middleware(
+    TraceContextMiddleware,
 )
 app.add_middleware(
     RequestSafetyMiddleware,
@@ -1228,6 +1238,105 @@ async def alerts_correlate(
     graph = AlertCorrelationGraph()
     report = graph.correlate(alerts_list, window_seconds=window_seconds)
     return report.to_dict()
+
+
+class TraceCorrelationRequest(BaseModel):
+    """Payload for correlating an alert or incident with candidate traces."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    alert_name: str = Field(..., min_length=1, max_length=128)
+    timestamp: float | None = Field(default=None, ge=0.0)
+    window_seconds: float = Field(default=300.0, ge=1.0, le=86400.0)
+    incident_id: str | None = Field(default=None, max_length=64)
+
+
+@app.get("/traces")
+def get_traces(
+    trace_id: str | None = None,
+    name: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Search buffered execution spans."""
+    lim = max(1, min(limit, 1000))
+    if service is not None:
+        spans = service.search_spans(
+            trace_id=trace_id, name=name, status=status, limit=lim
+        )
+    else:
+        from music_recommender.tracing import get_global_tracer
+
+        spans = get_global_tracer().get_spans(
+            trace_id=trace_id, name=name, status=status, limit=lim
+        )
+    return {
+        "count": len(spans),
+        "spans": [s.to_dict() for s in spans],
+    }
+
+
+@app.get("/traces/export/otlp")
+def export_traces_otlp(
+    trace_id: str | None = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Export stored spans into canonical OpenTelemetry JSON format."""
+    lim = max(1, min(limit, 1000))
+    if service is not None:
+        return service.export_otlp_traces(trace_id=trace_id, limit=lim)
+    from music_recommender.tracing import get_global_tracer
+
+    return get_global_tracer().to_otlp_export(trace_id=trace_id, limit=lim)
+
+
+@app.get("/traces/{trace_id}")
+def get_trace_by_id(trace_id: str) -> dict[str, Any]:
+    """Retrieve all spans belonging to a trace, ordered chronologically."""
+    tid = trace_id.strip().lower()
+    if service is not None:
+        spans = service.get_trace(tid)
+    else:
+        from music_recommender.tracing import get_global_tracer
+
+        spans = get_global_tracer().get_trace(tid)
+
+    if not spans:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Trace '{trace_id}' not found.",
+        )
+    return {
+        "trace_id": tid,
+        "span_count": len(spans),
+        "spans": [s.to_dict() for s in spans],
+    }
+
+
+@app.post("/traces/correlate/alert")
+def correlate_alert_traces(req: TraceCorrelationRequest) -> dict[str, Any]:
+    """Correlate an alert or incident with candidate traces and error spans."""
+    if service is not None:
+        result = service.correlate_alert_traces(
+            alert_name=req.alert_name,
+            timestamp=req.timestamp,
+            window_seconds=req.window_seconds,
+            incident_id=req.incident_id,
+        )
+    else:
+        from music_recommender.tracing import (
+            AlertTraceCorrelator,
+            get_global_tracer,
+        )
+
+        correlator = AlertTraceCorrelator(get_global_tracer())
+        result = correlator.correlate(
+            alert_name=req.alert_name,
+            timestamp=req.timestamp,
+            window_seconds=req.window_seconds,
+            incident_id=req.incident_id,
+        )
+    return result.to_dict()
 
 
 @app.get("/maintenance/status")
