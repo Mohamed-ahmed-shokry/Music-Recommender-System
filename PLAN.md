@@ -10,12 +10,12 @@ The 0.41.0 release delivered alert incident analytics, MTTD/MTTR telemetry calcu
 This milestone equips the platform with end-to-end distributed tracing, OpenTelemetry interoperability, and automated alert-to-trace correlation:
 a Distributed Tracing Engine (`TraceContext`, `SpanRecord`, `DistributedTracer`, `SpanKind`, `SpanStatus`) supporting the W3C Trace Context standard (`traceparent`, `tracestate`), thread/async context management via `contextvars`, and bounded in-memory ring buffering with OTLP JSON export capability;
 an Alert-to-Trace Correlator (`AlertTraceCorrelator`) linking firing/resolved alert incidents directly with candidate traces exhibiting errors or high latency within the anomaly window;
-HTTP middleware integration (`TraceContextMiddleware` in `api/middleware.py`), `RecommenderService` internal pipeline instrumentation (`recommender.recommend`, `bandit.select_arm`, `alert.evaluate`), FastAPI endpoints (`/traces/*`), operator CLI tooling (`trace-inspect`, `list-traces`), and Streamlit dashboard timeline visualization.
+HTTP middleware integration (`TraceContextMiddleware` in `api/middleware.py`), `RecommenderService` internal pipeline instrumentation (`service.recommend_user`, `service.similar_artists`, `service.recommend_tracks`, `service.evaluate_alerts`), FastAPI endpoints (`/traces/*`), operator CLI tooling (`trace-inspect`, `list-traces`), and Streamlit dashboard timeline visualization.
 
 - Phase 177 — Distributed trace context propagation across recommendation pipelines and background evaluators:
-  `TraceContext`, `SpanRecord`, `DistributedTracer`, `TraceContextMiddleware` in `tracing.py` and `middleware.py` (in progress).
+  `TraceContext`, `SpanRecord`, `DistributedTracer`, `TraceContextMiddleware` in `tracing.py` and `middleware.py` (completed). ✅
 - Phase 178 — Alert-to-trace deep linking and OpenTelemetry span correlation:
-  `AlertTraceCorrelator`, service integration, API endpoints, CLI commands, dashboard timeline, clean CI.
+  `AlertTraceCorrelator`, service integration, API endpoints, CLI commands, dashboard timeline, clean CI (completed). ✅
 
 ## Next milestone (0.43.0) — planned
 
