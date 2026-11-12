@@ -2420,3 +2420,162 @@ def test_multichannel_dispatcher_chat_registration_and_stats() -> None:
     assert "silencing" in stats
     assert stats["silencing"]["total_silences"] == 1
     assert stats["silencing"]["total_maintenance_windows"] == 1
+
+
+def test_incident_lifecycle_record_lifecycle_and_serialization() -> None:
+    from music_recommender.alerting import IncidentLifecycleRecord
+
+    rec = IncidentLifecycleRecord(
+        incident_id="inc-1001",
+        rule_name="StreamingRecordsDropped",
+        severity="critical",
+        started_at=1000.0,
+        detection_latency_seconds=12.5,
+        remediations_triggered=1,
+        silenced=False,
+        root_causes=["StreamingQueueHighUtilization"],
+        labels={"tier": "streaming"},
+    )
+    assert rec.is_active is True
+    assert rec.get_duration(now=1050.0) == 50.0
+
+    # Resolve incident
+    rec.resolve(timestamp=1120.0)
+    assert rec.is_active is False
+    assert rec.duration_seconds == 120.0
+    assert rec.get_duration(now=2000.0) == 120.0
+
+    # Roundtrip serialization
+    payload = rec.to_dict()
+    assert payload["incident_id"] == "inc-1001"
+    assert payload["rule_name"] == "StreamingRecordsDropped"
+    assert payload["severity"] == "critical"
+    assert payload["duration_seconds"] == 120.0
+    assert payload["detection_latency_seconds"] == 12.5
+    assert payload["remediations_triggered"] == 1
+    assert payload["root_causes"] == ["StreamingQueueHighUtilization"]
+    assert payload["labels"] == {"tier": "streaming"}
+    assert payload["is_active"] is False
+
+    restored = IncidentLifecycleRecord.from_dict(payload)
+    assert restored.incident_id == "inc-1001"
+    assert restored.rule_name == "StreamingRecordsDropped"
+    assert restored.started_at == 1000.0
+    assert restored.resolved_at == 1120.0
+    assert restored.duration_seconds == 120.0
+    assert restored.detection_latency_seconds == 12.5
+    assert restored.is_active is False
+
+
+def test_rule_incident_stats_serialization() -> None:
+    from music_recommender.alerting import RuleIncidentStats
+
+    stats = RuleIncidentStats(
+        rule_name="DiskFull",
+        total_incidents=3,
+        active_incidents=1,
+        resolved_incidents=2,
+        mttd_seconds=15.2,
+        mttr_seconds=120.5,
+        mtbf_seconds=3600.0,
+        total_downtime_seconds=241.0,
+        longest_incident_seconds=150.0,
+        slo_target_pct=99.9,
+        slo_compliance_pct=99.72,
+    )
+    d = stats.to_dict()
+    assert d["rule_name"] == "DiskFull"
+    assert d["total_incidents"] == 3
+    assert d["mttd_seconds"] == 15.2
+    assert d["mttr_seconds"] == 120.5
+    assert d["slo_compliance_pct"] == 99.72
+
+    restored = RuleIncidentStats.from_dict(d)
+    assert restored.rule_name == "DiskFull"
+    assert restored.total_incidents == 3
+    assert restored.active_incidents == 1
+
+
+def test_alert_incident_analytics_calculations() -> None:
+    from music_recommender.alerting import (
+        AlertIncidentAnalytics,
+        IncidentLifecycleRecord,
+    )
+
+    # Empty case
+    empty_stats = AlertIncidentAnalytics.compute_rule_stats(
+        rule_name="NonExistentRule",
+        incidents=[],
+        window_seconds=1000.0,
+    )
+    assert empty_stats.total_incidents == 0
+    assert empty_stats.active_incidents == 0
+    assert empty_stats.slo_compliance_pct == 100.0
+    assert empty_stats.mtbf_seconds == 1000.0
+
+    # Populated incidents for StreamingRecordsDropped:
+    # Incident 1: started 100.0, resolved 160.0 (duration 60s, latency 10s)
+    # Incident 2: started 300.0, resolved 340.0 (duration 40s, latency 20s)
+    inc1 = IncidentLifecycleRecord(
+        incident_id="i1",
+        rule_name="StreamingRecordsDropped",
+        started_at=100.0,
+        resolved_at=160.0,
+        duration_seconds=60.0,
+        detection_latency_seconds=10.0,
+    )
+    inc2 = IncidentLifecycleRecord(
+        incident_id="i2",
+        rule_name="StreamingRecordsDropped",
+        started_at=300.0,
+        resolved_at=340.0,
+        duration_seconds=40.0,
+        detection_latency_seconds=20.0,
+    )
+
+    stats = AlertIncidentAnalytics.compute_rule_stats(
+        rule_name="StreamingRecordsDropped",
+        incidents=[inc1, inc2],
+        window_seconds=1000.0,
+    )
+    assert stats.total_incidents == 2
+    assert stats.resolved_incidents == 2
+    assert stats.active_incidents == 0
+    assert stats.mttd_seconds == 15.0  # (10 + 20) / 2
+    assert stats.mttr_seconds == 50.0  # (60 + 40) / 2
+    assert stats.total_downtime_seconds == 100.0
+    assert stats.longest_incident_seconds == 60.0
+    assert stats.mtbf_seconds == 450.0  # (1000 - 100) / 2
+    assert stats.slo_compliance_pct == 90.0  # ((1000 - 100) / 1000) * 100
+
+    # Add active incident for another rule: ServiceDown
+    # (started 800.0, active at now=900.0)
+    inc3 = IncidentLifecycleRecord(
+        incident_id="i3",
+        rule_name="ServiceDown",
+        started_at=800.0,
+        resolved_at=None,
+        detection_latency_seconds=5.0,
+    )
+
+    all_stats = AlertIncidentAnalytics.compute_all_stats(
+        incidents=[inc1, inc2, inc3],
+        window_seconds=1000.0,
+        now=900.0,
+    )
+    assert "StreamingRecordsDropped" in all_stats
+    assert "ServiceDown" in all_stats
+    assert all_stats["ServiceDown"].active_incidents == 1
+    assert all_stats["ServiceDown"].total_downtime_seconds == 100.0  # 900 - 800
+
+    summary = AlertIncidentAnalytics.compute_summary(
+        incidents=[inc1, inc2, inc3],
+        window_seconds=1000.0,
+        now=900.0,
+    )
+    assert summary["total_incidents"] == 3
+    assert summary["active_incidents"] == 1
+    assert summary["resolved_incidents"] == 2
+    assert "StreamingRecordsDropped" in summary["rules"]
+    assert "ServiceDown" in summary["rules"]
+
