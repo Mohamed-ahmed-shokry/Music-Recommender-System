@@ -642,3 +642,115 @@ def test_telemetry_push_adapter_mock_http() -> None:
         res_conn = adapter.push([fam], cfg)
         assert res_conn.success is False
         assert "Connection refused" in (res_conn.error or "")
+
+
+def test_collect_alerting_metric_families() -> None:
+    from music_recommender.alerting import (
+        AlertIncidentTracker,
+        AlertRule,
+        AlertSeverity,
+        AlertSilenceRule,
+        AlertSilencingEngine,
+        AlertTransition,
+        MaintenanceWindow,
+        MultiChannelDispatcher,
+    )
+    from music_recommender.telemetry import (
+        KNOWN_PROMETHEUS_METRIC_NAMES,
+        collect_alerting_metric_families,
+    )
+
+    # 1. Verify KNOWN_PROMETHEUS_METRIC_NAMES
+    expected_new = {
+        "music_recommender_alert_active",
+        "music_recommender_alert_mttd_seconds",
+        "music_recommender_alert_mttr_seconds",
+        "music_recommender_alert_silences_active",
+        "music_recommender_alert_maintenance_active",
+        "music_recommender_alert_circuit_breaker_state",
+    }
+    for m in expected_new:
+        assert m in KNOWN_PROMETHEUS_METRIC_NAMES
+
+    # 2. Mock evaluator
+    mock_evaluator = MagicMock()
+    rule_firing = AlertRule(
+        name="DiskFull",
+        metric="m1",
+        comparator=">",
+        threshold=90.0,
+        severity=AlertSeverity.CRITICAL,
+        summary="Disk full",
+    )
+    rule_clean = AlertRule(
+        name="CpuHigh",
+        metric="m2",
+        comparator=">",
+        threshold=80.0,
+        severity=AlertSeverity.WARNING,
+        summary="CPU high",
+    )
+    mock_evaluator.rules = [rule_firing, rule_clean]
+    mock_evaluator.firing.return_value = [{"name": "DiskFull"}]
+
+    # 3. Tracker
+    tracker = AlertIncidentTracker()
+    t_fire = AlertTransition(
+        rule=rule_firing, event="firing", value=95.0, timestamp="T1"
+    )
+    t_res = AlertTransition(
+        rule=rule_firing, event="resolved", value=40.0, timestamp="T2"
+    )
+    tracker.record_transition(t_fire, now=100.0)
+    tracker.record_transition(t_res, now=160.0)
+
+    # 4. Silencing Engine
+    silencing = AlertSilencingEngine()
+    silencing.add_silence(
+        AlertSilenceRule(silence_id="s1", starts_at=50.0, ends_at=500.0)
+    )
+    silencing.add_maintenance_window(
+        MaintenanceWindow(window_id="mw1", starts_at=50.0, ends_at=500.0)
+    )
+
+    # 5. Dispatcher
+    dispatcher = MultiChannelDispatcher()
+    dispatcher.register_channel("slack", lambda t: (True, 200, "ok"))
+
+    families = collect_alerting_metric_families(
+        evaluator=mock_evaluator,
+        tracker=tracker,
+        silencing_engine=silencing,
+        dispatcher=dispatcher,
+        now=100.0,
+    )
+    fam_dict = {f.name: f for f in families}
+
+    assert "music_recommender_alert_active" in fam_dict
+    active_samples = {
+        s.labels["rule"]: s.value
+        for s in fam_dict["music_recommender_alert_active"].samples
+    }
+    assert active_samples["DiskFull"] == 1
+    assert active_samples["CpuHigh"] == 0
+
+    assert "music_recommender_alert_mttd_seconds" in fam_dict
+    assert "music_recommender_alert_mttr_seconds" in fam_dict
+    mttr_samples = {
+        s.labels["rule"]: s.value
+        for s in fam_dict["music_recommender_alert_mttr_seconds"].samples
+    }
+    assert mttr_samples["DiskFull"] == 60.0
+
+    assert "music_recommender_alert_silences_active" in fam_dict
+    assert fam_dict["music_recommender_alert_silences_active"].samples[0].value == 1
+
+    assert "music_recommender_alert_maintenance_active" in fam_dict
+    assert fam_dict["music_recommender_alert_maintenance_active"].samples[0].value == 1
+
+    assert "music_recommender_alert_circuit_breaker_state" in fam_dict
+    cb_samples = {
+        s.labels["channel"]: s.value
+        for s in fam_dict["music_recommender_alert_circuit_breaker_state"].samples
+    }
+    assert cb_samples["slack"] == 0  # closed

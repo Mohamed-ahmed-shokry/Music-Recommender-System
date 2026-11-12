@@ -600,6 +600,7 @@ def collect_alerting_metric_families(
     silencing_engine: Any | None = None,
     dispatcher: Any | None = None,
     custom_labels: dict[str, str] | None = None,
+    now: float | None = None,
 ) -> list[MetricFamily]:
     """Collect Prometheus metrics for alerts, incidents, and circuit breakers."""
     families: list[MetricFamily] = []
@@ -634,7 +635,7 @@ def collect_alerting_metric_families(
     # 2. MTTD and MTTR Metrics
     if tracker is not None and hasattr(tracker, "get_all_rule_stats"):
         with contextlib.suppress(Exception):
-            rule_stats = tracker.get_all_rule_stats()
+            rule_stats = tracker.get_all_rule_stats(now=now)
             mttd_fam = MetricFamily(
                 name="music_recommender_alert_mttd_seconds",
                 help_text="Mean Time to Detect (MTTD) in seconds per alert rule.",
@@ -663,7 +664,7 @@ def collect_alerting_metric_families(
                 metric_type=MetricType.GAUGE,
             )
             active_silences = (
-                len(silencing_engine.list_silences(active_only=True))
+                len(silencing_engine.list_silences(active_only=True, now=now))
                 if hasattr(silencing_engine, "list_silences")
                 else 0
             )
@@ -677,7 +678,11 @@ def collect_alerting_metric_families(
                 metric_type=MetricType.GAUGE,
             )
             active_maint = (
-                len(silencing_engine.list_maintenance_windows(active_only=True))
+                len(
+                    silencing_engine.list_maintenance_windows(
+                        active_only=True, now=now
+                    )
+                )
                 if hasattr(silencing_engine, "list_maintenance_windows")
                 else 0
             )
