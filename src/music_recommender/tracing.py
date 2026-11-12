@@ -563,3 +563,157 @@ class DistributedTracer:
                 }
             ]
         }
+
+
+@dataclass
+class TraceCorrelationResult:
+    """Correlation findings linking an alert or incident to distributed traces."""
+
+    incident_id: str | None
+    alert_name: str
+    time_window_start: str
+    time_window_end: str
+    matched_traces_count: int
+    matched_spans_count: int
+    error_spans_count: int
+    candidate_root_cause_spans: list[dict[str, Any]]
+    sample_trace_ids: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize correlation result to dictionary."""
+        return {
+            "incident_id": self.incident_id,
+            "alert_name": self.alert_name,
+            "time_window_start": self.time_window_start,
+            "time_window_end": self.time_window_end,
+            "matched_traces_count": self.matched_traces_count,
+            "matched_spans_count": self.matched_spans_count,
+            "error_spans_count": self.error_spans_count,
+            "candidate_root_cause_spans": self.candidate_root_cause_spans,
+            "sample_trace_ids": self.sample_trace_ids,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TraceCorrelationResult:
+        """Reconstruct correlation result from dictionary."""
+        return cls(
+            incident_id=(
+                str(data["incident_id"])
+                if data.get("incident_id") is not None
+                else None
+            ),
+            alert_name=str(data.get("alert_name", "")),
+            time_window_start=str(data.get("time_window_start", "")),
+            time_window_end=str(data.get("time_window_end", "")),
+            matched_traces_count=int(data.get("matched_traces_count", 0)),
+            matched_spans_count=int(data.get("matched_spans_count", 0)),
+            error_spans_count=int(data.get("error_spans_count", 0)),
+            candidate_root_cause_spans=list(data.get("candidate_root_cause_spans", [])),
+            sample_trace_ids=list(data.get("sample_trace_ids", [])),
+        )
+
+
+class AlertTraceCorrelator:
+    """Correlate alerts and incidents with candidate traces and error spans."""
+
+    def __init__(self, tracer: DistributedTracer) -> None:
+        self.tracer = tracer
+
+    def correlate(
+        self,
+        alert_name: str,
+        timestamp: float | str | datetime | None = None,
+        window_seconds: float = 300.0,
+        incident_id: str | None = None,
+        labels: dict[str, Any] | None = None,
+    ) -> TraceCorrelationResult:
+        """Find candidate traces and error root causes within anomaly time window."""
+        window_secs = max(1.0, float(window_seconds))
+
+        if timestamp is None:
+            ref_ts = time.time()
+        elif isinstance(timestamp, (int, float)):
+            ref_ts = float(timestamp)
+        elif isinstance(timestamp, datetime):
+            ref_ts = timestamp.timestamp()
+        else:
+            try:
+                ref_ts = datetime.fromisoformat(str(timestamp)).timestamp()
+            except Exception:
+                try:
+                    ref_ts = float(timestamp)
+                except Exception:
+                    ref_ts = time.time()
+
+        start_ts = ref_ts - window_secs
+        end_ts = ref_ts + (window_secs / 2.0)
+
+        dt_start = datetime.fromtimestamp(start_ts, tz=UTC)
+        dt_end = datetime.fromtimestamp(end_ts, tz=UTC)
+
+        all_spans = self.tracer.get_spans(limit=self.tracer.max_spans)
+
+        matched_spans: list[SpanRecord] = []
+        for s in all_spans:
+            try:
+                s_ts = datetime.fromisoformat(s.start_time).timestamp()
+            except Exception:
+                continue
+            if start_ts <= s_ts <= end_ts:
+                matched_spans.append(s)
+
+        matched_trace_ids = sorted({s.trace_id for s in matched_spans})
+        error_spans = [s for s in matched_spans if s.status == SpanStatus.ERROR]
+
+        candidates = sorted(
+            matched_spans,
+            key=lambda s: (s.status == SpanStatus.ERROR, s.duration_seconds),
+            reverse=True,
+        )
+
+        candidate_dicts = [s.to_dict() for s in candidates[:10]]
+
+        return TraceCorrelationResult(
+            incident_id=incident_id,
+            alert_name=alert_name,
+            time_window_start=dt_start.isoformat(),
+            time_window_end=dt_end.isoformat(),
+            matched_traces_count=len(matched_trace_ids),
+            matched_spans_count=len(matched_spans),
+            error_spans_count=len(error_spans),
+            candidate_root_cause_spans=candidate_dicts,
+            sample_trace_ids=matched_trace_ids[:10],
+        )
+
+    def correlate_incident(
+        self,
+        incident: Any,
+        window_seconds: float = 300.0,
+    ) -> TraceCorrelationResult:
+        """Correlate an IncidentLifecycleRecord or dictionary with traces."""
+        if hasattr(incident, "rule_name"):
+            alert_name = str(incident.rule_name)
+            incident_id: str | None = str(incident.incident_id)
+            started_at = float(incident.started_at)
+            labels = getattr(incident, "labels", {})
+        elif isinstance(incident, dict):
+            alert_name = str(
+                incident.get("rule_name") or incident.get("alert_name", "unknown_alert")
+            )
+            raw_id = incident.get("incident_id")
+            incident_id = str(raw_id) if raw_id is not None else None
+            started_at = float(incident.get("started_at", time.time()))
+            labels = incident.get("labels", {})
+        else:
+            alert_name = "unknown_alert"
+            incident_id = None
+            started_at = time.time()
+            labels = {}
+
+        return self.correlate(
+            alert_name=alert_name,
+            timestamp=started_at,
+            window_seconds=window_seconds,
+            incident_id=incident_id,
+            labels=labels,
+        )
