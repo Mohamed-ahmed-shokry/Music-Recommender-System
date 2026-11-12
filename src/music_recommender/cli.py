@@ -5816,5 +5816,160 @@ def incident_history_cmd(
             typer.echo(f"  Root Causes: {', '.join(inc.get('root_causes', []))}")
 
 
+def _get_tracer_or_service() -> tuple[Any | None, Any]:
+    from music_recommender.tracing import get_global_tracer
+
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable: %s", exc)
+
+    if service is not None:
+        return service, service.tracer
+    return None, get_global_tracer()
+
+
+@app.command("list-traces")
+def list_traces_command(
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            "-n",
+            help="Maximum number of spans to display.",
+            min=1,
+            max=1000,
+        ),
+    ] = 20,
+    name: Annotated[
+        str | None,
+        typer.Option("--name", help="Filter spans by operation name."),
+    ] = None,
+    status: Annotated[
+        str | None,
+        typer.Option(
+            "--status", "-s", help="Filter by span status (unset, ok, error)."
+        ),
+    ] = None,
+    trace_id: Annotated[
+        str | None,
+        typer.Option("--trace-id", "-t", help="Filter by 32-hex character trace ID."),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output spans as JSON array."),
+    ] = False,
+) -> None:
+    """Display buffered execution spans and distributed trace identifiers."""
+    _, tracer = _get_tracer_or_service()
+    spans = tracer.get_spans(
+        trace_id=trace_id,
+        name=name,
+        status=status,
+        limit=limit,
+    )
+
+    if json_output:
+        typer.echo(json.dumps([s.to_dict() for s in spans], indent=2))
+        return
+
+    if not spans:
+        typer.echo("No spans recorded in buffer.")
+        return
+
+    typer.secho(f"=== Distributed Trace Spans ({len(spans)} matching) ===", bold=True)
+    for s in spans:
+        if s.status.value == "error":
+            st_color = typer.colors.RED
+        elif s.status.value == "ok":
+            st_color = typer.colors.GREEN
+        else:
+            st_color = typer.colors.YELLOW
+
+        dur_ms = s.duration_seconds * 1000.0
+        typer.secho(
+            f"[{s.status.value.upper()}] {s.name} ({dur_ms:.2f}ms)",
+            fg=st_color,
+            bold=True,
+        )
+        typer.echo(f"  Trace:  {s.trace_id}")
+        parent_info = f" (Parent: {s.parent_span_id})" if s.parent_span_id else ""
+        typer.echo(f"  Span:   {s.span_id}{parent_info}")
+        typer.echo(f"  Start:  {s.start_time} | Kind: {s.kind.value}")
+        if s.status_message:
+            typer.secho(f"  Status: {s.status_message}", fg=typer.colors.RED)
+        if s.attributes:
+            attrs_preview = ", ".join(
+                f"{k}={v}" for k, v in list(s.attributes.items())[:5]
+            )
+            typer.echo(f"  Attrs:  {attrs_preview}")
+
+
+@app.command("trace-inspect")
+def trace_inspect_command(
+    trace_id: Annotated[
+        str,
+        typer.Argument(help="32-hex character trace identifier to inspect."),
+    ],
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output trace timeline as JSON array."),
+    ] = False,
+    otlp: Annotated[
+        bool,
+        typer.Option(
+            "--otlp",
+            help="Export trace spans in canonical OpenTelemetry JSON format.",
+        ),
+    ] = False,
+) -> None:
+    """Inspect all spans in a distributed trace timeline breakdown."""
+    _, tracer = _get_tracer_or_service()
+    spans = tracer.get_trace(trace_id.strip())
+
+    if not spans:
+        typer.secho(f"Trace '{trace_id}' not found.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    if otlp:
+        export_payload = tracer.to_otlp_export(trace_id=trace_id.strip())
+        typer.echo(json.dumps(export_payload, indent=2))
+        return
+
+    if json_output:
+        typer.echo(json.dumps([s.to_dict() for s in spans], indent=2))
+        return
+
+    typer.secho(
+        f"=== Distributed Trace Timeline: {trace_id} ({len(spans)} spans) ===",
+        bold=True,
+    )
+    for i, s in enumerate(spans, 1):
+        if s.status.value == "error":
+            st_color = typer.colors.RED
+        elif s.status.value == "ok":
+            st_color = typer.colors.GREEN
+        else:
+            st_color = typer.colors.YELLOW
+
+        indent = "  " if s.parent_span_id else ""
+        dur_ms = s.duration_seconds * 1000.0
+        typer.secho(
+            f"{indent}{i}. [{s.status.value.upper()}] {s.name} ({dur_ms:.2f}ms)",
+            fg=st_color,
+            bold=True,
+        )
+        typer.echo(f"{indent}   Span ID: {s.span_id} (Kind: {s.kind.value})")
+        if s.attributes:
+            attrs_str = ", ".join(f"{k}={v}" for k, v in s.attributes.items())
+            typer.echo(f"{indent}   Attributes: {attrs_str}")
+        if s.events:
+            for ev in s.events:
+                typer.echo(
+                    f"{indent}   Event: {ev.name} @ {ev.timestamp} {ev.attributes}"
+                )
+
+
 if __name__ == "__main__":
     app()  # pragma: no cover - CLI entry point invoked by `python -m`
