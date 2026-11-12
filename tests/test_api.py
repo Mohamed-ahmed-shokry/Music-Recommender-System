@@ -3326,3 +3326,56 @@ def test_trace_context_middleware_lifecycle() -> None:
     assert len(spans_3) == 1
     assert spans_3[0].status == SpanStatus.ERROR
     assert "HTTP 500" in (spans_3[0].status_message or "")
+
+
+def test_traces_api_endpoints() -> None:
+    client = TestClient(api_main.app)
+
+    # 1. Trigger request that generates a trace
+    res_root = client.get("/")
+    assert res_root.status_code == 200
+    assert "x-trace-id" in res_root.headers
+    trace_id = res_root.headers["x-trace-id"]
+    assert len(trace_id) == 32
+
+    # 2. Search traces
+    res_list = client.get("/traces")
+    assert res_list.status_code == 200
+    data_list = res_list.json()
+    assert data_list["count"] >= 1
+    assert any(s["trace_id"] == trace_id for s in data_list["spans"])
+
+    # 3. Retrieve specific trace
+    res_detail = client.get(f"/traces/{trace_id}")
+    assert res_detail.status_code == 200
+    data_detail = res_detail.json()
+    assert data_detail["trace_id"] == trace_id
+    assert data_detail["span_count"] >= 1
+
+    # 4. Non-existent trace returns 404
+    res_404 = client.get("/traces/00000000000000000000000000000000")
+    assert res_404.status_code == 404
+
+    # 5. OTLP traces export
+    res_otlp = client.get(f"/traces/export/otlp?trace_id={trace_id}")
+    assert res_otlp.status_code == 200
+    otlp_data = res_otlp.json()
+    assert "resourceSpans" in otlp_data
+    assert len(otlp_data["resourceSpans"]) >= 1
+
+    # 6. Correlate alert with traces
+    res_corr = client.post(
+        "/traces/correlate/alert",
+        json={"alert_name": "HealthCheckAnomaly", "window_seconds": 180.0},
+    )
+    assert res_corr.status_code == 200
+    corr_data = res_corr.json()
+    assert corr_data["alert_name"] == "HealthCheckAnomaly"
+    assert corr_data["matched_spans_count"] >= 1
+
+    # 7. Invalid correlation payload fails validation
+    res_bad = client.post(
+        "/traces/correlate/alert",
+        json={"alert_name": "", "window_seconds": -5.0},
+    )
+    assert res_bad.status_code == 422
