@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import re
 import secrets
+import threading
 import time
+from collections import deque
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -402,4 +407,159 @@ class SpanRecord:
                 "code": self.status.to_otlp_code(),
                 "message": self.status_message or "",
             },
+        }
+
+
+_CURRENT_SPAN: ContextVar[SpanRecord | None] = ContextVar("_CURRENT_SPAN", default=None)
+_CURRENT_CONTEXT: ContextVar[TraceContext | None] = ContextVar(
+    "_CURRENT_CONTEXT", default=None
+)
+
+
+class DistributedTracer:
+    """In-memory thread-safe distributed tracer with W3C and OpenTelemetry support."""
+
+    def __init__(self, max_spans: int = 5000) -> None:
+        self.max_spans = max(10, max_spans)
+        self._lock = threading.Lock()
+        self._spans: deque[SpanRecord] = deque(maxlen=self.max_spans)
+
+    @property
+    def active_span(self) -> SpanRecord | None:
+        """Return the active span for the current async task or thread."""
+        return _CURRENT_SPAN.get()
+
+    @property
+    def active_context(self) -> TraceContext | None:
+        """Return the active trace context for the current async task or thread."""
+        return _CURRENT_CONTEXT.get()
+
+    def record_span(self, span: SpanRecord) -> None:
+        """Record a completed or in-flight span in the ring buffer."""
+        with self._lock:
+            self._spans.append(span)
+
+    @contextmanager
+    def span(
+        self,
+        name: str,
+        attributes: dict[str, Any] | None = None,
+        kind: SpanKind = SpanKind.INTERNAL,
+        context: TraceContext | None = None,
+    ) -> Iterator[SpanRecord]:
+        """Context manager creating and activating a traced span."""
+        parent_span = _CURRENT_SPAN.get()
+        active_ctx = context or _CURRENT_CONTEXT.get()
+
+        if active_ctx is not None:
+            span_ctx = active_ctx.new_child()
+        else:
+            span_ctx = TraceContext.new_root()
+
+        parent_span_id = (
+            parent_span.span_id
+            if parent_span is not None
+            else (active_ctx.span_id if active_ctx is not None else None)
+        )
+
+        record = SpanRecord(
+            span_id=span_ctx.span_id,
+            trace_id=span_ctx.trace_id,
+            parent_span_id=parent_span_id,
+            name=name,
+            kind=kind,
+            attributes=dict(attributes or {}),
+        )
+
+        token_span = _CURRENT_SPAN.set(record)
+        token_ctx = _CURRENT_CONTEXT.set(span_ctx)
+
+        try:
+            yield record
+        except BaseException as exc:
+            record.record_exception(exc)
+            raise
+        finally:
+            if record.end_time is None:
+                record.finish(
+                    status=SpanStatus.OK
+                    if record.status == SpanStatus.UNSET
+                    else record.status
+                )
+            self.record_span(record)
+            _CURRENT_SPAN.reset(token_span)
+            _CURRENT_CONTEXT.reset(token_ctx)
+
+    def get_spans(
+        self,
+        trace_id: str | None = None,
+        name: str | None = None,
+        status: SpanStatus | str | None = None,
+        limit: int = 100,
+    ) -> list[SpanRecord]:
+        """Query recorded spans with filtering criteria."""
+        status_val: str | None = None
+        if status is not None:
+            status_val = status.value if isinstance(status, SpanStatus) else str(status)
+
+        with self._lock:
+            spans = list(self._spans)
+
+        results: list[SpanRecord] = []
+        for s in reversed(spans):
+            if trace_id and s.trace_id.lower() != trace_id.lower():
+                continue
+            if name and s.name != name:
+                continue
+            if status_val and s.status.value != status_val:
+                continue
+            results.append(s)
+            if len(results) >= limit:
+                break
+        return results
+
+    def get_trace(self, trace_id: str) -> list[SpanRecord]:
+        """Retrieve all spans belonging to a trace, ordered chronologically."""
+        target = trace_id.strip().lower()
+        with self._lock:
+            spans = [s for s in self._spans if s.trace_id.lower() == target]
+        return sorted(spans, key=lambda s: s.start_time)
+
+    def clear(self) -> None:
+        """Clear all stored spans."""
+        with self._lock:
+            self._spans.clear()
+
+    def to_otlp_export(
+        self,
+        trace_id: str | None = None,
+        limit: int = 100,
+        service_name: str = "music-recommender",
+        service_version: str = "0.42.0",
+    ) -> dict[str, Any]:
+        """Export stored spans into OpenTelemetry standard JSON payload."""
+        spans = self.get_trace(trace_id) if trace_id else self.get_spans(limit=limit)
+        return {
+            "resourceSpans": [
+                {
+                    "resource": {
+                        "attributes": [
+                            {
+                                "key": "service.name",
+                                "value": {"stringValue": service_name},
+                            },
+                            {
+                                "key": "service.version",
+                                "value": {"stringValue": service_version},
+                            },
+                        ]
+                    },
+                    "scopeSpans": [
+                        {
+                            "scope": {"name": "music-recommender-tracer"},
+                            "spans": [span.to_otlp_dict() for span in spans],
+                        }
+                    ],
+                }
+            ]
         }
