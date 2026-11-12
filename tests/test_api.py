@@ -3263,3 +3263,66 @@ def test_alerts_analytics_routes() -> None:
 
         res_fb_slo = client.get("/alerts/analytics/slo")
         assert res_fb_slo.status_code == 200
+
+
+def test_trace_context_middleware_lifecycle() -> None:
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    from api.middleware import TraceContextMiddleware
+    from music_recommender.tracing import DistributedTracer, SpanStatus
+
+    tracer = DistributedTracer()
+
+    async def hello(request):
+        return JSONResponse({"message": "hello"})
+
+    async def fail(request):
+        return JSONResponse({"error": "server exploded"}, status_code=500)
+
+    app = Starlette(
+        routes=[
+            Route("/hello", hello),
+            Route("/fail", fail),
+        ]
+    )
+    app.add_middleware(TraceContextMiddleware, tracer=tracer)
+    client = TestClient(app)
+
+    # 1. Request without headers creates root trace
+    res1 = client.get("/hello")
+    assert res1.status_code == 200
+    assert "traceparent" in res1.headers
+    assert "x-trace-id" in res1.headers
+    assert "x-span-id" in res1.headers
+    trace_id_1 = res1.headers["x-trace-id"]
+    spans_1 = tracer.get_trace(trace_id_1)
+    assert len(spans_1) == 1
+    assert spans_1[0].name == "GET /hello"
+    assert spans_1[0].status == SpanStatus.OK
+
+    # 2. Request with W3C traceparent header propagates context
+    parent_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+    parent_span_id = "00f067aa0ba902b7"
+    header_val = f"00-{parent_trace_id}-{parent_span_id}-01"
+
+    res2 = client.get(
+        "/hello",
+        headers={"traceparent": header_val, "tracestate": "congo=test"},
+    )
+    assert res2.status_code == 200
+    assert res2.headers["x-trace-id"] == parent_trace_id
+    assert res2.headers["tracestate"] == "congo=test"
+    spans_2 = tracer.get_trace(parent_trace_id)
+    assert len(spans_2) == 1
+    assert spans_2[0].parent_span_id == parent_span_id
+
+    # 3. Request resulting in 500 records error status on span
+    res3 = client.get("/fail")
+    assert res3.status_code == 500
+    trace_id_3 = res3.headers["x-trace-id"]
+    spans_3 = tracer.get_trace(trace_id_3)
+    assert len(spans_3) == 1
+    assert spans_3[0].status == SpanStatus.ERROR
+    assert "HTTP 500" in (spans_3[0].status_message or "")
