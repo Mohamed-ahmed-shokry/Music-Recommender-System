@@ -12,8 +12,8 @@
 - [x] Task 9: Add unit tests for `AlertTraceCorrelator` in `tests/test_tracing.py`.
 - [x] Task 10: Implement `TraceContextMiddleware` in `api/middleware.py`.
 - [x] Task 11: Add unit tests for `TraceContextMiddleware` in `tests/test_api.py`.
-- [ ] Task 12: Instrument `RecommenderService` with distributed tracer and span queries in `src/music_recommender/service.py`.
-- [ ] Task 13: Add service integration tests for tracing in `tests/test_service.py`.
+- [x] Task 12: Instrument `RecommenderService` with distributed tracer and span queries in `src/music_recommender/service.py`.
+- [x] Task 13: Add service integration tests for tracing in `tests/test_service.py`.
 - [ ] Task 14: Implement `/traces/*` endpoints in `api/main.py`.
 - [ ] Task 15: Add API integration tests for `/traces/*` in `tests/test_api.py`.
 - [ ] Task 16: Implement CLI commands `trace-inspect` and `list-traces` in `src/music_recommender/cli.py`.
@@ -30,7 +30,7 @@
 | AC-2: DistributedTracer manages thread/task context, records spans, converts to OTLP JSON | `Passed` | `tests/test_tracing.py` (15 tests passing) |
 | AC-3: AlertTraceCorrelator correlates alert incidents with candidate traces | `Passed` | `tests/test_tracing.py` (17 tests passing) |
 | AC-4: TraceContextMiddleware propagates trace context in HTTP headers | `Passed` | `tests/test_api.py::test_trace_context_middleware_lifecycle` |
-| AC-5: RecommenderService instruments internal pipeline operations and exposes queries | `Pending` | `tests/test_service.py` |
+| AC-5: RecommenderService instruments internal pipeline operations and exposes queries | `Passed` | `tests/test_service.py::test_service_distributed_tracing_integration` |
 | AC-6: FastAPI endpoints /traces/* return validated schemas | `Pending` | `tests/test_api.py` |
 | AC-7: Operator CLI commands trace-inspect and list-traces operate cleanly | `Pending` | `tests/test_cli.py` |
 | AC-8: Streamlit dashboard renders live trace inspection and timeline breakdowns | `Pending` | `tests/test_dashboard.py` |
