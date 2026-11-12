@@ -4294,3 +4294,73 @@ def test_maintenance_window_cli() -> None:
     if p.exists():
         with suppress(OSError):
             p.unlink()
+
+
+def test_alert_analytics_and_incident_history_cli(tmp_path: Path) -> None:
+    from music_recommender.alerting import (
+        AlertIncidentTracker,
+        AlertRule,
+        AlertSeverity,
+        AlertTransition,
+    )
+
+    runner = CliRunner()
+    incident_file = Path("data/alerts/incidents.json")
+    incident_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # 1. Populate incident data in default tracker storage
+    tracker = AlertIncidentTracker(storage_dir=Path("data/alerts"))
+    tracker.clear()
+    rule = AlertRule(
+        name="LatencySpike",
+        metric="http_latency",
+        comparator=">",
+        threshold=0.5,
+        severity=AlertSeverity.CRITICAL,
+        summary="High Latency",
+    )
+    t_fire = AlertTransition(rule, "firing", 1.2, "2026-11-12T10:00:00Z")
+    t_res = AlertTransition(rule, "resolved", 0.3, "2026-11-12T10:01:00Z")
+    tracker.record_transition(t_fire, now=100.0)
+    tracker.record_transition(t_res, now=160.0)
+
+    # 2. Test alert-analytics --json
+    res_analytics_json = runner.invoke(
+        cli.app, ["alert-analytics", "--window", "3600", "--json"]
+    )
+    assert res_analytics_json.exit_code == 0
+    data = json.loads(res_analytics_json.output)
+    assert data["total_incidents"] == 1
+    assert data["resolved_incidents"] == 1
+    assert "LatencySpike" in data["rules"]
+
+    # 3. Test alert-analytics human-readable
+    res_analytics_human = runner.invoke(
+        cli.app, ["alert-analytics", "--slo-target", "99.0"]
+    )
+    assert res_analytics_human.exit_code == 0
+    assert "Alert Incident Analytics" in res_analytics_human.output
+    assert "LatencySpike" in res_analytics_human.output
+
+    # 4. Test incident-history --json
+    res_history_json = runner.invoke(
+        cli.app, ["incident-history", "--limit", "10", "--json"]
+    )
+    assert res_history_json.exit_code == 0
+    incidents = json.loads(res_history_json.output)
+    assert len(incidents) == 1
+    assert incidents[0]["rule_name"] == "LatencySpike"
+
+    # 5. Test incident-history human-readable
+    res_history_human = runner.invoke(cli.app, ["incident-history"])
+    assert res_history_human.exit_code == 0
+    assert "Alert Incident Lifecycle History" in res_history_human.output
+    assert "LatencySpike" in res_history_human.output
+
+    # 6. Test incident-history --active-only
+    res_active = runner.invoke(cli.app, ["incident-history", "--active-only"])
+    assert res_active.exit_code == 0
+
+    # Cleanup
+    tracker.clear()
+
