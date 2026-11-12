@@ -18,6 +18,7 @@ from music_recommender.alerting import (
     AlertEscalationEngine,
     AlertEvaluator,
     AlertHistoryBuffer,
+    AlertIncidentTracker,
     AlertNotificationThrottler,
     AlertSilenceRule,
     AlertSilencingEngine,
@@ -32,6 +33,7 @@ from music_recommender.alerting import (
     MultiChannelDispatcher,
     RemediationActionType,
     RemediationRule,
+    SilenceDecision,
     WebhookDispatcher,
 )
 from music_recommender.artifacts import RecommenderArtifact, load_artifact
@@ -183,6 +185,7 @@ class RecommenderService:
         circuit_breaker_config: CircuitBreakerConfig | None = None,
         alert_remediation_runner: IncidentRemediationRunner | None = None,
         alert_silencing_engine: AlertSilencingEngine | None = None,
+        incident_tracker: AlertIncidentTracker | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -521,6 +524,17 @@ class RecommenderService:
             alert_remediation_runner or IncidentRemediationRunner()
         )
         self._register_default_remediation_handlers()
+
+        if incident_tracker is not None:
+            self.incident_tracker = incident_tracker
+        elif alert_storage_dir is not None:
+            self.incident_tracker = AlertIncidentTracker(
+                storage_dir=Path(alert_storage_dir)
+            )
+        else:
+            self.incident_tracker = AlertIncidentTracker(
+                storage_dir=Path("data/alerts")
+            )
 
     def _register_default_remediation_handlers(self) -> None:
         """Register built-in self-healing remediation handlers and fallback rules."""
@@ -1029,6 +1043,30 @@ class RecommenderService:
                 for r in action_results:
                     remediations.append(r.to_dict())
 
+        # Correlate and track incident lifecycle
+        for t in transitions:
+            severity_str = (
+                t.rule.severity.value
+                if hasattr(t.rule.severity, "value")
+                else str(t.rule.severity)
+            )
+            decision, _ = self.alert_silencing_engine.evaluate(
+                rule_name=t.rule.name,
+                severity=severity_str,
+                labels=t.rule.labels,
+                now=now,
+            )
+            is_silenced = decision is not SilenceDecision.ACTIVE
+            t_rem_count = sum(
+                1 for r in remediations if r.get("rule_name") == t.rule.name
+            )
+            self.incident_tracker.record_transition(
+                t,
+                now=now,
+                remediations=t_rem_count,
+                silenced=is_silenced,
+            )
+
         alerts = self.alert_evaluator.states()
         return {
             "alerts": alerts,
@@ -1256,6 +1294,62 @@ class RecommenderService:
             active_only=active_only, now=now
         )
         return [w.to_dict() for w in windows]
+
+    @property
+    def silencing_engine(self) -> AlertSilencingEngine:
+        """Alias for alert silencing engine."""
+        return self.alert_silencing_engine
+
+    @property
+    def multi_channel_dispatcher(self) -> MultiChannelDispatcher:
+        """Alias for multi-channel alert dispatcher."""
+        return self.alert_multichannel_dispatcher
+
+    def get_incident_analytics(
+        self,
+        window_seconds: float = 86400.0,
+        slo_target_pct: float = 99.9,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        """Return aggregated incident analytics (MTTD, MTTR, and SLO summary)."""
+        return self.incident_tracker.get_analytics(
+            window_seconds=window_seconds,
+            slo_target_pct=slo_target_pct,
+            now=now,
+        )
+
+    def get_incident_history(
+        self,
+        limit: int = 100,
+        rule_name: str | None = None,
+        active_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return historical or active incident lifecycle records."""
+        if active_only:
+            recs = self.incident_tracker.get_active_incidents()
+            if rule_name:
+                recs = [r for r in recs if r.rule_name == rule_name]
+            return [r.to_dict() for r in recs[:limit]]
+        recs = self.incident_tracker.get_history(limit=limit, rule_name=rule_name)
+        return [r.to_dict() for r in recs]
+
+    def get_slo_compliance_report(
+        self,
+        window_seconds: float = 86400.0,
+        slo_target_pct: float = 99.9,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        """Return SLO availability compliance metrics for all alert rules."""
+        stats = self.incident_tracker.get_all_rule_stats(
+            window_seconds=window_seconds,
+            slo_target_pct=slo_target_pct,
+            now=now,
+        )
+        return {
+            "window_seconds": window_seconds,
+            "slo_target_pct": slo_target_pct,
+            "rules": {name: s.to_dict() for name, s in stats.items()},
+        }
 
     def export_prometheus_metrics(
         self,
