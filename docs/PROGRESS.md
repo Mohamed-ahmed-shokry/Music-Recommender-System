@@ -4,10 +4,10 @@
 - [x] Task 1: Define Phase 177 & 178 roadmap, update plan, and initialize progress record.
 - [x] Task 2: Implement `TraceContext` with W3C `traceparent`/`tracestate` in `src/music_recommender/tracing.py`.
 - [x] Task 3: Add unit tests for `TraceContext` in `tests/test_tracing.py`.
-- [ ] Task 4: Implement `SpanRecord`, `SpanKind`, and `SpanStatus` in `src/music_recommender/tracing.py`.
-- [ ] Task 5: Add unit tests for `SpanRecord` and OTLP format conversion in `tests/test_tracing.py`.
-- [ ] Task 6: Implement `DistributedTracer` with context propagation and span buffer in `src/music_recommender/tracing.py`.
-- [ ] Task 7: Add unit tests for `DistributedTracer` in `tests/test_tracing.py`.
+- [x] Task 4: Implement `SpanRecord`, `SpanKind`, and `SpanStatus` in `src/music_recommender/tracing.py`.
+- [x] Task 5: Add unit tests for `SpanRecord` and OTLP format conversion in `tests/test_tracing.py`.
+- [x] Task 6: Implement `DistributedTracer` with context propagation and span buffer in `src/music_recommender/tracing.py`.
+- [x] Task 7: Add unit tests for `DistributedTracer` in `tests/test_tracing.py`.
 - [ ] Task 8: Implement `AlertTraceCorrelator` in `src/music_recommender/tracing.py`.
 - [ ] Task 9: Add unit tests for `AlertTraceCorrelator` in `tests/test_tracing.py`.
 - [ ] Task 10: Implement `TraceContextMiddleware` in `api/middleware.py`.
@@ -27,7 +27,7 @@
 | Criterion | Status | Verification Evidence |
 | :--- | :---: | :--- |
 | AC-1: TraceContext parses and formats W3C traceparent and tracestate headers | `Passed` | `tests/test_tracing.py` (5 tests passing) |
-| AC-2: DistributedTracer manages thread/task context, records spans, converts to OTLP JSON | `Pending` | `tests/test_tracing.py` |
+| AC-2: DistributedTracer manages thread/task context, records spans, converts to OTLP JSON | `Passed` | `tests/test_tracing.py` (15 tests passing) |
 | AC-3: AlertTraceCorrelator correlates alert incidents with candidate traces | `Pending` | `tests/test_tracing.py` |
 | AC-4: TraceContextMiddleware propagates trace context in HTTP headers | `Pending` | `tests/test_api.py` |
 | AC-5: RecommenderService instruments internal pipeline operations and exposes queries | `Pending` | `tests/test_service.py` |
