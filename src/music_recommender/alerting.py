@@ -3737,6 +3737,274 @@ class AlertCorrelationGraph:
         )
 
 
+@dataclass
+class IncidentLifecycleRecord:
+    """Record of an alert incident lifecycle from inception to resolution."""
+
+    incident_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    rule_name: str = ""
+    severity: str = AlertSeverity.WARNING.value
+    started_at: float = field(default_factory=time.time)
+    resolved_at: float | None = None
+    duration_seconds: float = 0.0
+    detection_latency_seconds: float = 0.0
+    remediations_triggered: int = 0
+    silenced: bool = False
+    root_causes: list[str] = field(default_factory=list)
+    labels: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def is_active(self) -> bool:
+        """Return True if this incident is currently ongoing (unresolved)."""
+        return self.resolved_at is None
+
+    def get_duration(self, now: float | None = None) -> float:
+        """Return elapsed duration in seconds."""
+        if self.resolved_at is not None:
+            return max(0.0, self.resolved_at - self.started_at)
+        current = time.time() if now is None else now
+        return max(0.0, current - self.started_at)
+
+    def resolve(self, timestamp: float | None = None) -> None:
+        """Mark incident as resolved and record finalized duration."""
+        self.resolved_at = time.time() if timestamp is None else timestamp
+        self.duration_seconds = max(0.0, self.resolved_at - self.started_at)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "incident_id": self.incident_id,
+            "rule_name": self.rule_name,
+            "severity": self.severity,
+            "started_at": self.started_at,
+            "resolved_at": self.resolved_at,
+            "duration_seconds": self.get_duration(),
+            "detection_latency_seconds": self.detection_latency_seconds,
+            "remediations_triggered": self.remediations_triggered,
+            "silenced": self.silenced,
+            "root_causes": list(self.root_causes),
+            "labels": dict(self.labels),
+            "is_active": self.is_active,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> IncidentLifecycleRecord:
+        return cls(
+            incident_id=str(data.get("incident_id", str(uuid.uuid4())[:8])),
+            rule_name=str(data.get("rule_name", "")),
+            severity=str(data.get("severity", AlertSeverity.WARNING.value)),
+            started_at=float(data.get("started_at", time.time())),
+            resolved_at=(
+                float(data["resolved_at"])
+                if data.get("resolved_at") is not None
+                else None
+            ),
+            duration_seconds=float(data.get("duration_seconds", 0.0)),
+            detection_latency_seconds=float(data.get("detection_latency_seconds", 0.0)),
+            remediations_triggered=int(data.get("remediations_triggered", 0)),
+            silenced=bool(data.get("silenced", False)),
+            root_causes=[str(rc) for rc in data.get("root_causes", [])],
+            labels={str(k): str(v) for k, v in data.get("labels", {}).items()},
+        )
+
+
+@dataclass
+class RuleIncidentStats:
+    """Quantitative reliability and incident metrics for a single alert rule."""
+
+    rule_name: str
+    total_incidents: int = 0
+    active_incidents: int = 0
+    resolved_incidents: int = 0
+    mttd_seconds: float = 0.0
+    mttr_seconds: float = 0.0
+    mtbf_seconds: float = 0.0
+    total_downtime_seconds: float = 0.0
+    longest_incident_seconds: float = 0.0
+    slo_target_pct: float = 99.9
+    slo_compliance_pct: float = 100.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rule_name": self.rule_name,
+            "total_incidents": self.total_incidents,
+            "active_incidents": self.active_incidents,
+            "resolved_incidents": self.resolved_incidents,
+            "mttd_seconds": round(self.mttd_seconds, 2),
+            "mttr_seconds": round(self.mttr_seconds, 2),
+            "mtbf_seconds": round(self.mtbf_seconds, 2),
+            "total_downtime_seconds": round(self.total_downtime_seconds, 2),
+            "longest_incident_seconds": round(self.longest_incident_seconds, 2),
+            "slo_target_pct": self.slo_target_pct,
+            "slo_compliance_pct": round(self.slo_compliance_pct, 4),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RuleIncidentStats:
+        return cls(
+            rule_name=str(data.get("rule_name", "")),
+            total_incidents=int(data.get("total_incidents", 0)),
+            active_incidents=int(data.get("active_incidents", 0)),
+            resolved_incidents=int(data.get("resolved_incidents", 0)),
+            mttd_seconds=float(data.get("mttd_seconds", 0.0)),
+            mttr_seconds=float(data.get("mttr_seconds", 0.0)),
+            mtbf_seconds=float(data.get("mtbf_seconds", 0.0)),
+            total_downtime_seconds=float(data.get("total_downtime_seconds", 0.0)),
+            longest_incident_seconds=float(data.get("longest_incident_seconds", 0.0)),
+            slo_target_pct=float(data.get("slo_target_pct", 99.9)),
+            slo_compliance_pct=float(data.get("slo_compliance_pct", 100.0)),
+        )
+
+
+class AlertIncidentAnalytics:
+    """Evaluates telemetry records into quantitative MTTD, MTTR, and SLO metrics."""
+
+    @staticmethod
+    def compute_rule_stats(
+        rule_name: str,
+        incidents: Sequence[IncidentLifecycleRecord],
+        window_seconds: float = 86400.0,
+        slo_target_pct: float = 99.9,
+        now: float | None = None,
+    ) -> RuleIncidentStats:
+        """Compute reliability metrics for a single alert rule over a time window."""
+        rule_incidents = [inc for inc in incidents if inc.rule_name == rule_name]
+        total_incidents = len(rule_incidents)
+        active_incidents = sum(1 for inc in rule_incidents if inc.is_active)
+        resolved_incidents = total_incidents - active_incidents
+
+        if total_incidents == 0:
+            return RuleIncidentStats(
+                rule_name=rule_name,
+                total_incidents=0,
+                active_incidents=0,
+                resolved_incidents=0,
+                mttd_seconds=0.0,
+                mttr_seconds=0.0,
+                mtbf_seconds=max(0.0, window_seconds),
+                total_downtime_seconds=0.0,
+                longest_incident_seconds=0.0,
+                slo_target_pct=slo_target_pct,
+                slo_compliance_pct=100.0,
+            )
+
+        mttd_sum = sum(inc.detection_latency_seconds for inc in rule_incidents)
+        mttd_seconds = mttd_sum / total_incidents
+
+        resolved_records = [inc for inc in rule_incidents if not inc.is_active]
+        if resolved_records:
+            mttr_seconds = sum(inc.get_duration(now) for inc in resolved_records) / len(
+                resolved_records
+            )
+        else:
+            mttr_seconds = 0.0
+
+        durations = [inc.get_duration(now) for inc in rule_incidents]
+        total_downtime_seconds = sum(durations)
+        longest_incident_seconds = max(durations) if durations else 0.0
+
+        effective_window = max(window_seconds, total_downtime_seconds)
+        uptime = max(0.0, effective_window - total_downtime_seconds)
+        mtbf_seconds = (
+            uptime / total_incidents if total_incidents > 0 else effective_window
+        )
+
+        if effective_window > 0:
+            slo_compliance_pct = max(
+                0.0,
+                min(
+                    100.0,
+                    (1.0 - (total_downtime_seconds / effective_window)) * 100.0,
+                ),
+            )
+        else:
+            slo_compliance_pct = 100.0
+
+        return RuleIncidentStats(
+            rule_name=rule_name,
+            total_incidents=total_incidents,
+            active_incidents=active_incidents,
+            resolved_incidents=resolved_incidents,
+            mttd_seconds=mttd_seconds,
+            mttr_seconds=mttr_seconds,
+            mtbf_seconds=mtbf_seconds,
+            total_downtime_seconds=total_downtime_seconds,
+            longest_incident_seconds=longest_incident_seconds,
+            slo_target_pct=slo_target_pct,
+            slo_compliance_pct=slo_compliance_pct,
+        )
+
+    @classmethod
+    def compute_all_stats(
+        cls,
+        incidents: Sequence[IncidentLifecycleRecord],
+        window_seconds: float = 86400.0,
+        slo_target_pct: float = 99.9,
+        now: float | None = None,
+    ) -> dict[str, RuleIncidentStats]:
+        """Compute stats grouped by rule name."""
+        rule_names = sorted({inc.rule_name for inc in incidents})
+        return {
+            name: cls.compute_rule_stats(
+                rule_name=name,
+                incidents=incidents,
+                window_seconds=window_seconds,
+                slo_target_pct=slo_target_pct,
+                now=now,
+            )
+            for name in rule_names
+        }
+
+    @classmethod
+    def compute_summary(
+        cls,
+        incidents: Sequence[IncidentLifecycleRecord],
+        window_seconds: float = 86400.0,
+        slo_target_pct: float = 99.9,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        """Compute aggregated incident summary across all rules."""
+        per_rule = cls.compute_all_stats(
+            incidents=incidents,
+            window_seconds=window_seconds,
+            slo_target_pct=slo_target_pct,
+            now=now,
+        )
+        total_incidents = len(incidents)
+        active_incidents = sum(1 for inc in incidents if inc.is_active)
+        resolved_incidents = total_incidents - active_incidents
+
+        overall_mttd = (
+            sum(r.mttd_seconds * r.total_incidents for r in per_rule.values())
+            / total_incidents
+            if total_incidents > 0
+            else 0.0
+        )
+        resolved_count = sum(r.resolved_incidents for r in per_rule.values())
+        overall_mttr = (
+            sum(r.mttr_seconds * r.resolved_incidents for r in per_rule.values())
+            / resolved_count
+            if resolved_count > 0
+            else 0.0
+        )
+        total_downtime = sum(r.total_downtime_seconds for r in per_rule.values())
+        effective_window = max(window_seconds, total_downtime)
+        overall_slo = (
+            max(0.0, min(100.0, (1.0 - (total_downtime / effective_window)) * 100.0))
+            if effective_window > 0
+            else 100.0
+        )
+
+        return {
+            "total_incidents": total_incidents,
+            "active_incidents": active_incidents,
+            "resolved_incidents": resolved_incidents,
+            "overall_mttd_seconds": round(overall_mttd, 2),
+            "overall_mttr_seconds": round(overall_mttr, 2),
+            "overall_slo_compliance_pct": round(overall_slo, 4),
+            "rules": {name: stats.to_dict() for name, stats in per_rule.items()},
+        }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Write generated Prometheus rules or Alertmanager config to PATH or stdout."""
     import sys
