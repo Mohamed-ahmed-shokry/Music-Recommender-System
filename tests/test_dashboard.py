@@ -813,6 +813,7 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Catalog",
         "Ablation Summary",
         "Cold-Start Bandit",
+        "Distributed Traces",
     ]
     assert [metric.label for metric in app.metric] == [
         "Listeners",
@@ -1474,6 +1475,7 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
         "Catalog",
         "Ablation Summary",
         "Cold-Start Bandit",
+        "Distributed Traces",
     ]
 
 
