@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import time
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
+from music_recommender.alerting import IncidentLifecycleRecord
 from music_recommender.tracing import (
+    AlertTraceCorrelator,
     DistributedTracer,
     SpanKind,
     SpanRecord,
     SpanStatus,
     TraceContext,
+    TraceCorrelationResult,
     generate_span_id,
     generate_trace_id,
 )
@@ -338,3 +344,73 @@ def test_distributed_tracer_otlp_export() -> None:
     scope_spans = export["resourceSpans"][0]["scopeSpans"]
     assert len(scope_spans[0]["spans"]) == 1
     assert scope_spans[0]["spans"][0]["name"] == "server_req"
+
+
+def test_alert_trace_correlator_window_matching() -> None:
+    tracer = DistributedTracer()
+    correlator = AlertTraceCorrelator(tracer)
+
+    now = datetime.now(UTC)
+    old_time = (now - timedelta(hours=2)).isoformat()
+
+    # Old span outside correlation window
+    old_span = SpanRecord(
+        span_id="0000000000000001",
+        trace_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        name="ancient_op",
+        start_time=old_time,
+    )
+    old_span.finish(status=SpanStatus.OK)
+    tracer.record_span(old_span)
+
+    # Active spans within window: 1 success, 1 error
+    with tracer.span("active_ok") as s_ok:
+        s_ok.set_attribute("status", "200")
+
+    with tracer.span("active_err") as s_err:
+        s_err.record_exception(ValueError("downstream failed"))
+
+    result = correlator.correlate(
+        alert_name="HighLatency",
+        timestamp=now.timestamp(),
+        window_seconds=120.0,
+    )
+
+    assert result.alert_name == "HighLatency"
+    assert result.matched_traces_count >= 1
+    assert result.matched_spans_count >= 2
+    assert result.error_spans_count >= 1
+
+    # Candidate root causes prioritize ERROR status
+    assert len(result.candidate_root_cause_spans) >= 1
+    top_candidate = result.candidate_root_cause_spans[0]
+    assert top_candidate["status"] == "error"
+    assert top_candidate["name"] == "active_err"
+
+    # Roundtrip serialization
+    d = result.to_dict()
+    restored = TraceCorrelationResult.from_dict(d)
+    assert restored.alert_name == result.alert_name
+    assert restored.matched_spans_count == result.matched_spans_count
+    assert restored.error_spans_count == result.error_spans_count
+
+
+def test_alert_trace_correlator_incident_record() -> None:
+    tracer = DistributedTracer()
+    correlator = AlertTraceCorrelator(tracer)
+
+    incident = IncidentLifecycleRecord(
+        rule_name="RecommendationErrorSpike",
+        started_at=time.time(),
+        labels={"service": "recommender"},
+    )
+
+    with tracer.span("eval_pipeline") as s:
+        s.record_exception(RuntimeError("eval timeout"))
+
+    result = correlator.correlate_incident(incident, window_seconds=60.0)
+
+    assert result.incident_id == incident.incident_id
+    assert result.alert_name == "RecommendationErrorSpike"
+    assert result.error_spans_count >= 1
+    assert result.candidate_root_cause_spans[0]["name"] == "eval_pipeline"
