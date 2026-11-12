@@ -2554,6 +2554,7 @@ def test_service_incident_analytics_integration(tmp_path: Path) -> None:
     )
 
     service = create_service(tmp_path)
+    service.incident_tracker.clear()
 
     # Initially no incidents
     assert service.get_incident_history() == []
@@ -2605,3 +2606,4 @@ def test_service_incident_analytics_integration(tmp_path: Path) -> None:
     assert "music_recommender_alert_mttd_seconds" in metrics_text
     assert "music_recommender_alert_mttr_seconds" in metrics_text
     assert "music_recommender_alert_silences_active" in metrics_text
+    service.incident_tracker.clear()
