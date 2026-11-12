@@ -5,6 +5,9 @@ from __future__ import annotations
 import pytest
 
 from music_recommender.tracing import (
+    SpanKind,
+    SpanRecord,
+    SpanStatus,
     TraceContext,
     generate_span_id,
     generate_trace_id,
@@ -116,3 +119,130 @@ def test_trace_context_serialization() -> None:
 
     restored = TraceContext.from_dict(d)
     assert restored == ctx
+
+
+def test_span_lifecycle_and_finish() -> None:
+    span = SpanRecord(
+        span_id="1111222233334444",
+        trace_id="aaaabbbbccccddddeeeeffff00001111",
+        name="unit_task",
+        kind=SpanKind.SERVER,
+    )
+    assert span.end_time is None
+    assert span.duration_seconds == 0.0
+    assert span.status == SpanStatus.UNSET
+
+    span.finish(status=SpanStatus.OK, message="finished cleanly")
+    assert span.end_time is not None
+    assert span.duration_seconds >= 0.0
+    assert span.status == SpanStatus.OK
+    assert span.status_message == "finished cleanly"
+
+
+def test_span_attributes_and_events() -> None:
+    span = SpanRecord(
+        span_id="1111222233334444",
+        trace_id="aaaabbbbccccddddeeeeffff00001111",
+        name="test_op",
+    )
+    span.set_attribute("http.method", "GET")
+    span.set_attribute("http.status_code", 200)
+    span.set_attribute("is_active", True)
+    span.set_attribute("score", 0.95)
+
+    assert span.attributes["http.method"] == "GET"
+    assert span.attributes["http.status_code"] == 200
+    assert span.attributes["is_active"] is True
+    assert span.attributes["score"] == 0.95
+
+    evt = span.add_event("cache_hit", {"key": "artist:10"})
+    assert evt.name == "cache_hit"
+    assert len(span.events) == 1
+    assert span.events[0].attributes["key"] == "artist:10"
+
+
+def test_span_record_exception() -> None:
+    span = SpanRecord(
+        span_id="1111222233334444",
+        trace_id="aaaabbbbccccddddeeeeffff00001111",
+        name="failing_op",
+    )
+    try:
+        raise ValueError("database unavailable")
+    except ValueError as exc:
+        span.record_exception(exc, {"db.system": "sqlite"})
+
+    assert span.status == SpanStatus.ERROR
+    assert span.status_message == "ValueError: database unavailable"
+    assert len(span.events) == 1
+    assert span.events[0].name == "exception"
+    assert span.events[0].attributes["exception.type"] == "ValueError"
+    assert span.events[0].attributes["exception.message"] == "database unavailable"
+    assert span.events[0].attributes["db.system"] == "sqlite"
+
+
+def test_span_serialization_roundtrip() -> None:
+    span = SpanRecord(
+        span_id="1111222233334444",
+        trace_id="aaaabbbbccccddddeeeeffff00001111",
+        parent_span_id="5555666677778888",
+        name="recommend_pipeline",
+        kind=SpanKind.INTERNAL,
+        attributes={"user_id": 42},
+    )
+    span.add_event("stage_1", {"items": 10})
+    span.finish(status=SpanStatus.OK)
+
+    d = span.to_dict()
+    assert d["span_id"] == "1111222233334444"
+    assert d["kind"] == "internal"
+    assert d["status"] == "ok"
+    assert len(d["events"]) == 1
+
+    restored = SpanRecord.from_dict(d)
+    assert restored.span_id == span.span_id
+    assert restored.trace_id == span.trace_id
+    assert restored.parent_span_id == span.parent_span_id
+    assert restored.kind == SpanKind.INTERNAL
+    assert restored.status == SpanStatus.OK
+    assert restored.attributes["user_id"] == 42
+    assert len(restored.events) == 1
+    assert restored.events[0].name == "stage_1"
+
+
+def test_span_otlp_dict_structure() -> None:
+    span = SpanRecord(
+        span_id="1111222233334444",
+        trace_id="aaaabbbbccccddddeeeeffff00001111",
+        parent_span_id="5555666677778888",
+        name="recommend_api",
+        kind=SpanKind.SERVER,
+    )
+    span.set_attribute("endpoint", "/api/v1/recommend")
+    span.set_attribute("user.id", 100)
+    span.set_attribute("cached", False)
+    span.set_attribute("latency_ms", 12.34)
+    span.add_event("render_start", {"step": 1})
+    span.finish(status=SpanStatus.OK, message="Success")
+
+    otlp = span.to_otlp_dict()
+    assert otlp["traceId"] == "aaaabbbbccccddddeeeeffff00001111"
+    assert otlp["spanId"] == "1111222233334444"
+    assert otlp["parentSpanId"] == "5555666677778888"
+    assert otlp["name"] == "recommend_api"
+    assert otlp["kind"] == 2  # SpanKind.SERVER
+    assert "startTimeUnixNano" in otlp
+    assert "endTimeUnixNano" in otlp
+    assert otlp["status"]["code"] == 1  # SpanStatus.OK
+    assert otlp["status"]["message"] == "Success"
+
+    # Verify typed attributes
+    attrs_by_key = {item["key"]: item["value"] for item in otlp["attributes"]}
+    assert attrs_by_key["endpoint"] == {"stringValue": "/api/v1/recommend"}
+    assert attrs_by_key["user.id"] == {"intValue": "100"}
+    assert attrs_by_key["cached"] == {"boolValue": False}
+    assert attrs_by_key["latency_ms"] == {"doubleValue": 12.34}
+
+    # Verify event
+    assert len(otlp["events"]) == 1
+    assert otlp["events"][0]["name"] == "render_start"
