@@ -3263,4 +3263,3 @@ def test_alerts_analytics_routes() -> None:
 
         res_fb_slo = client.get("/alerts/analytics/slo")
         assert res_fb_slo.status_code == 200
-

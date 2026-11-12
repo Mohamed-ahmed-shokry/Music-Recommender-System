@@ -1625,9 +1625,7 @@ def render_dashboard(service: RecommenderService) -> None:
                     )
                     mttd_val = float(analytics.get("overall_mttd_seconds", 0.0))
                     mttr_val = float(analytics.get("overall_mttr_seconds", 0.0))
-                    slo_val = float(
-                        analytics.get("overall_slo_compliance_pct", 100.0)
-                    )
+                    slo_val = float(analytics.get("overall_slo_compliance_pct", 100.0))
                     col_m1, col_m2, col_m3 = st.columns(3)
                     col_m1.metric("MTTD", f"{mttd_val:.1f}s")
                     col_m2.metric("MTTR", f"{mttr_val:.1f}s")

@@ -679,9 +679,7 @@ def collect_alerting_metric_families(
             )
             active_maint = (
                 len(
-                    silencing_engine.list_maintenance_windows(
-                        active_only=True, now=now
-                    )
+                    silencing_engine.list_maintenance_windows(active_only=True, now=now)
                 )
                 if hasattr(silencing_engine, "list_maintenance_windows")
                 else 0

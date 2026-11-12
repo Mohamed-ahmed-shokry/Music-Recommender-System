@@ -4049,9 +4049,7 @@ class AlertIncidentTracker:
                     return inc
 
                 # Calculate estimated detection latency from rule for_evaluations
-                est_mttd = float(
-                    transition.rule.for_evaluations * self._eval_interval
-                )
+                est_mttd = float(transition.rule.for_evaluations * self._eval_interval)
                 severity_val = (
                     transition.rule.severity.value
                     if hasattr(transition.rule.severity, "value")
@@ -4208,9 +4206,7 @@ class AlertIncidentTracker:
                 if isinstance(item, dict)
             ]
         except Exception as exc:
-            logger.warning(
-                "Failed to load alert incidents from %s: %s", file_path, exc
-            )
+            logger.warning("Failed to load alert incidents from %s: %s", file_path, exc)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

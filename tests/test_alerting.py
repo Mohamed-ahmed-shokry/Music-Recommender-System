@@ -2688,15 +2688,11 @@ def test_alert_incident_tracker_persistence(tmp_path: Any) -> None:
         summary="Rule two summary",
     )
 
-    t1_fire = AlertTransition(
-        rule=rule1, event="firing", value=2.0, timestamp="T1"
-    )
+    t1_fire = AlertTransition(rule=rule1, event="firing", value=2.0, timestamp="T1")
     t1_resolve = AlertTransition(
         rule=rule1, event="resolved", value=0.5, timestamp="T2"
     )
-    t2_fire = AlertTransition(
-        rule=rule2, event="firing", value=5.0, timestamp="T3"
-    )
+    t2_fire = AlertTransition(rule=rule2, event="firing", value=5.0, timestamp="T3")
 
     tracker1.record_transition(t1_fire, now=10.0)
     tracker1.record_transition(t1_resolve, now=30.0)
@@ -2721,5 +2717,3 @@ def test_alert_incident_tracker_persistence(tmp_path: Any) -> None:
     assert len(tracker2.get_active_incidents()) == 0
     assert len(tracker2.get_history()) == 0
     assert not (storage / "incidents.json").exists()
-
-

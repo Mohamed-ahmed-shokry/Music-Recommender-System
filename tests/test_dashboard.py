@@ -1972,9 +1972,7 @@ def test_dashboard_sidebar_incident_analytics_rendering() -> None:
     ).run()
 
     assert not app.exception
-    assert any(
-        "Incident Analytics & Reliability" in m.value for m in app.markdown
-    )
+    assert any("Incident Analytics & Reliability" in m.value for m in app.markdown)
     metric_values = [metric.value for metric in app.metric]
     assert any("12.5s" in str(v) for v in metric_values)
     assert any("55.0s" in str(v) for v in metric_values)

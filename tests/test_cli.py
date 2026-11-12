@@ -4363,4 +4363,3 @@ def test_alert_analytics_and_incident_history_cli(tmp_path: Path) -> None:
 
     # Cleanup
     tracker.clear()
-

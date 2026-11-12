@@ -5716,24 +5716,16 @@ def alert_analytics_cmd(
         typer.echo(json.dumps(analytics, indent=2))
         return
 
-    typer.secho(
-        "=== Alert Incident Analytics & Reliability Summary ===", bold=True
-    )
-    typer.echo(f"Evaluation Window:  {window:.0f}s ({window/3600:.1f}h)")
+    typer.secho("=== Alert Incident Analytics & Reliability Summary ===", bold=True)
+    typer.echo(f"Evaluation Window:  {window:.0f}s ({window / 3600:.1f}h)")
     typer.echo(f"Total Incidents:    {analytics.get('total_incidents', 0)}")
     typer.echo(f"Active Incidents:   {analytics.get('active_incidents', 0)}")
     typer.echo(f"Resolved Incidents: {analytics.get('resolved_incidents', 0)}")
-    typer.echo(
-        f"Overall MTTD:       {analytics.get('overall_mttd_seconds', 0.0):.2f}s"
-    )
-    typer.echo(
-        f"Overall MTTR:       {analytics.get('overall_mttr_seconds', 0.0):.2f}s"
-    )
+    typer.echo(f"Overall MTTD:       {analytics.get('overall_mttd_seconds', 0.0):.2f}s")
+    typer.echo(f"Overall MTTR:       {analytics.get('overall_mttr_seconds', 0.0):.2f}s")
 
     overall_slo = float(analytics.get("overall_slo_compliance_pct", 100.0))
-    slo_color = (
-        typer.colors.GREEN if overall_slo >= slo_target else typer.colors.RED
-    )
+    slo_color = typer.colors.GREEN if overall_slo >= slo_target else typer.colors.RED
     typer.secho(
         f"Overall SLO Availability: {overall_slo:.4f}% (Target: {slo_target}%)",
         fg=slo_color,
@@ -5745,11 +5737,7 @@ def alert_analytics_cmd(
         typer.echo("\nPer-Rule Incident Breakdown:")
         for rule_name, s in sorted(rules.items()):
             r_slo = float(s.get("slo_compliance_pct", 100.0))
-            r_color = (
-                typer.colors.GREEN
-                if r_slo >= slo_target
-                else typer.colors.YELLOW
-            )
+            r_color = typer.colors.GREEN if r_slo >= slo_target else typer.colors.YELLOW
             typer.secho(f"  • {rule_name}:", bold=True)
             tot = s.get("total_incidents", 0)
             act = s.get("active_incidents", 0)
@@ -5766,9 +5754,7 @@ def alert_analytics_cmd(
 def incident_history_cmd(
     limit: Annotated[
         int,
-        typer.Option(
-            "--limit", "-l", help="Maximum incident records to display."
-        ),
+        typer.Option("--limit", "-l", help="Maximum incident records to display."),
     ] = 20,
     rule: Annotated[
         str | None,
@@ -5776,9 +5762,7 @@ def incident_history_cmd(
     ] = None,
     active_only: Annotated[
         bool,
-        typer.Option(
-            "--active-only", help="Display only ongoing active incidents."
-        ),
+        typer.Option("--active-only", help="Display only ongoing active incidents."),
     ] = False,
     json_output: Annotated[
         bool,
@@ -5829,9 +5813,7 @@ def incident_history_cmd(
         sil = inc.get("silenced", False)
         typer.echo(f"  Duration: {dur:.1f}s | Remediations: {rem} | Silenced: {sil}")
         if inc.get("root_causes"):
-            typer.echo(
-                f"  Root Causes: {', '.join(inc.get('root_causes', []))}"
-            )
+            typer.echo(f"  Root Causes: {', '.join(inc.get('root_causes', []))}")
 
 
 if __name__ == "__main__":

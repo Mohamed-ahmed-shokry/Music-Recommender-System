@@ -2605,4 +2605,3 @@ def test_service_incident_analytics_integration(tmp_path: Path) -> None:
     assert "music_recommender_alert_mttd_seconds" in metrics_text
     assert "music_recommender_alert_mttr_seconds" in metrics_text
     assert "music_recommender_alert_silences_active" in metrics_text
-
