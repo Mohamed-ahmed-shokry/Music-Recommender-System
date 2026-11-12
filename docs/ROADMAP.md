@@ -1,3 +1,94 @@
+# Milestone 0.41.0 Roadmap — Phase 175 & 176
+
+## Phase 175 & 176: Alert Incident Analytics, MTTD/MTTR Telemetry, and Prometheus Alert Exporter (0.41.0)
+
+### 1. Objective
+Harden production observability with incident lifecycle tracking and quantitative reliability metrics:
+1. An **Alert Incident Analytics Engine** (`IncidentLifecycleRecord`, `RuleIncidentStats`, `AlertIncidentTracker`, `AlertIncidentAnalytics`) that tracks full incident lifecycles (started_at, resolved_at, duration_seconds), computing quantitative reliability metrics including Mean Time to Detect (MTTD), Mean Time to Resolve (MTTR), Mean Time Between Failures (MTBF), and Service Level Objective (SLO) compliance percentages per alert rule.
+2. A **Prometheus Alert Metrics Exporter** exposing native OpenMetrics/Prometheus gauge and histogram families for live alert status, MTTD, MTTR, active silence counts, maintenance window states, and circuit breaker health (`music_recommender_alert_active`, `music_recommender_alert_mttd_seconds`, `music_recommender_alert_mttr_seconds`, `music_recommender_alert_silences_active`, `music_recommender_alert_maintenance_active`, `music_recommender_alert_circuit_breaker_state`).
+3. Full integration in `RecommenderService`, FastAPI endpoints (`/alerts/analytics/*`), operator CLI commands (`alert-analytics`, `incident-history`), and Streamlit dashboard telemetry visualizations, releasing Milestone 0.41.0 with 100% green CI.
+
+### 2. Scope
+1. **Incident Lifecycle Models & Analytics Engine (`src/music_recommender/alerting.py`)**:
+   - `IncidentLifecycleRecord`: dataclass capturing `incident_id`, `rule_name`, `severity`, `started_at`, `resolved_at`, `duration_seconds`, `remediations_triggered`, `silenced`, `root_causes`.
+   - `RuleIncidentStats`: dataclass computing aggregate metrics: total incidents, active incidents, MTTD (seconds), MTTR (seconds), MTBF (seconds), longest incident duration, and SLO availability compliance percentage (e.g., 99.9% target).
+   - `AlertIncidentTracker`: thread-safe incident tracker listening to alert state transitions (`AlertTransition`), correlating firing and resolution events, maintaining active incidents and rolling historical incident records with disk persistence.
+   - `AlertIncidentAnalytics`: analytical evaluator generating summary reports, per-rule telemetry breakdown, and SLO availability audits.
+2. **Prometheus Alert Metrics Exporter (`src/music_recommender/telemetry.py`, `src/music_recommender/alerting.py`)**:
+   - Export metric families:
+     - `music_recommender_alert_active`: gauge labeled by `rule` and `severity`.
+     - `music_recommender_alert_mttd_seconds`: gauge of mean time to detect per `rule`.
+     - `music_recommender_alert_mttr_seconds`: gauge of mean time to resolve per `rule`.
+     - `music_recommender_alert_silences_active`: gauge of currently active silence rules.
+     - `music_recommender_alert_maintenance_active`: gauge of currently active maintenance windows.
+     - `music_recommender_alert_circuit_breaker_state`: gauge labeled by `channel` (0=closed, 1=half_open, 2=open).
+   - Integrate with `export_prometheus_metrics()` and `/metrics`.
+3. **Service Layer Integration (`src/music_recommender/service.py`)**:
+   - Attach `AlertIncidentTracker` to `RecommenderService.evaluate_alerts()`.
+   - Provide service methods `get_incident_analytics()`, `get_incident_history()`, `get_slo_compliance_report()`.
+4. **FastAPI Endpoints (`api/main.py`)**:
+   - `GET /alerts/analytics`: summary MTTD, MTTR, MTBF, and incident statistics.
+   - `GET /alerts/analytics/incidents`: paginated historical incident lifecycle records.
+   - `GET /alerts/analytics/slo`: SLO availability compliance report per rule.
+5. **Operator CLI Tooling (`src/music_recommender/cli.py`)**:
+   - `music-recommender alert-analytics`: tabular and JSON inspection of MTTD, MTTR, and incident frequencies.
+   - `music-recommender incident-history`: audit log of completed and ongoing incident lifecycles.
+6. **Dashboard Telemetry (`src/music_recommender/dashboard.py`)**:
+   - Streamlit alerting sidebar: incident analytics metrics (MTTD/MTTR, total incidents, SLO compliance gauge).
+7. **Comprehensive Tests**:
+   - Unit tests in `tests/test_alerting.py` for lifecycle tracking, MTTD/MTTR math, and SLO compliance calculations.
+   - Telemetry tests in `tests/test_telemetry.py` for Prometheus alert metric families.
+   - Integration tests in `tests/test_service.py` for service incident tracking.
+   - API integration tests in `tests/test_api.py`.
+   - CLI tests in `tests/test_cli.py`.
+   - Dashboard tests in `tests/test_dashboard.py`.
+8. **Documentation & Release 0.41.0**:
+   - Update `README.md`, `CHANGELOG.md`, `PLAN.md`, `docs/PROGRESS.md`.
+   - Bump version to `0.41.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+
+### 3. Acceptance Criteria
+- [ ] AC-1: `AlertIncidentTracker` tracks incident lifecycles (`started_at`, `resolved_at`, `duration_seconds`) on firing and resolved transitions.
+- [ ] AC-2: `AlertIncidentAnalytics` computes accurate MTTD, MTTR, MTBF, and SLO compliance percentages per alert rule.
+- [ ] AC-3: Prometheus exposition exports `music_recommender_alert_active`, `mttd_seconds`, `mttr_seconds`, `silences_active`, and `circuit_breaker_state`.
+- [ ] AC-4: `RecommenderService` coordinates incident lifecycle tracking on alert evaluation and exposes query methods.
+- [ ] AC-5: FastAPI endpoints `/alerts/analytics/*` return validated schemas for summary, incident history, and SLO reports.
+- [ ] AC-6: Operator CLI commands `alert-analytics` and `incident-history` support table and JSON formatting.
+- [ ] AC-7: Streamlit dashboard renders live MTTD/MTTR indicators and SLO availability metrics.
+- [ ] AC-8: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Validation & CI Plan
+- `uv run ruff format --check .`
+- `uv run ruff check .`
+- `uv run mypy`
+- `uv run --extra dashboard --extra tracking --extra spotify pytest -q`
+- `uv build`
+- Remote GitHub Actions CI on PR branch 100% green.
+
+### 5. Exclusions
+- External long-term time-series databases (e.g. InfluxDB/Thanos) for incident rollups are optional remote sinks; core tracking operates in-process with persistent JSON storage.
+
+### 6. Micro-Task Breakdown
+- [ ] Task 1: Define Phase 175 & 176 roadmap, update plan, and initialize progress record.
+- [ ] Task 2: Implement `IncidentLifecycleRecord`, `RuleIncidentStats`, and `AlertIncidentAnalytics` in `src/music_recommender/alerting.py`.
+- [ ] Task 3: Add unit tests for `IncidentLifecycleRecord` and `AlertIncidentAnalytics` in `tests/test_alerting.py`.
+- [ ] Task 4: Implement `AlertIncidentTracker` in `src/music_recommender/alerting.py`.
+- [ ] Task 5: Add unit tests for `AlertIncidentTracker` in `tests/test_alerting.py`.
+- [ ] Task 6: Implement Prometheus alerting metrics export in `src/music_recommender/telemetry.py` and `alerting.py`.
+- [ ] Task 7: Add unit tests for Prometheus alert metrics in `tests/test_telemetry.py` and `tests/test_alerting.py`.
+- [ ] Task 8: Integrate `AlertIncidentTracker` into `RecommenderService` in `src/music_recommender/service.py`.
+- [ ] Task 9: Add service integration tests in `tests/test_service.py`.
+- [ ] Task 10: Implement endpoints `/alerts/analytics/*` in `api/main.py`.
+- [ ] Task 11: Add API integration tests in `tests/test_api.py`.
+- [ ] Task 12: Implement CLI commands `alert-analytics` and `incident-history` in `src/music_recommender/cli.py`.
+- [ ] Task 13: Add CLI tests in `tests/test_cli.py`.
+- [ ] Task 14: Add incident analytics and MTTD/MTTR status to Streamlit dashboard in `src/music_recommender/dashboard.py`.
+- [ ] Task 15: Add dashboard tests in `tests/test_dashboard.py`.
+- [ ] Task 16: Update `README.md` and `CHANGELOG.md` with 0.41.0 documentation.
+- [ ] Task 17: Bump package version to `0.41.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [ ] Task 18: Verify local CI parity, push to remote, open draft PR, monitor remote CI to 100% green.
+
+---
+
 # Milestone 0.40.0 Roadmap — Phase 173 & 174
 
 ## Phase 173 & 174: Alert Silencing, Maintenance Window Schedules, and Slack/Teams Webhook Adapters (0.40.0)
