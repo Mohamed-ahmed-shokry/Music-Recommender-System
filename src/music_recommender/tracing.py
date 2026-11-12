@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import re
 import secrets
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 _TRACE_ID_RE = re.compile(r"^[0-9a-fA-F]{32}$")
@@ -59,9 +62,7 @@ class TraceContext:
         if self.parent_span_id is not None:
             psid = self.parent_span_id.lower()
             if not _SPAN_ID_RE.match(psid) or psid == INVALID_SPAN_ID:
-                raise ValueError(
-                    f"Invalid W3C parent_span_id: '{self.parent_span_id}'"
-                )
+                raise ValueError(f"Invalid W3C parent_span_id: '{self.parent_span_id}'")
 
         object.__setattr__(self, "trace_id", tid)
         object.__setattr__(self, "span_id", sid)
@@ -83,11 +84,7 @@ class TraceContext:
 
     def new_child(self, sampled: bool | None = None) -> TraceContext:
         """Create a child context inheriting trace_id and trace_state."""
-        flags = (
-            ("01" if sampled else "00")
-            if sampled is not None
-            else self.trace_flags
-        )
+        flags = ("01" if sampled else "00") if sampled is not None else self.trace_flags
         return TraceContext(
             trace_id=self.trace_id,
             span_id=generate_span_id(),
@@ -124,9 +121,7 @@ class TraceContext:
         )
 
     @classmethod
-    def from_traceparent(
-        cls, header: str, trace_state: str = ""
-    ) -> TraceContext:
+    def from_traceparent(cls, header: str, trace_state: str = "") -> TraceContext:
         """Parse W3C traceparent header string (00-{trace_id}-{span_id}-{flags})."""
         raw = header.strip()
         match = _TRACEPARENT_RE.match(raw)
@@ -134,9 +129,7 @@ class TraceContext:
             raise ValueError(f"Malformed W3C traceparent header: '{header}'")
         version, tid, sid, flags = match.groups()
         if version == "ff":
-            raise ValueError(
-                f"Unsupported W3C traceparent version 0xff in '{header}'"
-            )
+            raise ValueError(f"Unsupported W3C traceparent version 0xff in '{header}'")
         return cls(
             trace_id=tid,
             span_id=sid,
@@ -145,9 +138,7 @@ class TraceContext:
         )
 
     @classmethod
-    def new_root(
-        cls, sampled: bool = True, trace_state: str = ""
-    ) -> TraceContext:
+    def new_root(cls, sampled: bool = True, trace_state: str = "") -> TraceContext:
         """Generate a new root trace context."""
         return cls(
             trace_id=generate_trace_id(),
@@ -156,3 +147,259 @@ class TraceContext:
             trace_flags="01" if sampled else "00",
             trace_state=trace_state.strip(),
         )
+
+
+class SpanKind(StrEnum):
+    """OpenTelemetry span kind classifications."""
+
+    INTERNAL = "internal"
+    SERVER = "server"
+    CLIENT = "client"
+    PRODUCER = "producer"
+    CONSUMER = "consumer"
+
+    def to_otlp_code(self) -> int:
+        """Map span kind to standard OpenTelemetry numeric enum code."""
+        mapping = {
+            SpanKind.INTERNAL: 1,
+            SpanKind.SERVER: 2,
+            SpanKind.CLIENT: 3,
+            SpanKind.PRODUCER: 4,
+            SpanKind.CONSUMER: 5,
+        }
+        return mapping[self]
+
+
+class SpanStatus(StrEnum):
+    """OpenTelemetry span completion status codes."""
+
+    UNSET = "unset"
+    OK = "ok"
+    ERROR = "error"
+
+    def to_otlp_code(self) -> int:
+        """Map span status to standard OpenTelemetry numeric code."""
+        mapping = {
+            SpanStatus.UNSET: 0,
+            SpanStatus.OK: 1,
+            SpanStatus.ERROR: 2,
+        }
+        return mapping[self]
+
+
+def _attributes_to_otlp(attrs: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert a Python dictionary of attributes to OTLP KeyValue format."""
+    result: list[dict[str, Any]] = []
+    for k, v in attrs.items():
+        if isinstance(v, bool):
+            val: dict[str, Any] = {"boolValue": v}
+        elif isinstance(v, int):
+            val = {"intValue": str(v)}
+        elif isinstance(v, float):
+            val = {"doubleValue": v}
+        else:
+            val = {"stringValue": str(v)}
+        result.append({"key": str(k), "value": val})
+    return result
+
+
+@dataclass
+class SpanEvent:
+    """An event or annotation occurring during a span's lifetime."""
+
+    name: str
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    attributes: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert span event to dictionary representation."""
+        return {
+            "name": self.name,
+            "timestamp": self.timestamp,
+            "attributes": dict(self.attributes),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SpanEvent:
+        """Reconstruct span event from dictionary representation."""
+        return cls(
+            name=str(data.get("name", "")),
+            timestamp=str(data.get("timestamp", "")),
+            attributes=dict(data.get("attributes", {})),
+        )
+
+    def to_otlp_dict(self) -> dict[str, Any]:
+        """Convert span event to OpenTelemetry OTLP JSON format."""
+        try:
+            dt = datetime.fromisoformat(self.timestamp)
+            nano = int(dt.timestamp() * 1e9)
+        except Exception:
+            nano = int(time.time() * 1e9)
+        return {
+            "timeUnixNano": str(nano),
+            "name": self.name,
+            "attributes": _attributes_to_otlp(self.attributes),
+        }
+
+
+@dataclass
+class SpanRecord:
+    """A trace span record representing a single unit of execution."""
+
+    span_id: str
+    trace_id: str
+    name: str
+    parent_span_id: str | None = None
+    kind: SpanKind = SpanKind.INTERNAL
+    start_time: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    end_time: str | None = None
+    duration_seconds: float = 0.0
+    status: SpanStatus = SpanStatus.UNSET
+    status_message: str | None = None
+    attributes: dict[str, Any] = field(default_factory=dict)
+    events: list[SpanEvent] = field(default_factory=list)
+
+    def finish(
+        self,
+        status: SpanStatus | str | None = None,
+        message: str | None = None,
+    ) -> SpanRecord:
+        """Finish span execution, setting end_time and duration_seconds."""
+        now_dt = datetime.now(UTC)
+        self.end_time = now_dt.isoformat()
+        try:
+            start_dt = datetime.fromisoformat(self.start_time)
+            self.duration_seconds = max(0.0, (now_dt - start_dt).total_seconds())
+        except Exception:
+            self.duration_seconds = 0.0
+        if status is not None:
+            self.status = SpanStatus(status) if isinstance(status, str) else status
+        if message is not None:
+            self.status_message = message
+        return self
+
+    def set_attribute(self, key: str, value: Any) -> SpanRecord:
+        """Set a single span attribute."""
+        self.attributes[str(key)] = value
+        return self
+
+    def add_event(
+        self, name: str, attributes: dict[str, Any] | None = None
+    ) -> SpanEvent:
+        """Append an event annotation to this span."""
+        event = SpanEvent(
+            name=name,
+            attributes=attributes or {},
+        )
+        self.events.append(event)
+        return event
+
+    def record_exception(
+        self, exc: BaseException, attributes: dict[str, Any] | None = None
+    ) -> SpanRecord:
+        """Record an unhandled exception, setting status to ERROR."""
+        self.status = SpanStatus.ERROR
+        self.status_message = f"{type(exc).__name__}: {exc}"
+        event_attrs: dict[str, Any] = {
+            "exception.type": type(exc).__name__,
+            "exception.message": str(exc),
+        }
+        if attributes:
+            event_attrs.update(attributes)
+        self.add_event(name="exception", attributes=event_attrs)
+        return self
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert span record to dictionary representation."""
+        return {
+            "span_id": self.span_id,
+            "trace_id": self.trace_id,
+            "parent_span_id": self.parent_span_id,
+            "name": self.name,
+            "kind": self.kind.value,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "duration_seconds": round(self.duration_seconds, 6),
+            "status": self.status.value,
+            "status_message": self.status_message,
+            "attributes": dict(self.attributes),
+            "events": [event.to_dict() for event in self.events],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SpanRecord:
+        """Reconstruct span record from dictionary representation."""
+        kind_str = str(data.get("kind", SpanKind.INTERNAL.value))
+        try:
+            kind = SpanKind(kind_str)
+        except ValueError:
+            kind = SpanKind.INTERNAL
+
+        status_str = str(data.get("status", SpanStatus.UNSET.value))
+        try:
+            status = SpanStatus(status_str)
+        except ValueError:
+            status = SpanStatus.UNSET
+
+        events_raw = data.get("events", [])
+        events = (
+            [SpanEvent.from_dict(e) for e in events_raw]
+            if isinstance(events_raw, list)
+            else []
+        )
+
+        return cls(
+            span_id=str(data["span_id"]),
+            trace_id=str(data["trace_id"]),
+            name=str(data.get("name", "")),
+            parent_span_id=(
+                str(data["parent_span_id"])
+                if data.get("parent_span_id") is not None
+                else None
+            ),
+            kind=kind,
+            start_time=str(data.get("start_time", "")),
+            end_time=(
+                str(data["end_time"]) if data.get("end_time") is not None else None
+            ),
+            duration_seconds=float(data.get("duration_seconds", 0.0)),
+            status=status,
+            status_message=(
+                str(data["status_message"])
+                if data.get("status_message") is not None
+                else None
+            ),
+            attributes=dict(data.get("attributes", {})),
+            events=events,
+        )
+
+    def to_otlp_dict(self) -> dict[str, Any]:
+        """Convert span record to canonical OpenTelemetry OTLP JSON format."""
+        try:
+            start_nano = int(datetime.fromisoformat(self.start_time).timestamp() * 1e9)
+        except Exception:
+            start_nano = 0
+        try:
+            end_nano = (
+                int(datetime.fromisoformat(self.end_time).timestamp() * 1e9)
+                if self.end_time
+                else start_nano
+            )
+        except Exception:
+            end_nano = start_nano
+
+        return {
+            "traceId": self.trace_id,
+            "spanId": self.span_id,
+            "parentSpanId": self.parent_span_id or "",
+            "name": self.name,
+            "kind": self.kind.to_otlp_code(),
+            "startTimeUnixNano": str(start_nano),
+            "endTimeUnixNano": str(end_nano),
+            "attributes": _attributes_to_otlp(self.attributes),
+            "events": [event.to_otlp_dict() for event in self.events],
+            "status": {
+                "code": self.status.to_otlp_code(),
+                "message": self.status_message or "",
+            },
+        }
