@@ -4005,6 +4005,214 @@ class AlertIncidentAnalytics:
         }
 
 
+class AlertIncidentTracker:
+    """Thread-safe tracker correlating alert transitions into incident lifecycles."""
+
+    def __init__(
+        self,
+        storage_dir: Path | str | None = None,
+        max_history: int = 1000,
+        evaluation_interval_seconds: float = PROMETHEUS_EVALUATION_INTERVAL_SECONDS,
+    ) -> None:
+        self._lock = threading.Lock()
+        self._storage_dir = Path(storage_dir) if storage_dir else None
+        self._max_history = max_history
+        self._eval_interval = evaluation_interval_seconds
+        self._active_incidents: dict[str, IncidentLifecycleRecord] = {}
+        self._history: list[IncidentLifecycleRecord] = []
+        if self._storage_dir:
+            self._load()
+
+    def record_transition(
+        self,
+        transition: AlertTransition,
+        now: float | None = None,
+        remediations: int = 0,
+        silenced: bool = False,
+        root_causes: Sequence[str] | None = None,
+    ) -> IncidentLifecycleRecord | None:
+        """Record an alert firing or resolved transition and correlate into incident."""
+        current_time = time.time() if now is None else now
+        rule_name = transition.rule.name
+
+        with self._lock:
+            if transition.is_firing:
+                if rule_name in self._active_incidents:
+                    inc = self._active_incidents[rule_name]
+                    inc.remediations_triggered += remediations
+                    if silenced:
+                        inc.silenced = True
+                    if root_causes:
+                        for rc in root_causes:
+                            if rc not in inc.root_causes:
+                                inc.root_causes.append(rc)
+                    return inc
+
+                # Calculate estimated detection latency from rule for_evaluations
+                est_mttd = float(
+                    transition.rule.for_evaluations * self._eval_interval
+                )
+                severity_val = (
+                    transition.rule.severity.value
+                    if hasattr(transition.rule.severity, "value")
+                    else str(transition.rule.severity)
+                )
+                inc = IncidentLifecycleRecord(
+                    incident_id=str(uuid.uuid4())[:8],
+                    rule_name=rule_name,
+                    severity=severity_val,
+                    started_at=current_time,
+                    detection_latency_seconds=est_mttd,
+                    remediations_triggered=remediations,
+                    silenced=silenced,
+                    root_causes=list(root_causes or []),
+                    labels=dict(transition.rule.labels),
+                )
+                self._active_incidents[rule_name] = inc
+                self._persist()
+                return inc
+
+            elif transition.is_resolved:
+                if rule_name in self._active_incidents:
+                    inc = self._active_incidents.pop(rule_name)
+                    inc.resolve(current_time)
+                    self._history.append(inc)
+                    if len(self._history) > self._max_history:
+                        self._history = self._history[-self._max_history :]
+                    self._persist()
+                    return inc
+                return None
+
+            return None
+
+    def record_remediation(self, rule_name: str, count: int = 1) -> None:
+        """Increment count of remediation attempts for an active incident."""
+        with self._lock:
+            if rule_name in self._active_incidents:
+                self._active_incidents[rule_name].remediations_triggered += count
+                self._persist()
+
+    def get_active_incidents(self) -> list[IncidentLifecycleRecord]:
+        """Return shallow copy of all currently ongoing incidents."""
+        with self._lock:
+            return list(self._active_incidents.values())
+
+    def get_history(
+        self, limit: int = 100, rule_name: str | None = None
+    ) -> list[IncidentLifecycleRecord]:
+        """Return list of historical (resolved) incidents, newest first."""
+        with self._lock:
+            recs = [
+                r
+                for r in reversed(self._history)
+                if rule_name is None or r.rule_name == rule_name
+            ]
+            return recs[:limit]
+
+    def get_all_incidents(self) -> list[IncidentLifecycleRecord]:
+        """Return all active and historical incidents."""
+        with self._lock:
+            return list(self._active_incidents.values()) + list(self._history)
+
+    def get_analytics(
+        self,
+        window_seconds: float = 86400.0,
+        slo_target_pct: float = 99.9,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        """Compute aggregated incident analytics across all incidents."""
+        incidents = self.get_all_incidents()
+        return AlertIncidentAnalytics.compute_summary(
+            incidents=incidents,
+            window_seconds=window_seconds,
+            slo_target_pct=slo_target_pct,
+            now=now,
+        )
+
+    def get_rule_stats(
+        self,
+        rule_name: str,
+        window_seconds: float = 86400.0,
+        slo_target_pct: float = 99.9,
+        now: float | None = None,
+    ) -> RuleIncidentStats:
+        """Compute reliability stats for a specific alert rule."""
+        incidents = self.get_all_incidents()
+        return AlertIncidentAnalytics.compute_rule_stats(
+            rule_name=rule_name,
+            incidents=incidents,
+            window_seconds=window_seconds,
+            slo_target_pct=slo_target_pct,
+            now=now,
+        )
+
+    def get_all_rule_stats(
+        self,
+        window_seconds: float = 86400.0,
+        slo_target_pct: float = 99.9,
+        now: float | None = None,
+    ) -> dict[str, RuleIncidentStats]:
+        """Compute reliability stats for each alert rule."""
+        incidents = self.get_all_incidents()
+        return AlertIncidentAnalytics.compute_all_stats(
+            incidents=incidents,
+            window_seconds=window_seconds,
+            slo_target_pct=slo_target_pct,
+            now=now,
+        )
+
+    def clear(self) -> None:
+        """Clear active and historical incidents."""
+        with self._lock:
+            self._active_incidents.clear()
+            self._history.clear()
+            if self._storage_dir:
+                file_path = self._storage_dir / "incidents.json"
+                if file_path.exists():
+                    file_path.unlink()
+
+    def _persist(self) -> None:
+        """Persist state to disk if storage_dir is configured."""
+        if not self._storage_dir:
+            return
+        try:
+            self._storage_dir.mkdir(parents=True, exist_ok=True)
+            file_path = self._storage_dir / "incidents.json"
+            data = {
+                "active": [i.to_dict() for i in self._active_incidents.values()],
+                "history": [i.to_dict() for i in self._history],
+            }
+            tmp = file_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            tmp.replace(file_path)
+        except Exception as exc:
+            logger.warning("Failed to persist alert incidents: %s", exc)
+
+    def _load(self) -> None:
+        """Load state from disk."""
+        if not self._storage_dir:
+            return
+        file_path = self._storage_dir / "incidents.json"
+        if not file_path.exists():
+            return
+        try:
+            raw = json.loads(file_path.read_text(encoding="utf-8"))
+            self._active_incidents = {
+                item["rule_name"]: IncidentLifecycleRecord.from_dict(item)
+                for item in raw.get("active", [])
+                if isinstance(item, dict) and "rule_name" in item
+            }
+            self._history = [
+                IncidentLifecycleRecord.from_dict(item)
+                for item in raw.get("history", [])
+                if isinstance(item, dict)
+            ]
+        except Exception as exc:
+            logger.warning(
+                "Failed to load alert incidents from %s: %s", file_path, exc
+            )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Write generated Prometheus rules or Alertmanager config to PATH or stdout."""
     import sys
