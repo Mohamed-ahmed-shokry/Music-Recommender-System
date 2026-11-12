@@ -20,7 +20,7 @@
 - [x] Task 17: Add CLI tests in `tests/test_cli.py`.
 - [x] Task 18: Add trace viewer to Streamlit dashboard in `src/music_recommender/dashboard.py` and test in `tests/test_dashboard.py`.
 - [x] Task 19: Update `README.md` and `CHANGELOG.md` with 0.42.0 documentation.
-- [ ] Task 20: Bump package version to `0.42.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [x] Task 20: Bump package version to `0.42.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
 - [ ] Task 21: Verify local CI parity, push to remote, open draft PR, monitor remote CI to 100% green.
 
 ## 2. Acceptance Criteria Tracking
