@@ -1145,6 +1145,14 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
     uv run music-recommender trace-inspect <trace_id> --otlp   # export canonical OpenTelemetry JSON payload
     ```
 
+13. **Distributed Rate Limiting, Token-Bucket Throttling & Tenant Quotas** — Multi-tenant rate limiting (`free`, `pro`, `enterprise`) combining token-bucket burst smoothing, sliding-window caps, daily quotas, abuse quarantine, and state snapshot synchronization:
+
+    ```bash
+    uv run music-recommender ratelimit-stats                         # inspect aggregate limiter stats & tenant quotas
+    uv run music-recommender tenant-quota acme --set-tier pro        # upgrade tenant quota tier
+    uv run music-recommender tenant-quota acme --unblock --json      # lift quarantine and emit JSON snapshot
+    ```
+
 ## API Reference
 
 Train before starting the API:
@@ -1228,6 +1236,10 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/traces/{trace_id}` | Retrieve all execution spans belonging to a trace, ordered chronologically |
 | `GET` | `/traces/export/otlp?trace_id=...` | Export trace spans in canonical OpenTelemetry JSON format |
 | `POST` | `/traces/correlate/alert` | Correlate an alert or incident with candidate traces and error spans |
+| `GET` | `/ratelimit/stats` | Return aggregate rate-limiter telemetry and active tenant quotas |
+| `GET` | `/ratelimit/tenants/{tenant_id}` | Return detailed token-bucket, sliding-window, and daily quota usage for a tenant |
+| `POST` | `/ratelimit/tenants/{tenant_id}/tier` | Assign a rate-limit tier (`free`, `pro`, `enterprise`) to a tenant |
+| `POST` | `/ratelimit/tenants/{tenant_id}/unblock` | Lift an active quarantine block and clear recent violations |
 
 Example requests:
 
