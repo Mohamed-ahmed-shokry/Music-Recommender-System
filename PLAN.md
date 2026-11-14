@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.43.0) — active development (branch `phase/179-rate-limiting-and-quotas`)
+## Current milestone (0.43.0) — ready for review (branch `phase/179-rate-limiting-and-quotas`, PR #38)
 
 Distributed Rate Limiting, Token-Bucket Throttling, and Tenant Quota Governance.
 The 0.42.0 release delivered distributed trace context propagation, OpenTelemetry span ingestion, and alert-to-trace correlation.
@@ -13,8 +13,8 @@ automated abuse detection guardrails quarantining abusive tenants/IPs with JSON 
 HTTP middleware (`RateLimitMiddleware` in `api/middleware.py`), `RecommenderService` quota governance APIs, Prometheus rate-limit metrics, FastAPI endpoints (`/ratelimit/*`), operator CLI tooling (`ratelimit-stats`, `tenant-quota`), and Streamlit dashboard visibility.
 
 - Phase 179 — Token-bucket and sliding-window rate limiting engine with tiered tenant quotas:
-  `TenantTier`, `QuotaPolicy`, `RateLimitDecision`, `RateLimiterEngine` in `ratelimit.py` (in progress).
-- Phase 180 — Distributed rate limit synchronization, abuse detection guardrails, API/CLI/dashboard integration, clean CI.
+  `TenantTier`, `QuotaPolicy`, `RateLimitDecision`, `RateLimiterEngine` in `ratelimit.py` (completed).
+- Phase 180 — Distributed rate limit synchronization, abuse detection guardrails, API/CLI/dashboard integration, clean CI (completed).
 
 ## Next milestone (0.44.0) — planned
 
