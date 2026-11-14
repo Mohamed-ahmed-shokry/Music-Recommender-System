@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
+import threading
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Literal
 
 
@@ -276,16 +281,16 @@ class ShadowCanaryRouter:
             return raw / float(1 << 64)
 
     def route(self, entity_id: str) -> RoutingDecision:
-        """Deterministically route an entity to champion or canary (+ optional shadow)."""
+        """Route an entity to champion or canary (+ optional shadow)."""
         with self._lock:
             score = self._bucket_score(entity_id)
             mode = self.policy.mode
             arm: Literal["champion", "canary"] = "champion"
             shadow_arm: str | None = None
 
-            if mode == DeploymentMode.PROMOTED:
-                arm = "canary"
-            elif mode == DeploymentMode.CANARY and score < self.policy.canary_weight:
+            if mode == DeploymentMode.PROMOTED or (
+                mode == DeploymentMode.CANARY and score < self.policy.canary_weight
+            ):
                 arm = "canary"
 
             if (
@@ -473,8 +478,8 @@ class ShadowCanaryRouter:
                     status="insufficient_data",
                     should_rollback=False,
                     reasons=[
-                        f"Need >= {self.guardrails.min_samples_per_arm} samples per arm "
-                        f"(champion={champ.requests}, canary={cand.requests})."
+                        f"Need >= {self.guardrails.min_samples_per_arm} samples "
+                        f"per arm (champion={champ.requests}, canary={cand.requests})."
                     ],
                     z_score=0.0,
                     p_value=1.0,
@@ -559,7 +564,7 @@ class ShadowCanaryRouter:
             return result
 
     def get_status(self) -> dict[str, Any]:
-        """Return full canary policy, arm metrics, shadow comparisons, and evaluation."""
+        """Return canary policy, arm metrics, shadow summary, and evaluation."""
         with self._lock:
             comparisons = list(self._shadow_comparisons)
             avg_overlap = (
