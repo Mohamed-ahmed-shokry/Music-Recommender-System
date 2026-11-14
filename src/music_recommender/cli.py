@@ -5971,5 +5971,113 @@ def trace_inspect_command(
                 )
 
 
+def _get_rate_limiter_or_service() -> tuple[Any | None, Any]:
+    from music_recommender.ratelimit import get_global_rate_limiter
+
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable: %s", exc)
+
+    if service is not None:
+        return service, service.rate_limiter
+    return None, get_global_rate_limiter()
+
+
+@app.command("ratelimit-stats")
+def ratelimit_stats_command(
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON rate-limiter statistics."),
+    ] = False,
+) -> None:
+    """Display aggregate distributed rate-limiter telemetry and tenant counts."""
+    _service, engine = _get_rate_limiter_or_service()
+    stats = engine.get_stats()
+    if as_json:
+        typer.echo(json.dumps(stats, indent=2))
+        return
+
+    typer.secho("=== Distributed Rate Limiter Stats ===", bold=True)
+    typer.echo(f"Enabled:          {stats['enabled']}")
+    typer.echo(f"Default Tier:     {stats['default_tier']}")
+    typer.echo(f"Allowed Total:    {stats['requests_allowed_total']}")
+    typer.echo(f"Rejected Total:   {stats['requests_rejected_total']}")
+    typer.echo(f"Active Tenants:   {stats['active_tenants']}")
+    typer.echo(f"Blocked Tenants:  {stats['blocked_tenants']}")
+    for tenant in stats.get("tenants", []):
+        status = "BLOCKED" if tenant.get("blocked") else "ACTIVE"
+        typer.echo(
+            f"  - {tenant['tenant_id']} [{tenant['tier']}] "
+            f"daily={tenant['daily_used']}/{tenant['daily_quota']} "
+            f"tokens={tenant['tokens_available']}/{tenant['burst_capacity']} "
+            f"({status})"
+        )
+
+
+@app.command("tenant-quota")
+def tenant_quota_command(
+    tenant_id: Annotated[
+        str,
+        typer.Argument(help="Tenant identifier to inspect or update."),
+    ],
+    set_tier: Annotated[
+        str | None,
+        typer.Option(
+            "--set-tier",
+            help="Assign tier (free, pro, enterprise) to the tenant.",
+        ),
+    ] = None,
+    unblock: Annotated[
+        bool,
+        typer.Option("--unblock", help="Lift any active quarantine block."),
+    ] = False,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON tenant quota payload."),
+    ] = False,
+) -> None:
+    """Inspect or manage a tenant's rate-limit tier, quota usage, and quarantine."""
+    from music_recommender.ratelimit import TenantTier
+
+    _service, engine = _get_rate_limiter_or_service()
+    if set_tier is not None:
+        try:
+            resolved_tier = TenantTier(set_tier.strip().lower())
+        except ValueError as exc:
+            typer.secho(
+                f"Invalid tier '{set_tier}'. Expected: free, pro, enterprise.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(code=1) from exc
+        engine.set_tenant_tier(tenant_id, resolved_tier)
+
+    if unblock:
+        engine.unblock_tenant(tenant_id)
+
+    usage = engine.get_tenant_usage(tenant_id)
+    if as_json:
+        typer.echo(json.dumps(usage, indent=2))
+        return
+
+    typer.secho(f"=== Tenant Quota: {usage['tenant_id']} ===", bold=True)
+    typer.echo(f"Tier:             {usage['tier']}")
+    typer.echo(f"Algorithm:        {usage['algorithm']}")
+    typer.echo(
+        f"Token Bucket:     {usage['tokens_available']}/{usage['burst_capacity']} "
+        f"(+{usage['requests_per_second']}/s)"
+    )
+    typer.echo(
+        f"Sliding Window:   {usage['window_used']}/{usage['max_requests_per_window']} "
+        f"per {usage['window_seconds']}s"
+    )
+    typer.echo(
+        f"Daily Quota:      {usage['daily_used']}/{usage['daily_quota']} "
+        f"(remaining={usage['daily_remaining']})"
+    )
+    typer.echo(f"Blocked:          {usage['blocked']}")
+
+
 if __name__ == "__main__":
     app()  # pragma: no cover - CLI entry point invoked by `python -m`

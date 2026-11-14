@@ -1,3 +1,75 @@
+# Milestone 0.43.0 Roadmap — Phase 179 & 180
+
+## Phase 179 & 180: Distributed Rate Limiting, Token-Bucket Throttling, and Tenant Quota Governance (0.43.0)
+
+### 1. Objective
+Equip the platform with production-grade multi-tenant rate limiting, quota governance, and abuse protection:
+1. A **Rate Limiting & Quota Engine** (`RateLimiterEngine`, `QuotaPolicy`, `TenantTier`, `RateLimitDecision`, `AbuseGuardrailConfig`) supporting dual Token-Bucket (burst + refill) and Sliding-Window algorithms alongside daily tenant quotas.
+2. **Abuse Detection & Guardrails** automatically quarantining abusive tenants/IPs exceeding repeated violation thresholds, with state snapshot export/import for distributed synchronization.
+3. Integration with HTTP middleware (`RateLimitMiddleware` in `api/middleware.py`), `RecommenderService` governance APIs, Prometheus telemetry (`telemetry.py`), FastAPI endpoints (`/ratelimit/*`), operator CLI tooling (`ratelimit-stats`, `tenant-quota`), and Streamlit dashboard observability, releasing Milestone 0.43.0 with 100% green CI.
+
+### 2. Scope
+1. **Rate Limiting Engine (`src/music_recommender/ratelimit.py`)**:
+   - `TenantTier`: `FREE`, `STANDARD`, `PRO`, `ENTERPRISE`, `INTERNAL` with default `QuotaPolicy` profiles.
+   - `RateLimiterEngine`: Thread-safe token bucket + sliding window + daily quota evaluation, per-tenant tier assignment, abuse detection with temporary quarantine, and JSON state sync (`export_state()`, `import_state()`).
+   - `RateLimitDecision`: Rich decision object emitting standard `X-RateLimit-*` and `Retry-After` headers.
+2. **HTTP Middleware (`api/middleware.py`)**:
+   - `RateLimitMiddleware`: Tenant extraction (`X-Tenant-ID`, `X-API-Key`, client IP), `X-RateLimit-*` header injection, and `429 Too Many Requests` enforcement when enabled.
+3. **Service Layer & Telemetry (`src/music_recommender/service.py`, `telemetry.py`)**:
+   - Expose `get_rate_limit_stats()`, `get_tenant_quota()`, `set_tenant_tier()`, `block_tenant()`, `unblock_tenant()`.
+   - Export Prometheus metrics for allowed/rejected requests and active blocked tenants.
+4. **FastAPI Endpoints (`api/main.py`)**:
+   - `GET /ratelimit/stats`, `GET /ratelimit/tenants/{tenant_id}`, `POST /ratelimit/tenants/{tenant_id}/tier`, `POST /ratelimit/tenants/{tenant_id}/unblock`.
+5. **Operator CLI Tooling (`src/music_recommender/cli.py`)**:
+   - `music-recommender ratelimit-stats` and `music-recommender tenant-quota`.
+6. **Dashboard Visualization (`src/music_recommender/dashboard.py`)**:
+   - Streamlit "Rate Limits & Quotas" tab rendering live throttle metrics, blocked tenants, and quota inspection.
+7. **Comprehensive Tests & Release 0.43.0**:
+   - Unit and integration tests in `tests/test_ratelimit.py`, `tests/test_api.py`, `tests/test_service.py`, `tests/test_cli.py`, `tests/test_dashboard.py`.
+   - Documentation updates (`README.md`, `CHANGELOG.md`, `PLAN.md`, `docs/PROGRESS.md`) and version bump to `0.43.0`.
+
+### 3. Acceptance Criteria
+- [ ] AC-1: `RateLimiterEngine` enforces token-bucket burst/refill, sliding-window limits, and daily quotas accurately.
+- [ ] AC-2: Abuse guardrail detects repeated violations, blocks offending tenants temporarily, and supports manual unblock and state sync.
+- [ ] AC-3: `RateLimitMiddleware` injects `X-RateLimit-*` headers and enforces HTTP 429 with `Retry-After`.
+- [ ] AC-4: `RecommenderService` exposes tenant quota governance methods and Prometheus telemetry exports rate-limit metrics.
+- [ ] AC-5: FastAPI endpoints `/ratelimit/*` validate payloads and manage tenant tiers/blocks.
+- [ ] AC-6: Operator CLI commands `ratelimit-stats` and `tenant-quota` execute cleanly in text and JSON modes.
+- [ ] AC-7: Streamlit dashboard renders the "Rate Limits & Quotas" governance tab without errors.
+- [ ] AC-8: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Validation & CI Plan
+- `uv run ruff format --check .`
+- `uv run ruff check .`
+- `uv run mypy`
+- `uv run --extra dashboard --extra tracking --extra spotify pytest --cov`
+- `uv build`
+- Remote GitHub Actions CI on PR branch 100% green.
+
+### 5. Exclusions
+- External Redis cluster network client (deferred to a future phase; JSON state snapshot export/import provides the synchronization contract cleanly without adding external runtime dependencies).
+
+### 6. Micro-Task Breakdown
+1. Define Phase 179 & 180 roadmap, update `PLAN.md`, and initialize `docs/PROGRESS.md`.
+2. Implement `TenantTier`, `RateLimitAlgorithm`, `QuotaPolicy`, and `RateLimitDecision` in `src/music_recommender/ratelimit.py`.
+3. Add unit tests for quota policies and `RateLimitDecision` in `tests/test_ratelimit.py`.
+4. Implement `TokenBucketState`, `SlidingWindowState`, `AbuseGuardrailConfig`, and `RateLimiterEngine` in `src/music_recommender/ratelimit.py`.
+5. Add unit tests for token bucket, sliding window, daily quota, abuse guardrails, and state sync in `tests/test_ratelimit.py`.
+6. Implement `RateLimitMiddleware` in `api/middleware.py`.
+7. Add unit tests for `RateLimitMiddleware` in `tests/test_api.py`.
+8. Integrate `RateLimiterEngine` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
+9. Add service and telemetry integration tests in `tests/test_service.py`.
+10. Mount `RateLimitMiddleware` and implement `/ratelimit/*` endpoints in `api/main.py`.
+11. Add API integration tests for `/ratelimit/*` in `tests/test_api.py`.
+12. Implement CLI commands `ratelimit-stats` and `tenant-quota` in `src/music_recommender/cli.py`.
+13. Add CLI tests in `tests/test_cli.py`.
+14. Add "Rate Limits & Quotas" tab to `src/music_recommender/dashboard.py` and test in `tests/test_dashboard.py`.
+15. Update `README.md`, `CHANGELOG.md`, `PLAN.md`, and `docs/PROGRESS.md` for `0.43.0`.
+16. Bump version to `0.43.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+17. Run full local CI-parity checks, push to remote, open draft PR, monitor remote CI to 100% green.
+
+---
+
 # Milestone 0.42.0 Roadmap — Phase 177 & 178
 
 ## Phase 177 & 178: Distributed Trace Context Propagation, OpenTelemetry Span Ingestion, and Alert Trace Correlator (0.42.0)

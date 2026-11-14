@@ -4439,3 +4439,56 @@ def test_list_traces_and_trace_inspect_cli() -> None:
 
     # Cleanup
     tracer.clear()
+
+
+def test_ratelimit_and_tenant_quota_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from music_recommender.ratelimit import RateLimiterEngine, set_global_rate_limiter
+
+    engine = RateLimiterEngine(enabled=True)
+    set_global_rate_limiter(engine)
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(
+            lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError())
+        ),
+    )
+
+    runner = CliRunner()
+    engine.check_and_consume("cli-tenant")
+    engine.block_tenant("cli-tenant", duration_seconds=60.0, reason="cli_test")
+
+    # 1. ratelimit-stats --json and human-readable
+    res_stats_json = runner.invoke(cli.app, ["ratelimit-stats", "--json"])
+    assert res_stats_json.exit_code == 0
+    stats = json.loads(res_stats_json.output)
+    assert stats["requests_allowed_total"] == 1
+    assert stats["blocked_tenants"] == 1
+
+    res_stats_human = runner.invoke(cli.app, ["ratelimit-stats"])
+    assert res_stats_human.exit_code == 0
+    assert "Distributed Rate Limiter Stats" in res_stats_human.output
+    assert "cli-tenant" in res_stats_human.output
+
+    # 2. tenant-quota --set-tier --unblock --json
+    res_update = runner.invoke(
+        cli.app,
+        ["tenant-quota", "cli-tenant", "--set-tier", "pro", "--unblock", "--json"],
+    )
+    assert res_update.exit_code == 0
+    quota = json.loads(res_update.output)
+    assert quota["tier"] == "pro"
+    assert quota["blocked"] is False
+
+    # 3. tenant-quota human-readable
+    res_human = runner.invoke(cli.app, ["tenant-quota", "cli-tenant"])
+    assert res_human.exit_code == 0
+    assert "Tenant Quota: cli-tenant" in res_human.output
+
+    # 4. Invalid tier returns exit code 1
+    res_bad = runner.invoke(
+        cli.app, ["tenant-quota", "cli-tenant", "--set-tier", "invalid"]
+    )
+    assert res_bad.exit_code == 1

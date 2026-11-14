@@ -19,6 +19,7 @@ from music_recommender.dashboard import (
 
 class FakeDashboardService:
     def __init__(self) -> None:
+        from music_recommender.ratelimit import RateLimiterEngine
         from music_recommender.tracing import (
             AlertTraceCorrelator,
             DistributedTracer,
@@ -26,6 +27,7 @@ class FakeDashboardService:
 
         self.tracer = DistributedTracer()
         self.trace_correlator = AlertTraceCorrelator(self.tracer)
+        self.rate_limiter = RateLimiterEngine(enabled=True)
         self.context_features: tuple[str, ...] = (
             "log_plays",
             "log_unique_artists",
@@ -438,6 +440,9 @@ class FakeDashboardService:
             incident_id=incident_id,
         )
 
+    def get_rate_limit_stats(self) -> dict[str, Any]:
+        return self.rate_limiter.get_stats()
+
     def browse_artists(
         self,
         *,
@@ -814,6 +819,7 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Ablation Summary",
         "Cold-Start Bandit",
         "Distributed Traces",
+        "Rate Limits & Quotas",
     ]
     assert [metric.label for metric in app.metric] == [
         "Listeners",
@@ -824,6 +830,10 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Context dim",
         "Alpha",
         "Total selections",
+        "Allowed Requests",
+        "Rejected Requests",
+        "Active Tenants",
+        "Blocked Tenants",
     ]
 
 
@@ -1476,6 +1486,7 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
         "Ablation Summary",
         "Cold-Start Bandit",
         "Distributed Traces",
+        "Rate Limits & Quotas",
     ]
 
 
@@ -2032,4 +2043,22 @@ def test_dashboard_traces_tab_rendering() -> None:
         "Distributed Tracing & OpenTelemetry Explorer" in h.value for h in app.header
     )
     assert any("Distributed Traces" in str(tab.label) for tab in app.tabs)
+    assert len(app.dataframe) >= 1
+
+
+def test_dashboard_ratelimit_tab_rendering() -> None:
+    service = FakeDashboardService()
+    service.rate_limiter.check_and_consume("dash-tenant")
+
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(
+        "Distributed Rate Limits & Tenant Quotas" in s.value for s in app.subheader
+    )
+    assert any("Rate Limits & Quotas" in str(tab.label) for tab in app.tabs)
     assert len(app.dataframe) >= 1

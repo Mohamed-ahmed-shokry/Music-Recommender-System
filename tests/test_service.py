@@ -2662,3 +2662,42 @@ def test_service_distributed_tracing_integration(tmp_path: Path) -> None:
     assert spans[0]["name"] == "service.recommend_user"
 
     tracer.clear()
+
+
+def test_service_rate_limiting_and_telemetry_integration(tmp_path: Path) -> None:
+    from music_recommender.ratelimit import RateLimiterEngine, TenantTier
+    from music_recommender.telemetry import export_prometheus_metrics
+
+    service = create_service(tmp_path)
+    service.rate_limiter = RateLimiterEngine(enabled=True)
+
+    # Upgrade tenant tier and consume a couple of requests
+    tier_res = service.set_tenant_tier("acme", TenantTier.PRO)
+    assert tier_res["policy"]["tier"] == "pro"
+    assert service.rate_limiter.check_and_consume("acme").allowed is True
+    assert service.rate_limiter.check_and_consume("acme").allowed is True
+
+    usage = service.get_tenant_quota("acme")
+    assert usage["daily_used"] == 2
+    assert usage["tier"] == "pro"
+
+    # Block and unblock tenant
+    blk = service.block_tenant("spammer", duration_seconds=60.0, reason="abuse")
+    assert blk["blocked"] is True
+    assert service.rate_limiter.check_and_consume("spammer").allowed is False
+
+    stats = service.get_rate_limit_stats()
+    assert stats["requests_allowed_total"] == 2
+    assert stats["requests_rejected_total"] == 1
+    assert stats["blocked_tenants"] == 1
+
+    # Prometheus exposition includes rate-limiter metrics
+    prom_text = export_prometheus_metrics(service)
+    assert "music_recommender_ratelimit_requests_allowed_total 2" in prom_text
+    assert "music_recommender_ratelimit_requests_rejected_total 1" in prom_text
+    assert "music_recommender_ratelimit_blocked_tenants 1" in prom_text
+
+    unblk = service.unblock_tenant("spammer")
+    assert unblk["unblocked"] is True
+    assert unblk["was_blocked"] is True
+    assert service.get_rate_limit_stats()["blocked_tenants"] == 0

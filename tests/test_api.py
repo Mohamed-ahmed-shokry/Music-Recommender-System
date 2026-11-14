@@ -3379,3 +3379,124 @@ def test_traces_api_endpoints() -> None:
         json={"alert_name": "", "window_seconds": -5.0},
     )
     assert res_bad.status_code == 422
+
+
+def test_rate_limit_middleware_enforcement() -> None:
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    from api.middleware import RateLimitMiddleware
+    from music_recommender.ratelimit import (
+        DEFAULT_TIER_POLICIES,
+        QuotaPolicy,
+        RateLimiterEngine,
+        TenantTier,
+    )
+
+    now = [1000.0]
+    policies = {
+        TenantTier.FREE: QuotaPolicy(
+            tier=TenantTier.FREE,
+            requests_per_second=1.0,
+            burst_capacity=2,
+            window_seconds=60,
+            max_requests_per_window=50,
+            daily_quota=500,
+        ),
+        TenantTier.PRO: DEFAULT_TIER_POLICIES[TenantTier.PRO],
+        TenantTier.ENTERPRISE: DEFAULT_TIER_POLICIES[TenantTier.ENTERPRISE],
+    }
+    engine = RateLimiterEngine(
+        policies=policies,
+        enabled=True,
+        time_fn=lambda: now[0],
+    )
+
+    async def ping(request):
+        return JSONResponse({"ok": True})
+
+    async def health(request):
+        return JSONResponse({"status": "healthy"})
+
+    app = Starlette(
+        routes=[
+            Route("/ping", ping),
+            Route("/health", health),
+        ]
+    )
+    app.add_middleware(RateLimitMiddleware, rate_limiter=engine, enabled=True)
+    client = TestClient(app)
+
+    # Exempt path bypasses rate limiting
+    health_res = client.get("/health", headers={"X-Tenant-ID": "t-mw"})
+    assert health_res.status_code == 200
+    assert "x-ratelimit-limit" not in health_res.headers
+
+    # Burst capacity = 2 -> first two succeed with X-RateLimit-* headers
+    r1 = client.get("/ping", headers={"X-Tenant-ID": "t-mw"})
+    assert r1.status_code == 200
+    assert r1.headers["x-ratelimit-limit"] == "2"
+    assert r1.headers["x-ratelimit-remaining"] == "1"
+
+    r2 = client.get("/ping", headers={"X-Tenant-ID": "t-mw"})
+    assert r2.status_code == 200
+    assert r2.headers["x-ratelimit-remaining"] == "0"
+
+    # 3rd request is rejected with 429 and Retry-After
+    r3 = client.get("/ping", headers={"X-Tenant-ID": "t-mw"})
+    assert r3.status_code == 429
+    assert "retry-after" in r3.headers
+    payload = r3.json()
+    assert payload["tenant_id"] == "t-mw"
+    assert payload["reason"] == "token_bucket_exhausted"
+
+
+def test_ratelimit_api_endpoints() -> None:
+    from music_recommender.ratelimit import RateLimiterEngine, set_global_rate_limiter
+
+    original_service = api_main.service
+    engine = RateLimiterEngine(enabled=False)
+    set_global_rate_limiter(engine)
+    api_main.service = None
+    try:
+        client = TestClient(api_main.app)
+
+        # 1. Upgrade tenant tier via API
+        tier_res = client.post(
+            "/ratelimit/tenants/api-tenant/tier",
+            json={"tier": "enterprise"},
+        )
+        assert tier_res.status_code == 200
+        assert tier_res.json()["policy"]["tier"] == "enterprise"
+
+        # 2. Invalid tier fails validation (422)
+        bad_res = client.post(
+            "/ratelimit/tenants/api-tenant/tier",
+            json={"tier": "platinum"},
+        )
+        assert bad_res.status_code == 422
+
+        # 3. Extra field rejected by ConfigDict(extra="forbid")
+        extra_res = client.post(
+            "/ratelimit/tenants/api-tenant/tier",
+            json={"tier": "pro", "unknown": 1},
+        )
+        assert extra_res.status_code == 422
+
+        # 4. Block, inspect stats & tenant quota, then unblock
+        engine.block_tenant("api-tenant", duration_seconds=60.0, reason="test")
+        quota_res = client.get("/ratelimit/tenants/api-tenant")
+        assert quota_res.status_code == 200
+        assert quota_res.json()["blocked"] is True
+
+        stats_res = client.get("/ratelimit/stats")
+        assert stats_res.status_code == 200
+        assert stats_res.json()["blocked_tenants"] >= 1
+
+        unblock_res = client.post("/ratelimit/tenants/api-tenant/unblock")
+        assert unblock_res.status_code == 200
+        assert unblock_res.json()["unblocked"] is True
+        assert unblock_res.json()["was_blocked"] is True
+    finally:
+        api_main.service = original_service
