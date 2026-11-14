@@ -5,6 +5,20 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.0] - 2026-11-14
+
+### Added
+
+- **Distributed Rate Limiting & Token-Bucket Throttling (Phase 179):**
+  - Implemented `RateLimiterEngine` in `src/music_recommender/ratelimit.py` supporting `TenantTier` (`free`, `pro`, `enterprise`), `RateLimitAlgorithm` (`token_bucket`, `sliding_window`, `hybrid`), `QuotaPolicy`, `TokenBucketState`, `SlidingWindowState`, and `RateLimitDecision`.
+  - Added automated `AbuseGuardrailConfig` quarantine triggers with manual `block_tenant()` / `unblock_tenant()` controls and deterministic JSON state snapshot sync (`export_state()`, `import_state()`, `save_state()`, `load_state()`).
+  - Implemented `RateLimitMiddleware` in `api/middleware.py` extracting tenant identities (`X-Tenant-ID`, `X-API-Key`, or client IP), injecting `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers, and returning HTTP `429` with `Retry-After` when enabled.
+
+- **Tenant Quota Governance, Telemetry & Operator Controls (Phase 180):**
+  - Integrated `RateLimiterEngine` into `RecommenderService` (`get_rate_limit_stats()`, `get_tenant_quota()`, `set_tenant_tier()`, `block_tenant()`, `unblock_tenant()`) and Prometheus exposition (`music_recommender_ratelimit_requests_allowed_total`, `music_recommender_ratelimit_requests_rejected_total`, `music_recommender_ratelimit_blocked_tenants`).
+  - Added FastAPI governance routes `GET /ratelimit/stats`, `GET /ratelimit/tenants/{tenant_id}`, `POST /ratelimit/tenants/{tenant_id}/tier`, and `POST /ratelimit/tenants/{tenant_id}/unblock`.
+  - Added operator CLI commands `music-recommender ratelimit-stats` and `music-recommender tenant-quota` (`--set-tier`, `--unblock`, `--json`), plus the "Rate Limits & Quotas" Streamlit dashboard tab.
+
 ## [0.42.0] - 2026-11-13
 
 ### Added
