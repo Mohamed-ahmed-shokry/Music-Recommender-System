@@ -3500,3 +3500,63 @@ def test_ratelimit_api_endpoints() -> None:
         assert unblock_res.json()["was_blocked"] is True
     finally:
         api_main.service = original_service
+
+
+def test_canary_api_endpoints() -> None:
+    from music_recommender.canary import ShadowCanaryRouter, set_global_canary_router
+
+    original_service = api_main.service
+    router = ShadowCanaryRouter()
+    set_global_canary_router(router)
+    api_main.service = None
+    try:
+        client = TestClient(api_main.app)
+
+        # 1. Configure canary & shadow
+        cfg_res = client.post(
+            "/canary/configure",
+            json={
+                "canary_weight": 0.2,
+                "shadow_enabled": True,
+                "shadow_sample_rate": 0.5,
+                "candidate_version": "v2-api",
+            },
+        )
+        assert cfg_res.status_code == 200
+        assert cfg_res.json()["policy"]["canary_weight"] == 0.2
+        assert cfg_res.json()["policy"]["mode"] == "canary"
+
+        # 2. Invalid weight & mode fail validation (422)
+        assert (
+            client.post("/canary/configure", json={"canary_weight": 1.5}).status_code
+            == 422
+        )
+        assert (
+            client.post("/canary/configure", json={"mode": "unknown"}).status_code
+            == 422
+        )
+        assert (
+            client.post("/canary/configure", json={"extra_field": 1}).status_code == 422
+        )
+
+        # 3. Inspect status & evaluate guardrails
+        status_res = client.get("/canary/status")
+        assert status_res.status_code == 200
+        assert status_res.json()["policy"]["candidate_version"] == "v2-api"
+
+        eval_res = client.post("/canary/evaluate", json={"auto_rollback": False})
+        assert eval_res.status_code == 200
+        assert eval_res.json()["evaluation"]["status"] == "insufficient_data"
+
+        # 4. Rollback & promote
+        rb_res = client.post("/canary/rollback", json={"reason": "api_test"})
+        assert rb_res.status_code == 200
+        assert rb_res.json()["rolled_back"] is True
+        assert rb_res.json()["policy"]["mode"] == "rolled_back"
+
+        prom_res = client.post("/canary/promote")
+        assert prom_res.status_code == 200
+        assert prom_res.json()["promoted"] is True
+        assert prom_res.json()["policy"]["canary_weight"] == 1.0
+    finally:
+        api_main.service = original_service
