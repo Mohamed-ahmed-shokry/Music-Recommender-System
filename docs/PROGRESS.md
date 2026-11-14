@@ -8,8 +8,8 @@
 - [x] Task 5: Add unit tests for sticky bucketing, shadow comparisons, two-proportion z-test guardrails, auto-rollback, and state sync in `tests/test_canary.py`.
 - [x] Task 6: Integrate `ShadowCanaryRouter` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
 - [x] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
-- [ ] Task 8: Implement `/canary/*` endpoints in `api/main.py`.
-- [ ] Task 9: Add API integration tests for `/canary/*` in `tests/test_api.py`.
+- [x] Task 8: Implement `/canary/*` endpoints in `api/main.py`.
+- [x] Task 9: Add API integration tests for `/canary/*` in `tests/test_api.py`.
 - [ ] Task 10: Implement CLI commands `canary-status` and `canary-configure` in `src/music_recommender/cli.py`.
 - [ ] Task 11: Add CLI tests in `tests/test_cli.py`.
 - [ ] Task 12: Add `"Shadow & Canary"` tab to `src/music_recommender/dashboard.py` and test in `tests/test_dashboard.py`.
@@ -23,7 +23,7 @@
 | AC-1: ShadowCanaryRouter performs deterministic sticky bucketing, canary splitting, and shadow comparison recording | `Passed` | `tests/test_canary.py` |
 | AC-2: ABGuardrailConfig and evaluate_guardrails() detect error/latency/CTR regressions and trigger automated rollback | `Passed` | `tests/test_canary.py` |
 | AC-3: RecommenderService exposes canary governance methods and Prometheus exports canary metrics | `Passed` | `tests/test_service.py` |
-| AC-4: FastAPI /canary/* endpoints validate payloads and manage canary config, evaluation, rollback, and promotion | `Pending` | `tests/test_api.py` |
+| AC-4: FastAPI /canary/* endpoints validate payloads and manage canary config, evaluation, rollback, and promotion | `Passed` | `tests/test_api.py` |
 | AC-5: CLI commands canary-status and canary-configure work in human-readable and --json modes | `Pending` | `tests/test_cli.py` |
 | AC-6: Streamlit dashboard renders Shadow & Canary tab cleanly without errors | `Pending` | `tests/test_dashboard.py` |
 | AC-7: All local CI-parity checks and remote CI workflow runs pass 100% | `Pending` | Local checks + GitHub Actions runs |
