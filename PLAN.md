@@ -3,7 +3,24 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.43.0) — ready for review (branch `phase/179-rate-limiting-and-quotas`, PR #38)
+## Current milestone (0.44.0) — active development (branch `phase/181-shadow-canary-deployment`)
+
+Automated Model Shadow Deployment, Canary Traffic Splitting, and Online A/B Guardrails.
+The 0.43.0 release delivered distributed rate limiting, token-bucket throttling, and tenant quota governance.
+This milestone equips the platform with safe, automated model rollout capabilities:
+a Shadow & Canary Routing Engine (`ShadowCanaryRouter`, `CanaryPolicy`, `RoutingDecision`, `DeploymentMode`, `ABGuardrailConfig`, `GuardrailEvaluation`) supporting deterministic sticky bucketing, sampled shadow traffic mirroring, two-proportion z-test CTR significance, error/latency guardrails, and automated rollback;
+integration with `RecommenderService`, Prometheus telemetry, FastAPI `/canary/*` routes, operator CLI (`canary-status`, `canary-configure`), and Streamlit dashboard (`Shadow & Canary`).
+
+- Phase 181 — Shadow traffic mirroring and canary routing policy engine (`canary.py`, in progress).
+- Phase 182 — Real-time statistical significance, automated canary rollback guardrails, API/CLI/dashboard integration, clean CI.
+
+## Next milestone (0.45.0) — planned
+
+Feature Store Drift Monitoring, Embedding Staleness Detection, and Automated Retraining Triggers.
+- Phase 183 — Feature distribution drift & embedding staleness detector.
+- Phase 184 — Automated retraining trigger policy, API/CLI/dashboard integration, and CI release.
+
+## Previous milestone (0.43.0) — shipped (branch `phase/179-rate-limiting-and-quotas`, PR #38)
 
 Distributed Rate Limiting, Token-Bucket Throttling, and Tenant Quota Governance.
 The 0.42.0 release delivered distributed trace context propagation, OpenTelemetry span ingestion, and alert-to-trace correlation.
@@ -15,12 +32,6 @@ HTTP middleware (`RateLimitMiddleware` in `api/middleware.py`), `RecommenderServ
 - Phase 179 — Token-bucket and sliding-window rate limiting engine with tiered tenant quotas:
   `TenantTier`, `QuotaPolicy`, `RateLimitDecision`, `RateLimiterEngine` in `ratelimit.py` (completed).
 - Phase 180 — Distributed rate limit synchronization, abuse detection guardrails, API/CLI/dashboard integration, clean CI (completed).
-
-## Next milestone (0.44.0) — planned
-
-Automated Model Shadow Deployment, Canary Traffic Splitting, and Online A/B Guardrails.
-- Phase 181 — Shadow traffic mirroring and canary routing policy engine.
-- Phase 182 — Real-time statistical significance and automated canary rollback guardrails.
 
 ## Previous milestone (0.42.0) — shipped (branch `phase/177-distributed-tracing`, PR #37)
 
