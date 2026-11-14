@@ -2244,3 +2244,117 @@ def unblock_tenant_endpoint(tenant_id: str) -> dict[str, Any]:
         "was_blocked": was_blocked,
         "usage": engine.get_tenant_usage(tid),
     }
+
+
+class CanaryConfigureRequest(BaseModel):
+    """Payload for updating shadow deployment and canary routing policy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    canary_weight: float | None = Field(default=None, ge=0.0, le=1.0)
+    shadow_enabled: bool | None = None
+    shadow_sample_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    candidate_version: str | None = None
+    mode: str | None = None
+
+
+class CanaryEvaluateRequest(BaseModel):
+    """Payload for evaluating online A/B canary guardrails."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    auto_rollback: bool = True
+
+
+class CanaryRollbackRequest(BaseModel):
+    """Payload for manually rolling back canary/shadow traffic."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(default="manual_rollback", min_length=1)
+
+
+@app.get("/canary/status")
+def get_canary_status_endpoint() -> dict[str, Any]:
+    """Return active shadow/canary policy, arm metrics, and evaluation."""
+    if service is not None:
+        return service.get_canary_status()
+    from music_recommender.canary import get_global_canary_router
+
+    return get_global_canary_router().get_status()
+
+
+@app.post("/canary/configure")
+def configure_canary_endpoint(payload: CanaryConfigureRequest) -> dict[str, Any]:
+    """Update canary traffic weight, shadow sampling, or deployment mode."""
+    from music_recommender.canary import DeploymentMode, get_global_canary_router
+
+    resolved_mode: DeploymentMode | None = None
+    if payload.mode is not None:
+        try:
+            resolved_mode = DeploymentMode(payload.mode.strip().lower())
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unsupported deployment mode '{payload.mode}'.",
+            ) from error
+
+    if service is not None:
+        return service.configure_canary(
+            canary_weight=payload.canary_weight,
+            shadow_enabled=payload.shadow_enabled,
+            shadow_sample_rate=payload.shadow_sample_rate,
+            candidate_version=payload.candidate_version,
+            mode=resolved_mode,
+        )
+    router = get_global_canary_router()
+    router.update_policy(
+        canary_weight=payload.canary_weight,
+        shadow_enabled=payload.shadow_enabled,
+        shadow_sample_rate=payload.shadow_sample_rate,
+        candidate_version=payload.candidate_version,
+        mode=resolved_mode,
+    )
+    return router.get_status()
+
+
+@app.post("/canary/evaluate")
+def evaluate_canary_endpoint(
+    payload: CanaryEvaluateRequest | None = None,
+) -> dict[str, Any]:
+    """Evaluate online A/B guardrails and optionally trigger auto-rollback."""
+    req = payload or CanaryEvaluateRequest()
+    if service is not None:
+        return service.evaluate_canary_guardrails(auto_rollback=req.auto_rollback)
+    from music_recommender.canary import get_global_canary_router
+
+    router = get_global_canary_router()
+    evaluation = router.evaluate_guardrails(auto_rollback=req.auto_rollback)
+    return {"evaluation": evaluation.to_dict(), "policy": router.policy.to_dict()}
+
+
+@app.post("/canary/rollback")
+def rollback_canary_endpoint(
+    payload: CanaryRollbackRequest | None = None,
+) -> dict[str, Any]:
+    """Immediately roll back canary/shadow traffic to champion."""
+    req = payload or CanaryRollbackRequest()
+    if service is not None:
+        return service.rollback_canary(reason=req.reason)
+    from music_recommender.canary import get_global_canary_router
+
+    router = get_global_canary_router()
+    policy = router.rollback(reason=req.reason)
+    return {"rolled_back": True, "reason": req.reason, "policy": policy.to_dict()}
+
+
+@app.post("/canary/promote")
+def promote_canary_endpoint() -> dict[str, Any]:
+    """Promote the canary candidate to 100% serving traffic."""
+    if service is not None:
+        return service.promote_canary()
+    from music_recommender.canary import get_global_canary_router
+
+    router = get_global_canary_router()
+    policy = router.promote()
+    return {"promoted": True, "policy": policy.to_dict()}
