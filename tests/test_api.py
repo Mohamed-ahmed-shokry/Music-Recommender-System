@@ -3379,3 +3379,74 @@ def test_traces_api_endpoints() -> None:
         json={"alert_name": "", "window_seconds": -5.0},
     )
     assert res_bad.status_code == 422
+
+
+def test_rate_limit_middleware_enforcement() -> None:
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    from api.middleware import RateLimitMiddleware
+    from music_recommender.ratelimit import (
+        DEFAULT_TIER_POLICIES,
+        QuotaPolicy,
+        RateLimiterEngine,
+        TenantTier,
+    )
+
+    now = [1000.0]
+    policies = {
+        TenantTier.FREE: QuotaPolicy(
+            tier=TenantTier.FREE,
+            requests_per_second=1.0,
+            burst_capacity=2,
+            window_seconds=60,
+            max_requests_per_window=50,
+            daily_quota=500,
+        ),
+        TenantTier.PRO: DEFAULT_TIER_POLICIES[TenantTier.PRO],
+        TenantTier.ENTERPRISE: DEFAULT_TIER_POLICIES[TenantTier.ENTERPRISE],
+    }
+    engine = RateLimiterEngine(
+        policies=policies,
+        enabled=True,
+        time_fn=lambda: now[0],
+    )
+
+    async def ping(request):
+        return JSONResponse({"ok": True})
+
+    async def health(request):
+        return JSONResponse({"status": "healthy"})
+
+    app = Starlette(
+        routes=[
+            Route("/ping", ping),
+            Route("/health", health),
+        ]
+    )
+    app.add_middleware(RateLimitMiddleware, rate_limiter=engine, enabled=True)
+    client = TestClient(app)
+
+    # Exempt path bypasses rate limiting
+    health_res = client.get("/health", headers={"X-Tenant-ID": "t-mw"})
+    assert health_res.status_code == 200
+    assert "x-ratelimit-limit" not in health_res.headers
+
+    # Burst capacity = 2 -> first two succeed with X-RateLimit-* headers
+    r1 = client.get("/ping", headers={"X-Tenant-ID": "t-mw"})
+    assert r1.status_code == 200
+    assert r1.headers["x-ratelimit-limit"] == "2"
+    assert r1.headers["x-ratelimit-remaining"] == "1"
+
+    r2 = client.get("/ping", headers={"X-Tenant-ID": "t-mw"})
+    assert r2.status_code == 200
+    assert r2.headers["x-ratelimit-remaining"] == "0"
+
+    # 3rd request is rejected with 429 and Retry-After
+    r3 = client.get("/ping", headers={"X-Tenant-ID": "t-mw"})
+    assert r3.status_code == 429
+    assert "retry-after" in r3.headers
+    payload = r3.json()
+    assert payload["tenant_id"] == "t-mw"
+    assert payload["reason"] == "token_bucket_exhausted"
