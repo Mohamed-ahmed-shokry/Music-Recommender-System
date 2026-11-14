@@ -131,6 +131,11 @@ from music_recommender.ranking import (
     rerank_with_diversity,
     validate_ranking_parameters,
 )
+from music_recommender.ratelimit import (
+    RateLimiterEngine,
+    TenantTier,
+    get_global_rate_limiter,
+)
 from music_recommender.recommend import (
     get_similar_artists,
     recommend_artists_for_user,
@@ -195,6 +200,7 @@ class RecommenderService:
         alert_silencing_engine: AlertSilencingEngine | None = None,
         incident_tracker: AlertIncidentTracker | None = None,
         tracer: DistributedTracer | None = None,
+        rate_limiter: RateLimiterEngine | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -550,6 +556,10 @@ class RecommenderService:
         else:
             self.tracer = get_global_tracer()
         self.trace_correlator = AlertTraceCorrelator(self.tracer)
+        if rate_limiter is not None:
+            self.rate_limiter = rate_limiter
+        else:
+            self.rate_limiter = get_global_rate_limiter()
 
     def _register_default_remediation_handlers(self) -> None:
         """Register built-in self-healing remediation handlers and fallback rules."""
@@ -1519,6 +1529,54 @@ class RecommenderService:
     ) -> dict[str, Any]:
         """Export traces in standard OpenTelemetry JSON format."""
         return self.tracer.to_otlp_export(trace_id=trace_id, limit=limit)
+
+    def get_rate_limit_stats(self) -> dict[str, Any]:
+        """Return aggregate rate-limiter telemetry and active tenant quotas."""
+        return self.rate_limiter.get_stats()
+
+    def get_tenant_quota(self, tenant_id: str) -> dict[str, Any]:
+        """Return detailed quota and rate-limit usage for a tenant."""
+        return self.rate_limiter.get_tenant_usage(tenant_id)
+
+    def set_tenant_tier(
+        self,
+        tenant_id: str,
+        tier: TenantTier | str,
+    ) -> dict[str, Any]:
+        """Assign a service tier to a tenant and return updated quota snapshot."""
+        resolved_tier = tier if isinstance(tier, TenantTier) else TenantTier(tier)
+        policy = self.rate_limiter.set_tenant_tier(tenant_id, resolved_tier)
+        usage = self.rate_limiter.get_tenant_usage(tenant_id)
+        return {"policy": policy.to_dict(), "usage": usage}
+
+    def block_tenant(
+        self,
+        tenant_id: str,
+        duration_seconds: float | None = None,
+        reason: str = "manual_block",
+    ) -> dict[str, Any]:
+        """Quarantine a tenant for a duration and return updated usage."""
+        blocked_until = self.rate_limiter.block_tenant(
+            tenant_id,
+            duration_seconds=duration_seconds,
+            reason=reason,
+        )
+        return {
+            "tenant_id": tenant_id,
+            "blocked": True,
+            "blocked_until": blocked_until,
+            "reason": reason,
+        }
+
+    def unblock_tenant(self, tenant_id: str) -> dict[str, Any]:
+        """Lift a tenant quarantine and clear recent violations."""
+        was_blocked = self.rate_limiter.unblock_tenant(tenant_id)
+        return {
+            "tenant_id": tenant_id,
+            "unblocked": True,
+            "was_blocked": was_blocked,
+            "usage": self.rate_limiter.get_tenant_usage(tenant_id),
+        }
 
     def record_request(
         self,
