@@ -717,6 +717,48 @@ def collect_alerting_metric_families(
                 cb_fam.add_sample(value=state_map.get(state_str, 0), labels=labels)
             families.append(cb_fam)
 
+    # 5. Distributed Rate Limiter Metrics
+    rate_limiter = (
+        getattr(service, "rate_limiter", None) if service is not None else None
+    )
+    if rate_limiter is not None and hasattr(rate_limiter, "get_stats"):
+        with contextlib.suppress(Exception):
+            rl_stats = rate_limiter.get_stats()
+            rl_labels = dict(custom_labels) if custom_labels else {}
+
+            allowed_fam = MetricFamily(
+                name="music_recommender_ratelimit_requests_allowed_total",
+                help_text="Total requests allowed by the distributed rate limiter.",
+                metric_type=MetricType.COUNTER,
+            )
+            allowed_fam.add_sample(
+                value=int(rl_stats.get("requests_allowed_total", 0)),
+                labels=rl_labels,
+            )
+            families.append(allowed_fam)
+
+            rejected_fam = MetricFamily(
+                name="music_recommender_ratelimit_requests_rejected_total",
+                help_text="Total requests rejected by the distributed rate limiter.",
+                metric_type=MetricType.COUNTER,
+            )
+            rejected_fam.add_sample(
+                value=int(rl_stats.get("requests_rejected_total", 0)),
+                labels=rl_labels,
+            )
+            families.append(rejected_fam)
+
+            blocked_fam = MetricFamily(
+                name="music_recommender_ratelimit_blocked_tenants",
+                help_text="Number of currently quarantined/blocked tenants.",
+                metric_type=MetricType.GAUGE,
+            )
+            blocked_fam.add_sample(
+                value=int(rl_stats.get("blocked_tenants", 0)),
+                labels=rl_labels,
+            )
+            families.append(blocked_fam)
+
     return families
 
 
