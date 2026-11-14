@@ -3,7 +3,26 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.42.0) — active development (branch `phase/177-distributed-tracing`)
+## Current milestone (0.43.0) — active development (branch `phase/179-rate-limiting-and-quotas`)
+
+Distributed Rate Limiting, Token-Bucket Throttling, and Tenant Quota Governance.
+The 0.42.0 release delivered distributed trace context propagation, OpenTelemetry span ingestion, and alert-to-trace correlation.
+This milestone equips the platform with multi-tenant rate limiting, quota governance, and abuse protection:
+a Rate Limiting & Quota Engine (`RateLimiterEngine`, `QuotaPolicy`, `TenantTier`, `RateLimitDecision`, `AbuseGuardrailConfig`) supporting dual Token-Bucket and Sliding-Window algorithms alongside daily tenant quotas;
+automated abuse detection guardrails quarantining abusive tenants/IPs with JSON state snapshot synchronization;
+HTTP middleware (`RateLimitMiddleware` in `api/middleware.py`), `RecommenderService` quota governance APIs, Prometheus rate-limit metrics, FastAPI endpoints (`/ratelimit/*`), operator CLI tooling (`ratelimit-stats`, `tenant-quota`), and Streamlit dashboard visibility.
+
+- Phase 179 — Token-bucket and sliding-window rate limiting engine with tiered tenant quotas:
+  `TenantTier`, `QuotaPolicy`, `RateLimitDecision`, `RateLimiterEngine` in `ratelimit.py` (in progress).
+- Phase 180 — Distributed rate limit synchronization, abuse detection guardrails, API/CLI/dashboard integration, clean CI.
+
+## Next milestone (0.44.0) — planned
+
+Automated Model Shadow Deployment, Canary Traffic Splitting, and Online A/B Guardrails.
+- Phase 181 — Shadow traffic mirroring and canary routing policy engine.
+- Phase 182 — Real-time statistical significance and automated canary rollback guardrails.
+
+## Previous milestone (0.42.0) — shipped (branch `phase/177-distributed-tracing`, PR #37)
 
 Distributed Trace Context Propagation, OpenTelemetry Span Ingestion, and Alert-to-Trace Correlator.
 The 0.41.0 release delivered alert incident analytics, MTTD/MTTR telemetry calculation, and Prometheus alert exporter metrics.
@@ -16,12 +35,6 @@ HTTP middleware integration (`TraceContextMiddleware` in `api/middleware.py`), `
   `TraceContext`, `SpanRecord`, `DistributedTracer`, `TraceContextMiddleware` in `tracing.py` and `middleware.py` (completed). ✅
 - Phase 178 — Alert-to-trace deep linking and OpenTelemetry span correlation:
   `AlertTraceCorrelator`, service integration, API endpoints, CLI commands, dashboard timeline, clean CI (completed). ✅
-
-## Next milestone (0.43.0) — planned
-
-Distributed Rate Limiting, Token-Bucket Throttling, and Tenant Quota Governance.
-- Phase 179 — Token-bucket and sliding-window rate limiting engine with tiered tenant quotas.
-- Phase 180 — Redis/in-memory distributed rate limit synchronization and abuse detection guardrails.
 
 ## Previous milestone (0.41.0) — shipped (branch `phase/175-analytics-and-prometheus-alerts`, PR #36)
 
