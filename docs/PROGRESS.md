@@ -2,10 +2,10 @@
 
 ## 1. Micro-Task Checklist
 - [x] Task 1: Define Phase 181 & 182 roadmap, update `PLAN.md`, and initialize `docs/PROGRESS.md`.
-- [ ] Task 2: Implement `DeploymentMode`, `CanaryPolicy`, `ABGuardrailConfig`, and `RoutingDecision` in `src/music_recommender/canary.py`.
-- [ ] Task 3: Add unit tests for canary policy validation and `RoutingDecision` in `tests/test_canary.py`.
-- [ ] Task 4: Implement `ArmMetrics`, `GuardrailEvaluation`, `ShadowCanaryRouter`, and global accessors in `src/music_recommender/canary.py`.
-- [ ] Task 5: Add unit tests for sticky bucketing, shadow comparisons, two-proportion z-test guardrails, auto-rollback, and state sync in `tests/test_canary.py`.
+- [x] Task 2: Implement `DeploymentMode`, `CanaryPolicy`, `ABGuardrailConfig`, and `RoutingDecision` in `src/music_recommender/canary.py`.
+- [x] Task 3: Add unit tests for canary policy validation and `RoutingDecision` in `tests/test_canary.py`.
+- [x] Task 4: Implement `ArmMetrics`, `GuardrailEvaluation`, `ShadowCanaryRouter`, and global accessors in `src/music_recommender/canary.py`.
+- [x] Task 5: Add unit tests for sticky bucketing, shadow comparisons, two-proportion z-test guardrails, auto-rollback, and state sync in `tests/test_canary.py`.
 - [ ] Task 6: Integrate `ShadowCanaryRouter` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
 - [ ] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
 - [ ] Task 8: Implement `/canary/*` endpoints in `api/main.py`.
@@ -20,8 +20,8 @@
 ## 2. Acceptance Criteria Tracking
 | Criterion | Status | Verification Evidence |
 | :--- | :---: | :--- |
-| AC-1: ShadowCanaryRouter performs deterministic sticky bucketing, canary splitting, and shadow comparison recording | `Pending` | `tests/test_canary.py` |
-| AC-2: ABGuardrailConfig and evaluate_guardrails() detect error/latency/CTR regressions and trigger automated rollback | `Pending` | `tests/test_canary.py` |
+| AC-1: ShadowCanaryRouter performs deterministic sticky bucketing, canary splitting, and shadow comparison recording | `Passed` | `tests/test_canary.py` |
+| AC-2: ABGuardrailConfig and evaluate_guardrails() detect error/latency/CTR regressions and trigger automated rollback | `Passed` | `tests/test_canary.py` |
 | AC-3: RecommenderService exposes canary governance methods and Prometheus exports canary metrics | `Pending` | `tests/test_service.py` |
 | AC-4: FastAPI /canary/* endpoints validate payloads and manage canary config, evaluation, rollback, and promotion | `Pending` | `tests/test_api.py` |
 | AC-5: CLI commands canary-status and canary-configure work in human-readable and --json modes | `Pending` | `tests/test_cli.py` |
