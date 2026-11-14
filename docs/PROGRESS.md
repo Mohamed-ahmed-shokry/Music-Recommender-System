@@ -6,8 +6,8 @@
 - [x] Task 3: Add unit tests for quota policies and `RateLimitDecision` in `tests/test_ratelimit.py`.
 - [x] Task 4: Implement `TokenBucketState`, `SlidingWindowState`, `AbuseGuardrailConfig`, and `RateLimiterEngine` in `src/music_recommender/ratelimit.py`.
 - [x] Task 5: Add unit tests for token bucket, sliding window, daily quota, abuse guardrails, and state sync in `tests/test_ratelimit.py`.
-- [ ] Task 6: Implement `RateLimitMiddleware` in `api/middleware.py`.
-- [ ] Task 7: Add unit tests for `RateLimitMiddleware` in `tests/test_api.py`.
+- [x] Task 6: Implement `RateLimitMiddleware` in `api/middleware.py`.
+- [x] Task 7: Add unit tests for `RateLimitMiddleware` in `tests/test_api.py`.
 - [ ] Task 8: Integrate `RateLimiterEngine` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
 - [ ] Task 9: Add service and telemetry integration tests in `tests/test_service.py`.
 - [ ] Task 10: Mount `RateLimitMiddleware` and implement `/ratelimit/*` endpoints in `api/main.py`.
@@ -24,7 +24,7 @@
 | :--- | :---: | :--- |
 | AC-1: RateLimiterEngine enforces token-bucket burst/refill, sliding-window limits, and daily quotas | `Passed` | `tests/test_ratelimit.py` |
 | AC-2: Abuse guardrail detects repeated violations, blocks tenants, supports unblock and state sync | `Passed` | `tests/test_ratelimit.py` |
-| AC-3: RateLimitMiddleware injects X-RateLimit-* headers and enforces HTTP 429 | `Pending` | `tests/test_api.py` |
+| AC-3: RateLimitMiddleware injects X-RateLimit-* headers and enforces HTTP 429 | `Passed` | `tests/test_api.py` |
 | AC-4: RecommenderService exposes tenant quota governance methods and Prometheus metrics | `Pending` | `tests/test_service.py` |
 | AC-5: FastAPI endpoints /ratelimit/* validate payloads and manage tenant tiers/blocks | `Pending` | `tests/test_api.py` |
 | AC-6: Operator CLI commands ratelimit-stats and tenant-quota operate cleanly | `Pending` | `tests/test_cli.py` |
