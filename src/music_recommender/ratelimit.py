@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -136,4 +137,50 @@ class RateLimitDecision:
             "daily_quota": self.daily_quota,
             "blocked": self.blocked,
             "evaluated_at": self.evaluated_at,
+        }
+
+
+@dataclass(slots=True)
+class TokenBucketState:
+    """Mutable token-bucket state for a tenant."""
+
+    tokens: float
+    last_refill: float
+
+    def refill(self, now: float, rate: float, capacity: int) -> None:
+        """Refill tokens proportionally to elapsed seconds up to capacity."""
+        if now <= self.last_refill:
+            return
+        elapsed = now - self.last_refill
+        self.tokens = min(float(capacity), self.tokens + elapsed * rate)
+        self.last_refill = now
+
+
+@dataclass(slots=True)
+class SlidingWindowState:
+    """Mutable sliding-window request timestamp queue for a tenant."""
+
+    timestamps: deque[float] = field(default_factory=deque)
+
+    def prune(self, now: float, window_seconds: int) -> None:
+        """Remove timestamps older than the active sliding window."""
+        cutoff = now - window_seconds
+        while self.timestamps and self.timestamps[0] <= cutoff:
+            self.timestamps.popleft()
+
+
+@dataclass(frozen=True, slots=True)
+class AbuseGuardrailConfig:
+    """Configuration for automated abuse detection and quarantine."""
+
+    rejection_threshold: int = 20
+    quarantine_seconds: float = 300.0
+    violation_window_seconds: float = 60.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize guardrail config to a JSON-compatible dictionary."""
+        return {
+            "rejection_threshold": self.rejection_threshold,
+            "quarantine_seconds": self.quarantine_seconds,
+            "violation_window_seconds": self.violation_window_seconds,
         }
