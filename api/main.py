@@ -13,7 +13,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from api.middleware import RequestSafetyMiddleware, TraceContextMiddleware
+from api.middleware import (
+    RateLimitMiddleware,
+    RequestSafetyMiddleware,
+    TraceContextMiddleware,
+)
 from music_recommender import __version__
 from music_recommender.alerting import (
     AlertEvaluator,
@@ -279,7 +283,14 @@ app.add_middleware(
         "tracestate",
         "X-Trace-ID",
         "X-Span-ID",
+        "X-RateLimit-Limit",
+        "X-RateLimit-Remaining",
+        "X-RateLimit-Reset",
+        "Retry-After",
     ],
+)
+app.add_middleware(
+    RateLimitMiddleware,
 )
 app.add_middleware(
     TraceContextMiddleware,
@@ -2154,3 +2165,82 @@ def bandit_policy_derive(
         ) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+class TenantTierUpdateRequest(BaseModel):
+    """Payload for updating a tenant's rate-limit and quota tier."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tier: str
+
+
+@app.get("/ratelimit/stats")
+def get_ratelimit_stats() -> dict[str, Any]:
+    """Return aggregate rate-limiter telemetry and active tenant quotas."""
+    if service is not None:
+        return service.get_rate_limit_stats()
+    from music_recommender.ratelimit import get_global_rate_limiter
+
+    return get_global_rate_limiter().get_stats()
+
+
+@app.get("/ratelimit/tenants/{tenant_id}")
+def get_tenant_quota(tenant_id: str) -> dict[str, Any]:
+    """Return detailed rate-limit and daily quota usage for a tenant."""
+    tid = tenant_id.strip()
+    if not tid:
+        raise HTTPException(status_code=422, detail="tenant_id must be non-empty")
+    if service is not None:
+        return service.get_tenant_quota(tid)
+    from music_recommender.ratelimit import get_global_rate_limiter
+
+    return get_global_rate_limiter().get_tenant_usage(tid)
+
+
+@app.post("/ratelimit/tenants/{tenant_id}/tier")
+def update_tenant_tier(
+    tenant_id: str,
+    payload: TenantTierUpdateRequest,
+) -> dict[str, Any]:
+    """Assign a rate-limit tier (free, pro, enterprise) to a tenant."""
+    from music_recommender.ratelimit import TenantTier, get_global_rate_limiter
+
+    tid = tenant_id.strip()
+    if not tid:
+        raise HTTPException(status_code=422, detail="tenant_id must be non-empty")
+    try:
+        resolved_tier = TenantTier(payload.tier.strip().lower())
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unsupported tier '{payload.tier}'. Expected: free, pro, enterprise."
+            ),
+        ) from error
+
+    if service is not None:
+        return service.set_tenant_tier(tid, resolved_tier)
+    engine = get_global_rate_limiter()
+    policy = engine.set_tenant_tier(tid, resolved_tier)
+    return {"policy": policy.to_dict(), "usage": engine.get_tenant_usage(tid)}
+
+
+@app.post("/ratelimit/tenants/{tenant_id}/unblock")
+def unblock_tenant_endpoint(tenant_id: str) -> dict[str, Any]:
+    """Lift a quarantine block on a tenant and clear recent violations."""
+    tid = tenant_id.strip()
+    if not tid:
+        raise HTTPException(status_code=422, detail="tenant_id must be non-empty")
+    if service is not None:
+        return service.unblock_tenant(tid)
+    from music_recommender.ratelimit import get_global_rate_limiter
+
+    engine = get_global_rate_limiter()
+    was_blocked = engine.unblock_tenant(tid)
+    return {
+        "tenant_id": tid,
+        "unblocked": True,
+        "was_blocked": was_blocked,
+        "usage": engine.get_tenant_usage(tid),
+    }
