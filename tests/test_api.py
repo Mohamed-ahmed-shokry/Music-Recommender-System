@@ -3450,3 +3450,53 @@ def test_rate_limit_middleware_enforcement() -> None:
     payload = r3.json()
     assert payload["tenant_id"] == "t-mw"
     assert payload["reason"] == "token_bucket_exhausted"
+
+
+def test_ratelimit_api_endpoints() -> None:
+    from music_recommender.ratelimit import RateLimiterEngine, set_global_rate_limiter
+
+    original_service = api_main.service
+    engine = RateLimiterEngine(enabled=False)
+    set_global_rate_limiter(engine)
+    api_main.service = None
+    try:
+        client = TestClient(api_main.app)
+
+        # 1. Upgrade tenant tier via API
+        tier_res = client.post(
+            "/ratelimit/tenants/api-tenant/tier",
+            json={"tier": "enterprise"},
+        )
+        assert tier_res.status_code == 200
+        assert tier_res.json()["policy"]["tier"] == "enterprise"
+
+        # 2. Invalid tier fails validation (422)
+        bad_res = client.post(
+            "/ratelimit/tenants/api-tenant/tier",
+            json={"tier": "platinum"},
+        )
+        assert bad_res.status_code == 422
+
+        # 3. Extra field rejected by ConfigDict(extra="forbid")
+        extra_res = client.post(
+            "/ratelimit/tenants/api-tenant/tier",
+            json={"tier": "pro", "unknown": 1},
+        )
+        assert extra_res.status_code == 422
+
+        # 4. Block, inspect stats & tenant quota, then unblock
+        engine.block_tenant("api-tenant", duration_seconds=60.0, reason="test")
+        quota_res = client.get("/ratelimit/tenants/api-tenant")
+        assert quota_res.status_code == 200
+        assert quota_res.json()["blocked"] is True
+
+        stats_res = client.get("/ratelimit/stats")
+        assert stats_res.status_code == 200
+        assert stats_res.json()["blocked_tenants"] >= 1
+
+        unblock_res = client.post("/ratelimit/tenants/api-tenant/unblock")
+        assert unblock_res.status_code == 200
+        assert unblock_res.json()["unblocked"] is True
+        assert unblock_res.json()["was_blocked"] is True
+    finally:
+        api_main.service = original_service
