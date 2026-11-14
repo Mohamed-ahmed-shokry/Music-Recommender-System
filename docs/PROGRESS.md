@@ -12,8 +12,8 @@
 - [x] Task 9: Add service and telemetry integration tests in `tests/test_service.py`.
 - [x] Task 10: Mount `RateLimitMiddleware` and implement `/ratelimit/*` endpoints in `api/main.py`.
 - [x] Task 11: Add API integration tests for `/ratelimit/*` in `tests/test_api.py`.
-- [ ] Task 12: Implement CLI commands `ratelimit-stats` and `tenant-quota` in `src/music_recommender/cli.py`.
-- [ ] Task 13: Add CLI tests in `tests/test_cli.py`.
+- [x] Task 12: Implement CLI commands `ratelimit-stats` and `tenant-quota` in `src/music_recommender/cli.py`.
+- [x] Task 13: Add CLI tests in `tests/test_cli.py`.
 - [ ] Task 14: Add "Rate Limits & Quotas" tab to `src/music_recommender/dashboard.py` and test in `tests/test_dashboard.py`.
 - [ ] Task 15: Update `README.md`, `CHANGELOG.md`, `PLAN.md`, and `docs/PROGRESS.md` for `0.43.0`.
 - [ ] Task 16: Bump version to `0.43.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
@@ -27,7 +27,7 @@
 | AC-3: RateLimitMiddleware injects X-RateLimit-* headers and enforces HTTP 429 | `Passed` | `tests/test_api.py` |
 | AC-4: RecommenderService exposes tenant quota governance methods and Prometheus metrics | `Passed` | `tests/test_service.py` |
 | AC-5: FastAPI endpoints /ratelimit/* validate payloads and manage tenant tiers/blocks | `Passed` | `tests/test_api.py` |
-| AC-6: Operator CLI commands ratelimit-stats and tenant-quota operate cleanly | `Pending` | `tests/test_cli.py` |
+| AC-6: Operator CLI commands ratelimit-stats and tenant-quota operate cleanly | `Passed` | `tests/test_cli.py` |
 | AC-7: Streamlit dashboard renders Rate Limits & Quotas tab cleanly | `Pending` | `tests/test_dashboard.py` |
 | AC-8: All local CI-parity checks and remote CI workflow runs pass 100% | `Pending` | Local checks + GitHub Actions runs |
 
