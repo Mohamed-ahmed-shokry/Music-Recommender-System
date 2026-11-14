@@ -1503,6 +1503,49 @@ def _render_traces_tab(service: RecommenderService) -> None:
                 st.json(corr_res.candidate_root_cause_spans)
 
 
+def _render_ratelimit_tab(service: RecommenderService) -> None:
+    """Render distributed rate-limiter telemetry and tenant quota controls."""
+    st.subheader("Distributed Rate Limits & Tenant Quotas")
+    st.caption(
+        "Monitor token-bucket bursts, sliding-window enforcement, daily tenant "
+        "quotas, and quarantine status."
+    )
+    if not hasattr(service, "get_rate_limit_stats"):
+        st.info("Rate limiting telemetry is unavailable for this service.")
+        return
+
+    stats = service.get_rate_limit_stats()
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Allowed Requests", int(stats.get("requests_allowed_total", 0)))
+    col2.metric("Rejected Requests", int(stats.get("requests_rejected_total", 0)))
+    col3.metric("Active Tenants", int(stats.get("active_tenants", 0)))
+    col4.metric("Blocked Tenants", int(stats.get("blocked_tenants", 0)))
+
+    tenants = stats.get("tenants", [])
+    if tenants:
+        st.dataframe(
+            [
+                {
+                    "Tenant ID": t.get("tenant_id"),
+                    "Tier": t.get("tier"),
+                    "Tokens": (
+                        f"{t.get('tokens_available')}/{t.get('burst_capacity')}"
+                    ),
+                    "Window": (
+                        f"{t.get('window_used')}/{t.get('max_requests_per_window')}"
+                    ),
+                    "Daily Quota": f"{t.get('daily_used')}/{t.get('daily_quota')}",
+                    "Blocked": bool(t.get("blocked", False)),
+                }
+                for t in tenants
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+    else:
+        st.info("No tenant rate-limit activity recorded yet.")
+
+
 def render_dashboard(service: RecommenderService) -> None:
     """Render the dashboard using an already loaded recommender service."""
     health = service.health()
@@ -1732,6 +1775,7 @@ def render_dashboard(service: RecommenderService) -> None:
             "Ablation Summary",
             "Cold-Start Bandit",
             "Distributed Traces",
+            "Rate Limits & Quotas",
         ]
     )
     with tabs[0]:
@@ -1765,6 +1809,8 @@ def render_dashboard(service: RecommenderService) -> None:
         _render_bandit_tab(service)
     with tabs[8]:
         _render_traces_tab(service)
+    with tabs[9]:
+        _render_ratelimit_tab(service)
 
 
 def main() -> None:
