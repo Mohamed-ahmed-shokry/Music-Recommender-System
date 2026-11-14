@@ -5,6 +5,20 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.0] - 2026-11-15
+
+### Added
+
+- **Automated Model Shadow Deployment & Canary Traffic Splitting (Phase 181):**
+  - Implemented `ShadowCanaryRouter` in `src/music_recommender/canary.py` with `DeploymentMode`, `CanaryPolicy`, `RoutingDecision`, deterministic SHA-256 sticky bucketing, configurable canary traffic weights (`0.0..1.0`), and sampled shadow traffic mirroring (`record_shadow_comparison()` with Jaccard overlap and latency delta tracking).
+  - Added deterministic JSON state snapshot persistence (`export_state()`, `import_state()`, `save_state()`, `load_state()`).
+
+- **Online A/B Guardrails, Telemetry & Operator Controls (Phase 182):**
+  - Implemented `ABGuardrailConfig`, `ArmMetrics`, and `GuardrailEvaluation` with two-proportion z-test CTR significance (`math.erfc`), error-rate delta, and p95 latency ratio guardrails triggering automated canary rollback (`ROLLED_BACK`) or promotion (`PROMOTED`).
+  - Integrated `ShadowCanaryRouter` into `RecommenderService` and Prometheus exposition (`music_recommender_canary_weight`, `music_recommender_canary_requests_total`, `music_recommender_canary_errors_total`).
+  - Added FastAPI routes `GET /canary/status`, `POST /canary/configure`, `POST /canary/evaluate`, `POST /canary/rollback`, and `POST /canary/promote`.
+  - Added operator CLI commands `music-recommender canary-status` and `music-recommender canary-configure`, plus the `"Shadow & Canary"` Streamlit dashboard tab.
+
 ## [0.43.0] - 2026-11-14
 
 ### Added
