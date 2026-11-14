@@ -73,6 +73,11 @@ from music_recommender.bandit import (
     write_cold_start_policy,
 )
 from music_recommender.baselines import popular_artists
+from music_recommender.canary import (
+    DeploymentMode,
+    ShadowCanaryRouter,
+    get_global_canary_router,
+)
 from music_recommender.config import (
     ALERT_STORAGE_DIR_ENV_VAR,
     ALERT_WEBHOOK_URL_ENV_VAR,
@@ -201,6 +206,7 @@ class RecommenderService:
         incident_tracker: AlertIncidentTracker | None = None,
         tracer: DistributedTracer | None = None,
         rate_limiter: RateLimiterEngine | None = None,
+        canary_router: ShadowCanaryRouter | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -560,6 +566,10 @@ class RecommenderService:
             self.rate_limiter = rate_limiter
         else:
             self.rate_limiter = get_global_rate_limiter()
+        if canary_router is not None:
+            self.canary_router = canary_router
+        else:
+            self.canary_router = get_global_canary_router()
 
     def _register_default_remediation_handlers(self) -> None:
         """Register built-in self-healing remediation handlers and fallback rules."""
@@ -1577,6 +1587,51 @@ class RecommenderService:
             "was_blocked": was_blocked,
             "usage": self.rate_limiter.get_tenant_usage(tenant_id),
         }
+
+    def get_canary_status(self) -> dict[str, Any]:
+        """Return shadow/canary deployment policy, arm metrics, and evaluation."""
+        return self.canary_router.get_status()
+
+    def configure_canary(
+        self,
+        *,
+        canary_weight: float | None = None,
+        shadow_enabled: bool | None = None,
+        shadow_sample_rate: float | None = None,
+        candidate_version: str | None = None,
+        mode: DeploymentMode | str | None = None,
+    ) -> dict[str, Any]:
+        """Update shadow/canary routing policy and return the active status."""
+        self.canary_router.update_policy(
+            canary_weight=canary_weight,
+            shadow_enabled=shadow_enabled,
+            shadow_sample_rate=shadow_sample_rate,
+            candidate_version=candidate_version,
+            mode=mode,
+        )
+        return self.canary_router.get_status()
+
+    def evaluate_canary_guardrails(
+        self,
+        *,
+        auto_rollback: bool = True,
+    ) -> dict[str, Any]:
+        """Evaluate online A/B statistical and reliability guardrails."""
+        evaluation = self.canary_router.evaluate_guardrails(auto_rollback=auto_rollback)
+        return {
+            "evaluation": evaluation.to_dict(),
+            "policy": self.canary_router.policy.to_dict(),
+        }
+
+    def rollback_canary(self, reason: str = "manual_rollback") -> dict[str, Any]:
+        """Immediately roll back canary/shadow traffic to champion."""
+        policy = self.canary_router.rollback(reason=reason)
+        return {"rolled_back": True, "reason": reason, "policy": policy.to_dict()}
+
+    def promote_canary(self) -> dict[str, Any]:
+        """Promote the canary candidate to 100% serving traffic."""
+        policy = self.canary_router.promote()
+        return {"promoted": True, "policy": policy.to_dict()}
 
     def record_request(
         self,

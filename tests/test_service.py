@@ -2701,3 +2701,44 @@ def test_service_rate_limiting_and_telemetry_integration(tmp_path: Path) -> None
     assert unblk["unblocked"] is True
     assert unblk["was_blocked"] is True
     assert service.get_rate_limit_stats()["blocked_tenants"] == 0
+
+
+def test_service_canary_and_telemetry_integration(tmp_path: Path) -> None:
+    from music_recommender.canary import ShadowCanaryRouter
+    from music_recommender.telemetry import export_prometheus_metrics
+
+    service = create_service(tmp_path)
+    service.canary_router = ShadowCanaryRouter()
+
+    cfg = service.configure_canary(
+        canary_weight=0.25,
+        shadow_enabled=True,
+        shadow_sample_rate=0.5,
+        candidate_version="v2-cand",
+    )
+    assert cfg["policy"]["canary_weight"] == 0.25
+    assert cfg["policy"]["mode"] == "canary"
+
+    service.canary_router.record_outcome(
+        "champion", latency_ms=15.0, success=True, converted=True
+    )
+    service.canary_router.record_outcome(
+        "canary", latency_ms=20.0, success=False, converted=False
+    )
+
+    prom_text = export_prometheus_metrics(service)
+    assert "music_recommender_canary_weight 0.25" in prom_text
+    assert 'music_recommender_canary_requests_total{arm="champion"} 1' in prom_text
+    assert 'music_recommender_canary_requests_total{arm="canary"} 1' in prom_text
+    assert 'music_recommender_canary_errors_total{arm="canary"} 1' in prom_text
+
+    eval_res = service.evaluate_canary_guardrails(auto_rollback=False)
+    assert eval_res["evaluation"]["status"] == "insufficient_data"
+
+    rb_res = service.rollback_canary(reason="ops_halt")
+    assert rb_res["rolled_back"] is True
+    assert rb_res["policy"]["canary_weight"] == 0.0
+
+    prom_res = service.promote_canary()
+    assert prom_res["promoted"] is True
+    assert prom_res["policy"]["canary_weight"] == 1.0

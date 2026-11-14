@@ -1,3 +1,41 @@
+# Milestone 0.44.0 Roadmap — Phase 181 & 182
+
+## Phase 181 & 182: Automated Model Shadow Deployment, Canary Traffic Splitting, and Online A/B Guardrails (0.44.0)
+
+### 1. Objective
+Equip the recommendation platform with safe, automated model rollout capabilities:
+1. A **Shadow & Canary Routing Engine** (`ShadowCanaryRouter`, `CanaryPolicy`, `RoutingDecision`, `DeploymentMode`) supporting deterministic sticky bucketing, configurable canary traffic splitting (`0.0..1.0`), and sampled shadow traffic mirroring with candidate vs. champion overlap/latency comparisons.
+2. **Online A/B Guardrails** (`ABGuardrailConfig`, `ArmMetrics`, `GuardrailEvaluation`) computing two-proportion z-test statistical significance, error-rate deltas, and p95 latency ratios with automated canary rollback (`ROLLED_BACK`) or promotion (`PROMOTED`), plus deterministic JSON state sync.
+3. Integration with `RecommenderService`, Prometheus telemetry (`telemetry.py`), FastAPI endpoints (`/canary/*`), operator CLI tooling (`canary-status`, `canary-configure`), and Streamlit dashboard observability (`Shadow & Canary`), releasing Milestone 0.44.0 with 100% green CI.
+
+### 2. Scope
+1. **Canary & Shadow Engine (`src/music_recommender/canary.py`)**:
+   - `DeploymentMode`, `CanaryPolicy`, `ABGuardrailConfig`, `RoutingDecision`, `ArmMetrics`, `GuardrailEvaluation`, `ShadowCanaryRouter`.
+2. **Service Layer & Telemetry (`src/music_recommender/service.py`, `telemetry.py`)**:
+   - Wire `self.canary_router` and governance methods into `RecommenderService`; export `music_recommender_canary_weight`, `music_recommender_canary_requests_total`, and `music_recommender_canary_errors_total`.
+3. **FastAPI Endpoints (`api/main.py`)**:
+   - `GET /canary/status`, `POST /canary/configure`, `POST /canary/evaluate`, `POST /canary/rollback`, `POST /canary/promote`.
+4. **Operator CLI (`src/music_recommender/cli.py`)**:
+   - `music-recommender canary-status` and `music-recommender canary-configure`.
+5. **Streamlit Dashboard (`src/music_recommender/dashboard.py`)**:
+   - `"Shadow & Canary"` tab rendering traffic split, arm health, and guardrail status.
+6. **Tests, Docs & Release 0.44.0**:
+   - Unit and integration tests across `tests/test_canary.py`, `tests/test_service.py`, `tests/test_api.py`, `tests/test_cli.py`, `tests/test_dashboard.py`, plus `README.md`, `CHANGELOG.md`, `PLAN.md`, `docs/PROGRESS.md`, and `pyproject.toml` (`0.44.0`).
+
+### 3. Acceptance Criteria
+- [ ] AC-1: `ShadowCanaryRouter` performs deterministic sticky bucketing, canary splitting, and shadow comparison recording.
+- [ ] AC-2: `ABGuardrailConfig` and `evaluate_guardrails()` detect error/latency/CTR regressions and trigger automated rollback.
+- [ ] AC-3: `RecommenderService` exposes canary governance methods and Prometheus exports canary metrics.
+- [ ] AC-4: FastAPI `/canary/*` endpoints validate payloads and manage canary configuration, evaluation, rollback, and promotion.
+- [ ] AC-5: CLI commands `canary-status` and `canary-configure` work in human-readable and `--json` modes.
+- [ ] AC-6: Streamlit dashboard renders the `"Shadow & Canary"` tab cleanly without errors.
+- [ ] AC-7: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Exclusions
+- External Kubernetes Ingress/Istio Envoy sidecar integration is deferred; routing and shadow evaluation are implemented deterministically in-process with JSON state snapshots.
+
+---
+
 # Milestone 0.43.0 Roadmap — Phase 179 & 180
 
 ## Phase 179 & 180: Distributed Rate Limiting, Token-Bucket Throttling, and Tenant Quota Governance (0.43.0)

@@ -633,6 +633,54 @@ def collect_service_metric_families(
             )
             families.append(blocked_fam)
 
+    # 6. Shadow & Canary Deployment Metrics
+    canary_router = (
+        getattr(service, "canary_router", None) if service is not None else None
+    )
+    if canary_router is not None and hasattr(canary_router, "get_status"):
+        with contextlib.suppress(Exception):
+            c_status = canary_router.get_status()
+            c_policy = c_status.get("policy", {})
+            c_arms = c_status.get("arms", {})
+            base_labels = dict(custom_labels) if custom_labels else {}
+
+            weight_fam = MetricFamily(
+                name="music_recommender_canary_weight",
+                help_text="Configured canary traffic split weight (0.0 to 1.0).",
+                metric_type=MetricType.GAUGE,
+            )
+            weight_fam.add_sample(
+                value=float(c_policy.get("canary_weight", 0.0)),
+                labels=base_labels,
+            )
+            families.append(weight_fam)
+
+            req_fam = MetricFamily(
+                name="music_recommender_canary_requests_total",
+                help_text="Total requests routed per deployment arm.",
+                metric_type=MetricType.COUNTER,
+            )
+            err_fam = MetricFamily(
+                name="music_recommender_canary_errors_total",
+                help_text="Total errors recorded per deployment arm.",
+                metric_type=MetricType.COUNTER,
+            )
+            for arm_name in ("champion", "canary"):
+                arm_data = c_arms.get(arm_name, {})
+                arm_labels = {"arm": arm_name}
+                if custom_labels:
+                    arm_labels.update(custom_labels)
+                req_fam.add_sample(
+                    value=int(arm_data.get("requests", 0)),
+                    labels=arm_labels,
+                )
+                err_fam.add_sample(
+                    value=int(arm_data.get("errors", 0)),
+                    labels=arm_labels,
+                )
+            families.append(req_fam)
+            families.append(err_fam)
+
     return families
 
 
