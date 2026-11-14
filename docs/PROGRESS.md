@@ -15,9 +15,9 @@
 - [x] Task 12: Implement CLI commands `ratelimit-stats` and `tenant-quota` in `src/music_recommender/cli.py`.
 - [x] Task 13: Add CLI tests in `tests/test_cli.py`.
 - [x] Task 14: Add "Rate Limits & Quotas" tab to `src/music_recommender/dashboard.py` and test in `tests/test_dashboard.py`.
-- [ ] Task 15: Update `README.md`, `CHANGELOG.md`, `PLAN.md`, and `docs/PROGRESS.md` for `0.43.0`.
-- [ ] Task 16: Bump version to `0.43.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
-- [ ] Task 17: Run full local CI-parity checks, push to remote, open draft PR, monitor remote CI to 100% green.
+- [x] Task 15: Update `README.md`, `CHANGELOG.md`, `PLAN.md`, and `docs/PROGRESS.md` for `0.43.0`.
+- [x] Task 16: Bump version to `0.43.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
+- [x] Task 17: Run full local CI-parity checks, push to remote, open draft PR, monitor remote CI to 100% green.
 
 ## 2. Acceptance Criteria Tracking
 | Criterion | Status | Verification Evidence |
@@ -29,7 +29,7 @@
 | AC-5: FastAPI endpoints /ratelimit/* validate payloads and manage tenant tiers/blocks | `Passed` | `tests/test_api.py` |
 | AC-6: Operator CLI commands ratelimit-stats and tenant-quota operate cleanly | `Passed` | `tests/test_cli.py` |
 | AC-7: Streamlit dashboard renders Rate Limits & Quotas tab cleanly | `Passed` | `tests/test_dashboard.py` |
-| AC-8: All local CI-parity checks and remote CI workflow runs pass 100% | `Pending` | Local checks + GitHub Actions runs |
+| AC-8: All local CI-parity checks and remote CI workflow runs pass 100% | `Passed` | Local checks + GitHub Actions runs |
 
 ## 3. Autonomous Decisions Log
 - **Decision 1 (Dual-Algorithm Enforcement)**: Combine Token-Bucket (smooth burst control + continuous refill) with Sliding-Window (strict interval cap) and Daily Quota counters inside `RateLimiterEngine` so tenants get predictable burst tolerance without exceeding sustained window or daily limits.
