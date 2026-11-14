@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from time import perf_counter
 from typing import TYPE_CHECKING
@@ -13,6 +14,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 if TYPE_CHECKING:
+    from music_recommender.ratelimit import RateLimiterEngine
     from music_recommender.tracing import DistributedTracer
 
 logger = logging.getLogger("music_recommender.api.middleware")
@@ -256,3 +258,101 @@ class TraceContextMiddleware:
             except Exception as exc:
                 span.record_exception(exc)
                 raise
+
+
+_DEFAULT_EXEMPT_PATHS: frozenset[str] = frozenset({"/", "/health", "/metrics"})
+
+
+class RateLimitMiddleware:
+    """ASGI middleware enforcing per-tenant rate limits and X-RateLimit-* headers."""
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        rate_limiter: RateLimiterEngine | None = None,
+        *,
+        enabled: bool | None = None,
+        exempt_paths: frozenset[str] | None = None,
+    ) -> None:
+        self.app = app
+        self._rate_limiter = rate_limiter
+        self._enabled = enabled
+        self.exempt_paths = (
+            _DEFAULT_EXEMPT_PATHS if exempt_paths is None else exempt_paths
+        )
+
+    @property
+    def rate_limiter(self) -> RateLimiterEngine:
+        """Return configured engine or the process-wide RateLimiterEngine."""
+        if self._rate_limiter is not None:
+            return self._rate_limiter
+        from music_recommender.ratelimit import get_global_rate_limiter
+
+        return get_global_rate_limiter()
+
+    def _is_enabled(self) -> bool:
+        if self._enabled is not None:
+            return self._enabled
+        if self._rate_limiter is not None and self._rate_limiter.enabled:
+            return True
+        if self.rate_limiter.enabled:
+            return True
+        raw = os.getenv("MUSIC_RECOMMENDER_RATE_LIMIT_ENABLED", "").strip().lower()
+        return raw in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _resolve_tenant_id(scope: Scope, headers: Headers) -> str:
+        tenant_header = (headers.get("x-tenant-id") or "").strip()
+        if tenant_header:
+            return tenant_header[:128]
+        api_key = (headers.get("x-api-key") or "").strip()
+        if api_key:
+            return f"apikey:{api_key[:32]}"
+        client = scope.get("client")
+        if client and isinstance(client, (list, tuple)) and len(client) > 0:
+            return f"ip:{client[0]}"
+        return "anonymous"
+
+    async def __call__(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+    ) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = str(scope.get("path") or "/")
+        if path in self.exempt_paths or not self._is_enabled():
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(scope=scope)
+        tenant_id = self._resolve_tenant_id(scope, headers)
+        decision = self.rate_limiter.check_and_consume(tenant_id)
+        rate_headers = decision.to_headers()
+
+        if not decision.allowed:
+            response = JSONResponse(
+                status_code=429,
+                content={
+                    "detail": "Rate limit exceeded",
+                    "reason": decision.reason,
+                    "tenant_id": decision.tenant_id,
+                    "tier": decision.tier.value,
+                    "retry_after_seconds": round(decision.retry_after_seconds, 3),
+                },
+                headers=rate_headers,
+            )
+            await response(scope, receive, send)
+            return
+
+        async def send_with_ratelimit(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                response_headers = MutableHeaders(scope=message)
+                for key, value in rate_headers.items():
+                    response_headers[key] = value
+            await send(message)
+
+        await self.app(scope, receive, send_with_ratelimit)
