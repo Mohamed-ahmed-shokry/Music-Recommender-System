@@ -4492,3 +4492,62 @@ def test_ratelimit_and_tenant_quota_cli(monkeypatch: pytest.MonkeyPatch) -> None
         cli.app, ["tenant-quota", "cli-tenant", "--set-tier", "invalid"]
     )
     assert res_bad.exit_code == 1
+
+
+def test_canary_status_and_configure_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from music_recommender.canary import ShadowCanaryRouter, set_global_canary_router
+
+    router = ShadowCanaryRouter()
+    set_global_canary_router(router)
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(
+            lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError())
+        ),
+    )
+
+    runner = CliRunner()
+
+    # 1. Configure canary & shadow via CLI
+    res_cfg = runner.invoke(
+        cli.app,
+        [
+            "canary-configure",
+            "--weight",
+            "0.25",
+            "--shadow",
+            "--shadow-rate",
+            "0.5",
+            "--candidate-version",
+            "v2-cli",
+            "--evaluate",
+            "--json",
+        ],
+    )
+    assert res_cfg.exit_code == 0
+    cfg_payload = json.loads(res_cfg.output)
+    assert cfg_payload["policy"]["canary_weight"] == 0.25
+    assert cfg_payload["policy"]["candidate_version"] == "v2-cli"
+    assert cfg_payload["evaluation"]["status"] == "insufficient_data"
+
+    # 2. canary-status human & --json
+    res_status = runner.invoke(cli.app, ["canary-status"])
+    assert res_status.exit_code == 0
+    assert "Shadow & Canary Deployment Status" in res_status.output
+
+    res_status_json = runner.invoke(cli.app, ["canary-status", "--json"])
+    assert res_status_json.exit_code == 0
+    assert json.loads(res_status_json.output)["policy"]["canary_weight"] == 0.25
+
+    # 3. Rollback & mutual exclusion check
+    res_rb = runner.invoke(cli.app, ["canary-configure", "--rollback"])
+    assert res_rb.exit_code == 0
+    assert "rolled_back" in res_rb.output
+
+    res_conflict = runner.invoke(
+        cli.app, ["canary-configure", "--rollback", "--promote"]
+    )
+    assert res_conflict.exit_code == 1
