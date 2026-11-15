@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.44.0) — active development (branch `phase/181-shadow-canary-deployment`)
+## Current milestone (0.44.0) — ready for review (branch `phase/181-shadow-canary-deployment`, PR #39)
 
 Automated Model Shadow Deployment, Canary Traffic Splitting, and Online A/B Guardrails.
 The 0.43.0 release delivered distributed rate limiting, token-bucket throttling, and tenant quota governance.
@@ -11,8 +11,8 @@ This milestone equips the platform with safe, automated model rollout capabiliti
 a Shadow & Canary Routing Engine (`ShadowCanaryRouter`, `CanaryPolicy`, `RoutingDecision`, `DeploymentMode`, `ABGuardrailConfig`, `GuardrailEvaluation`) supporting deterministic sticky bucketing, sampled shadow traffic mirroring, two-proportion z-test CTR significance, error/latency guardrails, and automated rollback;
 integration with `RecommenderService`, Prometheus telemetry, FastAPI `/canary/*` routes, operator CLI (`canary-status`, `canary-configure`), and Streamlit dashboard (`Shadow & Canary`).
 
-- Phase 181 — Shadow traffic mirroring and canary routing policy engine (`canary.py`, in progress).
-- Phase 182 — Real-time statistical significance, automated canary rollback guardrails, API/CLI/dashboard integration, clean CI.
+- Phase 181 — Shadow traffic mirroring and canary routing policy engine (`canary.py`, completed).
+- Phase 182 — Real-time statistical significance, automated canary rollback guardrails, API/CLI/dashboard integration, clean CI (completed).
 
 ## Next milestone (0.45.0) — planned
 

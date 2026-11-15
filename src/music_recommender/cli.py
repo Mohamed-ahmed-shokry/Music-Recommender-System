@@ -6079,5 +6079,123 @@ def tenant_quota_command(
     typer.echo(f"Blocked:          {usage['blocked']}")
 
 
+def _get_canary_router_or_service() -> tuple[Any | None, Any]:
+    from music_recommender.canary import get_global_canary_router
+
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable: %s", exc)
+
+    if service is not None:
+        return service, service.canary_router
+    return None, get_global_canary_router()
+
+
+@app.command("canary-status")
+def canary_status_command(
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON shadow/canary deployment status."),
+    ] = False,
+) -> None:
+    """Display active shadow/canary deployment policy, arm health, and A/B status."""
+    _service, router = _get_canary_router_or_service()
+    status = router.get_status()
+    if as_json:
+        typer.echo(json.dumps(status, indent=2))
+        return
+
+    pol = status["policy"]
+    champ = status["arms"]["champion"]
+    cand = status["arms"]["canary"]
+    typer.secho("=== Shadow & Canary Deployment Status ===", bold=True)
+    typer.echo(f"Mode:             {pol['mode']}")
+    typer.echo(f"Canary Weight:    {pol['canary_weight']:.2f}")
+    typer.echo(
+        f"Shadow Mirroring: {pol['shadow_enabled']} "
+        f"(sample={pol['shadow_sample_rate']:.2f})"
+    )
+    typer.echo(f"Champion Arm:     req={champ['requests']} err={champ['errors']}")
+    typer.echo(f"Canary Arm:       req={cand['requests']} err={cand['errors']}")
+
+
+@app.command("canary-configure")
+def canary_configure_command(
+    weight: Annotated[
+        float | None,
+        typer.Option("--weight", min=0.0, max=1.0, help="Canary traffic weight 0..1."),
+    ] = None,
+    shadow: Annotated[
+        bool | None,
+        typer.Option(
+            "--shadow/--no-shadow", help="Enable or disable shadow mirroring."
+        ),
+    ] = None,
+    shadow_rate: Annotated[
+        float | None,
+        typer.Option(
+            "--shadow-rate", min=0.0, max=1.0, help="Shadow sampling rate 0..1."
+        ),
+    ] = None,
+    candidate_version: Annotated[
+        str | None,
+        typer.Option("--candidate-version", help="Candidate model version tag."),
+    ] = None,
+    rollback: Annotated[
+        bool,
+        typer.Option("--rollback", help="Immediately roll back canary to champion."),
+    ] = False,
+    promote: Annotated[
+        bool,
+        typer.Option("--promote", help="Promote canary candidate to 100% traffic."),
+    ] = False,
+    evaluate: Annotated[
+        bool,
+        typer.Option("--evaluate", help="Run A/B guardrail evaluation."),
+    ] = False,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON output."),
+    ] = False,
+) -> None:
+    """Configure shadow/canary traffic splitting, rollback, promote, or evaluate."""
+    _service, router = _get_canary_router_or_service()
+
+    if rollback and promote:
+        typer.secho("Cannot pass both --rollback and --promote.", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    if rollback:
+        router.rollback(reason="cli_rollback")
+    elif promote:
+        router.promote()
+    elif any(x is not None for x in (weight, shadow, shadow_rate, candidate_version)):
+        router.update_policy(
+            canary_weight=weight,
+            shadow_enabled=shadow,
+            shadow_sample_rate=shadow_rate,
+            candidate_version=candidate_version,
+        )
+
+    evaluation = router.evaluate_guardrails() if evaluate else None
+    payload: dict[str, Any] = router.get_status()
+    if evaluation is not None:
+        payload["evaluation"] = evaluation.to_dict()
+
+    if as_json:
+        typer.echo(json.dumps(payload, indent=2))
+        return
+
+    pol = payload["policy"]
+    typer.secho("=== Canary Policy Updated ===", bold=True)
+    typer.echo(f"Mode:             {pol['mode']}")
+    typer.echo(f"Canary Weight:    {pol['canary_weight']:.2f}")
+    typer.echo(f"Candidate:        {pol['candidate_version']}")
+    if evaluation is not None:
+        typer.echo(f"Guardrail Status: {evaluation.status}")
+
+
 if __name__ == "__main__":
     app()  # pragma: no cover - CLI entry point invoked by `python -m`

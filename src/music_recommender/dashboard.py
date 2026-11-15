@@ -1546,6 +1546,61 @@ def _render_ratelimit_tab(service: RecommenderService) -> None:
         st.info("No tenant rate-limit activity recorded yet.")
 
 
+def _render_canary_tab(service: RecommenderService) -> None:
+    """Render shadow deployment, canary traffic split, and A/B guardrail view."""
+    st.subheader("Model Shadow & Canary Deployment")
+    st.caption(
+        "Monitor traffic splitting, shadow candidate overlap, and online A/B "
+        "statistical guardrails."
+    )
+    if not hasattr(service, "get_canary_status"):
+        st.info("Canary deployment telemetry is unavailable for this service.")
+        return
+
+    status = service.get_canary_status()
+    pol = status.get("policy", {})
+    arms = status.get("arms", {})
+    champ = arms.get("champion", {})
+    cand = arms.get("canary", {})
+    shadow = status.get("shadow_summary", {})
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Deployment Mode", str(pol.get("mode", "champion_only")))
+    col2.metric("Canary Weight", f"{float(pol.get('canary_weight', 0.0)):.0%}")
+    col3.metric("Champion Requests", int(champ.get("requests", 0)))
+    col4.metric("Canary Requests", int(cand.get("requests", 0)))
+
+    st.dataframe(
+        [
+            {
+                "Arm": "champion",
+                "Version": pol.get("champion_version", "champion"),
+                "Requests": champ.get("requests", 0),
+                "Errors": champ.get("errors", 0),
+                "Error Rate": f"{float(champ.get('error_rate', 0.0)):.2%}",
+                "CTR": f"{float(champ.get('conversion_rate', 0.0)):.2%}",
+                "p95 (ms)": champ.get("latency_p95_ms", 0.0),
+            },
+            {
+                "Arm": "canary",
+                "Version": pol.get("candidate_version", "candidate"),
+                "Requests": cand.get("requests", 0),
+                "Errors": cand.get("errors", 0),
+                "Error Rate": f"{float(cand.get('error_rate', 0.0)):.2%}",
+                "CTR": f"{float(cand.get('conversion_rate', 0.0)):.2%}",
+                "p95 (ms)": cand.get("latency_p95_ms", 0.0),
+            },
+        ],
+        width="stretch",
+        hide_index=True,
+    )
+    if shadow.get("sample_count", 0) > 0:
+        st.caption(
+            f"Shadow samples: {shadow['sample_count']} | "
+            f"Mean Jaccard overlap: {shadow.get('mean_jaccard_overlap', 1.0):.2f}"
+        )
+
+
 def render_dashboard(service: RecommenderService) -> None:
     """Render the dashboard using an already loaded recommender service."""
     health = service.health()
@@ -1776,6 +1831,7 @@ def render_dashboard(service: RecommenderService) -> None:
             "Cold-Start Bandit",
             "Distributed Traces",
             "Rate Limits & Quotas",
+            "Shadow & Canary",
         ]
     )
     with tabs[0]:
@@ -1811,6 +1867,8 @@ def render_dashboard(service: RecommenderService) -> None:
         _render_traces_tab(service)
     with tabs[9]:
         _render_ratelimit_tab(service)
+    with tabs[10]:
+        _render_canary_tab(service)
 
 
 def main() -> None:

@@ -19,6 +19,7 @@ from music_recommender.dashboard import (
 
 class FakeDashboardService:
     def __init__(self) -> None:
+        from music_recommender.canary import ShadowCanaryRouter
         from music_recommender.ratelimit import RateLimiterEngine
         from music_recommender.tracing import (
             AlertTraceCorrelator,
@@ -28,6 +29,7 @@ class FakeDashboardService:
         self.tracer = DistributedTracer()
         self.trace_correlator = AlertTraceCorrelator(self.tracer)
         self.rate_limiter = RateLimiterEngine(enabled=True)
+        self.canary_router = ShadowCanaryRouter()
         self.context_features: tuple[str, ...] = (
             "log_plays",
             "log_unique_artists",
@@ -443,6 +445,9 @@ class FakeDashboardService:
     def get_rate_limit_stats(self) -> dict[str, Any]:
         return self.rate_limiter.get_stats()
 
+    def get_canary_status(self) -> dict[str, Any]:
+        return self.canary_router.get_status()
+
     def browse_artists(
         self,
         *,
@@ -820,6 +825,7 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Cold-Start Bandit",
         "Distributed Traces",
         "Rate Limits & Quotas",
+        "Shadow & Canary",
     ]
     assert [metric.label for metric in app.metric] == [
         "Listeners",
@@ -834,6 +840,10 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Rejected Requests",
         "Active Tenants",
         "Blocked Tenants",
+        "Deployment Mode",
+        "Canary Weight",
+        "Champion Requests",
+        "Canary Requests",
     ]
 
 
@@ -1487,6 +1497,7 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
         "Cold-Start Bandit",
         "Distributed Traces",
         "Rate Limits & Quotas",
+        "Shadow & Canary",
     ]
 
 
@@ -2061,4 +2072,34 @@ def test_dashboard_ratelimit_tab_rendering() -> None:
         "Distributed Rate Limits & Tenant Quotas" in s.value for s in app.subheader
     )
     assert any("Rate Limits & Quotas" in str(tab.label) for tab in app.tabs)
+    assert len(app.dataframe) >= 1
+
+
+def test_dashboard_canary_tab_rendering() -> None:
+    service = FakeDashboardService()
+    service.canary_router.update_policy(
+        canary_weight=0.25,
+        shadow_enabled=True,
+        shadow_sample_rate=0.5,
+    )
+    service.canary_router.record_outcome(
+        "champion", latency_ms=10.0, success=True, converted=True
+    )
+    service.canary_router.record_shadow_comparison(
+        entity_id="u1",
+        champion_items=["a1", "a2"],
+        candidate_items=["a2", "a3"],
+        champion_latency_ms=10.0,
+        candidate_latency_ms=12.0,
+    )
+
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("Model Shadow & Canary Deployment" in s.value for s in app.subheader)
+    assert any("Shadow & Canary" in str(tab.label) for tab in app.tabs)
     assert len(app.dataframe) >= 1

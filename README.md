@@ -1153,6 +1153,14 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
     uv run music-recommender tenant-quota acme --unblock --json      # lift quarantine and emit JSON snapshot
     ```
 
+14. **Model Shadow Deployment, Canary Traffic Splitting & Online A/B Guardrails** — Deterministic sticky bucketing, sampled shadow mirroring with Jaccard overlap comparison, two-proportion z-test CTR significance, and automated rollback:
+
+    ```bash
+    uv run music-recommender canary-status                           # inspect active canary/shadow policy and arm metrics
+    uv run music-recommender canary-configure --weight 0.2 --shadow  # route 20% canary traffic with shadow mirroring
+    uv run music-recommender canary-configure --evaluate --json      # evaluate A/B guardrails and emit JSON report
+    ```
+
 ## API Reference
 
 Train before starting the API:
@@ -1240,6 +1248,11 @@ uv run uvicorn api.main:app --reload
 | `GET` | `/ratelimit/tenants/{tenant_id}` | Return detailed token-bucket, sliding-window, and daily quota usage for a tenant |
 | `POST` | `/ratelimit/tenants/{tenant_id}/tier` | Assign a rate-limit tier (`free`, `pro`, `enterprise`) to a tenant |
 | `POST` | `/ratelimit/tenants/{tenant_id}/unblock` | Lift an active quarantine block and clear recent violations |
+| `GET` | `/canary/status` | Return active shadow/canary policy, arm metrics, shadow overlap, and last guardrail evaluation |
+| `POST` | `/canary/configure` | Update canary traffic weight, shadow sampling rate, candidate version, or deployment mode |
+| `POST` | `/canary/evaluate` | Evaluate online A/B statistical and reliability guardrails with optional auto-rollback |
+| `POST` | `/canary/rollback` | Immediately roll back canary and shadow traffic to the champion model |
+| `POST` | `/canary/promote` | Promote the canary candidate model to 100% serving traffic |
 
 Example requests:
 
