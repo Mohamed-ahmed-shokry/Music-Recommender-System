@@ -1161,6 +1161,14 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
     uv run music-recommender canary-configure --evaluate --json      # evaluate A/B guardrails and emit JSON report
     ```
 
+15. **Feature Store Drift Monitoring & Embedding Staleness Detection** — Population Stability Index (PSI), mean z-shift checks, embedding freshness/cosine retention monitoring, and cooldown-guarded retraining triggers:
+
+    ```bash
+    uv run music-recommender drift-status                            # inspect registered baselines & embedding age
+    uv run music-recommender drift-evaluate --json                   # evaluate feature drift & retrain decision
+    uv run music-recommender drift-evaluate --acknowledge-retrain    # mark retraining complete & start cooldown
+    ```
+
 ## API Reference
 
 Train before starting the API:
@@ -1253,6 +1261,11 @@ uv run uvicorn api.main:app --reload
 | `POST` | `/canary/evaluate` | Evaluate online A/B statistical and reliability guardrails with optional auto-rollback |
 | `POST` | `/canary/rollback` | Immediately roll back canary and shadow traffic to the champion model |
 | `POST` | `/canary/promote` | Promote the canary candidate model to 100% serving traffic |
+| `GET` | `/drift/status` | Return registered feature baselines, observation counts, and embedding freshness |
+| `POST` | `/drift/baseline` | Register a reference baseline distribution for a monitored feature |
+| `POST` | `/drift/observe` | Record recent feature observations for drift monitoring |
+| `POST` | `/drift/evaluate` | Evaluate PSI/z-shift drift, embedding staleness, and retrain recommendation |
+| `POST` | `/drift/acknowledge-retrain` | Acknowledge retraining completion and start the cooldown window |
 
 Example requests:
 
