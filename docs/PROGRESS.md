@@ -6,8 +6,8 @@
 - [x] Task 3: Add unit tests for drift models and baseline serialization in `tests/test_feature_drift.py`.
 - [x] Task 4: Implement `FeatureDriftMonitor` and global accessors in `src/music_recommender/feature_drift.py`.
 - [x] Task 5: Add unit tests for PSI calculation, z-shift drift, embedding staleness, cooldowns, and state sync in `tests/test_feature_drift.py`.
-- [ ] Task 6: Integrate `FeatureDriftMonitor` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
-- [ ] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
+- [x] Task 6: Integrate `FeatureDriftMonitor` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
+- [x] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
 - [ ] Task 8: Implement `/drift/*` endpoints in `api/main.py`.
 - [ ] Task 9: Add API integration tests for `/drift/*` in `tests/test_api.py`.
 - [ ] Task 10: Implement CLI commands `drift-status` and `drift-evaluate` in `src/music_recommender/cli.py`.
@@ -22,7 +22,7 @@
 | :--- | :---: | :--- |
 | AC-1: FeatureDriftMonitor computes PSI and z-shift accurately against registered FeatureBaselines | `Passed` | `tests/test_feature_drift.py` |
 | AC-2: EmbeddingStalenessReport and RetrainTriggerDecision detect stale/drifted embeddings and respect cooldowns | `Passed` | `tests/test_feature_drift.py` |
-| AC-3: RecommenderService exposes drift governance methods and Prometheus exports drift/staleness metrics | `Pending` | `tests/test_service.py` |
+| AC-3: RecommenderService exposes drift governance methods and Prometheus exports drift/staleness metrics | `Passed` | `tests/test_service.py` |
 | AC-4: FastAPI /drift/* endpoints validate payloads and manage baselines, observations, evaluation, and retrain ack | `Pending` | `tests/test_api.py` |
 | AC-5: CLI commands drift-status and drift-evaluate execute cleanly in text and --json modes | `Pending` | `tests/test_cli.py` |
 | AC-6: Streamlit dashboard renders Feature Drift tab cleanly without errors | `Pending` | `tests/test_dashboard.py` |
