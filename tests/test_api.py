@@ -3560,3 +3560,71 @@ def test_canary_api_endpoints() -> None:
         assert prom_res.json()["policy"]["canary_weight"] == 1.0
     finally:
         api_main.service = original_service
+
+
+def test_drift_api_endpoints() -> None:
+    from music_recommender.feature_drift import (
+        DriftMonitorConfig,
+        FeatureDriftMonitor,
+        set_global_drift_monitor,
+    )
+
+    original_service = api_main.service
+    monitor = FeatureDriftMonitor(config=DriftMonitorConfig(min_samples=5))
+    set_global_drift_monitor(monitor)
+    api_main.service = None
+    try:
+        client = TestClient(api_main.app)
+
+        # 1. Register baseline & record drifted observations
+        base_res = client.post(
+            "/drift/baseline",
+            json={
+                "feature_name": "log_plays",
+                "values": [1.0, 2.0, 3.0, 4.0, 5.0],
+                "bins": 5,
+            },
+        )
+        assert base_res.status_code == 200
+        assert base_res.json()["name"] == "log_plays"
+
+        obs_res = client.post(
+            "/drift/observe",
+            json={"feature_name": "log_plays", "values": [20.0] * 10},
+        )
+        assert obs_res.status_code == 200
+        assert obs_res.json()["observation_count"] == 10
+
+        # 2. Validation errors (422)
+        assert (
+            client.post(
+                "/drift/baseline",
+                json={"feature_name": "", "values": [1.0]},
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                "/drift/observe",
+                json={"feature_name": "x", "values": [1.0], "extra": 1},
+            ).status_code
+            == 422
+        )
+
+        # 3. Evaluate, inspect status, and acknowledge retrain
+        eval_res = client.post("/drift/evaluate", json={"record_trigger": True})
+        assert eval_res.status_code == 200
+        assert eval_res.json()["decision"]["should_retrain"] is True
+
+        status_res = client.get("/drift/status")
+        assert status_res.status_code == 200
+        assert status_res.json()["baseline_count"] == 1
+
+        ack_res = client.post(
+            "/drift/acknowledge-retrain",
+            json={"clear_observations": True},
+        )
+        assert ack_res.status_code == 200
+        assert ack_res.json()["acknowledged"] is True
+    finally:
+        api_main.service = original_service
