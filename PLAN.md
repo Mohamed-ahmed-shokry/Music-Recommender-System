@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.45.0) — active development (branch `phase/183-feature-drift-monitoring`)
+## Current milestone (0.45.0) — ready for review (branch `phase/183-feature-drift-monitoring`, PR #43)
 
 Feature Store Drift Monitoring, Embedding Staleness Detection, and Automated Retraining Triggers.
 The 0.44.0 release delivered automated model shadow deployment, canary traffic splitting, and online A/B guardrails.
@@ -11,8 +11,8 @@ This milestone equips the platform with automated feature drift monitoring, embe
 a Feature Drift & Staleness Engine (`FeatureDriftMonitor`, `FeatureBaseline`, `DriftMonitorConfig`, `FeatureDriftReport`, `EmbeddingStalenessReport`, `RetrainTriggerDecision`) computing Population Stability Index (PSI), mean z-shift, embedding age, and cosine retention with cooldown-guarded retraining triggers;
 integration with `RecommenderService`, Prometheus telemetry, FastAPI `/drift/*` routes, operator CLI (`drift-status`, `drift-evaluate`), and Streamlit dashboard (`Feature Drift`).
 
-- Phase 183 — Feature distribution drift & embedding staleness detector (`feature_drift.py`, in progress).
-- Phase 184 — Automated retraining trigger policy, API/CLI/dashboard integration, clean CI.
+- Phase 183 — Feature distribution drift & embedding staleness detector (`feature_drift.py`, completed).
+- Phase 184 — Automated retraining trigger policy, API/CLI/dashboard integration, clean CI (completed).
 
 ## Next milestone (0.46.0) — planned
 
