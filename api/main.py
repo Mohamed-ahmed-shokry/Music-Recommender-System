@@ -2358,3 +2358,122 @@ def promote_canary_endpoint() -> dict[str, Any]:
     router = get_global_canary_router()
     policy = router.promote()
     return {"promoted": True, "policy": policy.to_dict()}
+
+
+class DriftBaselineRequest(BaseModel):
+    """Payload for registering a feature baseline distribution."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_name: str = Field(..., min_length=1)
+    values: list[float] = Field(..., min_length=1)
+    bins: int = Field(default=10, ge=2, le=100)
+
+
+class DriftObserveRequest(BaseModel):
+    """Payload for recording feature observations for drift detection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_name: str = Field(..., min_length=1)
+    values: list[float] = Field(..., min_length=1)
+
+
+class DriftEvaluateRequest(BaseModel):
+    """Payload for evaluating feature drift and embedding staleness."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    record_trigger: bool = True
+
+
+class DriftAcknowledgeRequest(BaseModel):
+    """Payload for acknowledging retraining completion."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    clear_observations: bool = True
+
+
+@app.get("/drift/status")
+def get_drift_status_endpoint() -> dict[str, Any]:
+    """Return feature drift baselines, observation counts, and staleness."""
+    if service is not None:
+        return service.get_feature_drift_status()
+    from music_recommender.feature_drift import get_global_drift_monitor
+
+    return get_global_drift_monitor().get_status()
+
+
+@app.post("/drift/baseline")
+def register_drift_baseline_endpoint(
+    payload: DriftBaselineRequest,
+) -> dict[str, Any]:
+    """Register a reference baseline distribution for a monitored feature."""
+    try:
+        if service is not None:
+            return service.register_feature_baseline(
+                payload.feature_name,
+                payload.values,
+                bins=payload.bins,
+            )
+        from music_recommender.feature_drift import get_global_drift_monitor
+
+        baseline = get_global_drift_monitor().register_baseline(
+            payload.feature_name,
+            payload.values,
+            bins=payload.bins,
+        )
+        return baseline.to_dict()
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/drift/observe")
+def record_drift_observations_endpoint(
+    payload: DriftObserveRequest,
+) -> dict[str, Any]:
+    """Record recent observations for a monitored feature."""
+    try:
+        if service is not None:
+            return service.record_feature_observations(
+                payload.feature_name,
+                payload.values,
+            )
+        from music_recommender.feature_drift import get_global_drift_monitor
+
+        count = get_global_drift_monitor().record_observations(
+            payload.feature_name,
+            payload.values,
+        )
+        return {"feature_name": payload.feature_name, "observation_count": count}
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/drift/evaluate")
+def evaluate_drift_endpoint(
+    payload: DriftEvaluateRequest | None = None,
+) -> dict[str, Any]:
+    """Evaluate feature drift, embedding staleness, and retrain recommendation."""
+    req = payload or DriftEvaluateRequest()
+    if service is not None:
+        return service.drift_monitor.evaluate_drift(record_trigger=req.record_trigger)
+    from music_recommender.feature_drift import get_global_drift_monitor
+
+    return get_global_drift_monitor().evaluate_drift(record_trigger=req.record_trigger)
+
+
+@app.post("/drift/acknowledge-retrain")
+def acknowledge_retrain_endpoint(
+    payload: DriftAcknowledgeRequest | None = None,
+) -> dict[str, Any]:
+    """Acknowledge retraining completion and start the retrain cooldown window."""
+    req = payload or DriftAcknowledgeRequest()
+    if service is not None:
+        return service.acknowledge_retrain(clear_observations=req.clear_observations)
+    from music_recommender.feature_drift import get_global_drift_monitor
+
+    return get_global_drift_monitor().acknowledge_retrain(
+        clear_observations=req.clear_observations
+    )
