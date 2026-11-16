@@ -3,7 +3,24 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.44.0) — ready for review (branch `phase/181-shadow-canary-deployment`, PR #39)
+## Current milestone (0.45.0) — active development (branch `phase/183-feature-drift-monitoring`)
+
+Feature Store Drift Monitoring, Embedding Staleness Detection, and Automated Retraining Triggers.
+The 0.44.0 release delivered automated model shadow deployment, canary traffic splitting, and online A/B guardrails.
+This milestone equips the platform with automated feature drift monitoring, embedding staleness detection, and retraining trigger governance:
+a Feature Drift & Staleness Engine (`FeatureDriftMonitor`, `FeatureBaseline`, `DriftMonitorConfig`, `FeatureDriftReport`, `EmbeddingStalenessReport`, `RetrainTriggerDecision`) computing Population Stability Index (PSI), mean z-shift, embedding age, and cosine retention with cooldown-guarded retraining triggers;
+integration with `RecommenderService`, Prometheus telemetry, FastAPI `/drift/*` routes, operator CLI (`drift-status`, `drift-evaluate`), and Streamlit dashboard (`Feature Drift`).
+
+- Phase 183 — Feature distribution drift & embedding staleness detector (`feature_drift.py`, in progress).
+- Phase 184 — Automated retraining trigger policy, API/CLI/dashboard integration, clean CI.
+
+## Next milestone (0.46.0) — planned
+
+Multi-Region Model Replication, Edge Artifact Caching, and Geo-Failover Routing.
+- Phase 185 — Edge artifact manifest sync and regional health scoring.
+- Phase 186 — Geo-failover routing policy, API/CLI/dashboard integration, and CI release.
+
+## Previous milestone (0.44.0) — shipped (branch `phase/181-shadow-canary-deployment`, PR #39 & #40)
 
 Automated Model Shadow Deployment, Canary Traffic Splitting, and Online A/B Guardrails.
 The 0.43.0 release delivered distributed rate limiting, token-bucket throttling, and tenant quota governance.
@@ -13,12 +30,6 @@ integration with `RecommenderService`, Prometheus telemetry, FastAPI `/canary/*`
 
 - Phase 181 — Shadow traffic mirroring and canary routing policy engine (`canary.py`, completed).
 - Phase 182 — Real-time statistical significance, automated canary rollback guardrails, API/CLI/dashboard integration, clean CI (completed).
-
-## Next milestone (0.45.0) — planned
-
-Feature Store Drift Monitoring, Embedding Staleness Detection, and Automated Retraining Triggers.
-- Phase 183 — Feature distribution drift & embedding staleness detector.
-- Phase 184 — Automated retraining trigger policy, API/CLI/dashboard integration, and CI release.
 
 ## Previous milestone (0.43.0) — shipped (branch `phase/179-rate-limiting-and-quotas`, PR #38)
 

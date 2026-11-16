@@ -1,3 +1,34 @@
+# Milestone 0.45.0 Roadmap — Phase 183 & 184
+
+## Phase 183 & 184: Feature Store Drift Monitoring, Embedding Staleness Detection, and Automated Retraining Triggers (0.45.0)
+
+### 1. Objective
+Equip the recommendation platform with automated data quality, feature drift, and embedding freshness observability:
+1. A **Feature Drift & Staleness Engine** (`FeatureDriftMonitor`, `FeatureBaseline`, `DriftMonitorConfig`, `FeatureDriftReport`, `EmbeddingStalenessReport`, `RetrainTriggerDecision`) computing Population Stability Index (PSI), mean z-shift, embedding age, and cosine retention.
+2. **Automated Retraining Triggers** evaluating drift severity and staleness thresholds with configurable cooldown windows and JSON state snapshot persistence.
+3. Integration with `RecommenderService`, Prometheus telemetry (`telemetry.py`), FastAPI `/drift/*` routes, operator CLI (`drift-status`, `drift-evaluate`), and Streamlit dashboard (`Feature Drift`), releasing Milestone 0.45.0 with 100% green CI.
+
+### 2. Scope
+1. **Drift Engine (`src/music_recommender/feature_drift.py`)**: `DriftSeverity`, `FeatureBaseline`, `DriftMonitorConfig`, `FeatureDriftReport`, `EmbeddingStalenessReport`, `RetrainTriggerDecision`, `FeatureDriftMonitor`.
+2. **Service & Telemetry (`src/music_recommender/service.py`, `telemetry.py`)**: Wire `self.drift_monitor` and export `music_recommender_feature_drift_psi_max`, `music_recommender_embedding_age_hours`, `music_recommender_retrain_recommended`.
+3. **FastAPI Endpoints (`api/main.py`)**: `GET /drift/status`, `POST /drift/baseline`, `POST /drift/observe`, `POST /drift/evaluate`, `POST /drift/acknowledge-retrain`.
+4. **CLI & Dashboard (`cli.py`, `dashboard.py`)**: `drift-status`, `drift-evaluate`, and `"Feature Drift"` Streamlit tab.
+5. **Tests, Docs & Release 0.45.0**: Tests across `tests/test_feature_drift.py`, `tests/test_service.py`, `tests/test_api.py`, `tests/test_cli.py`, `tests/test_dashboard.py`, plus `README.md`, `CHANGELOG.md`, `PLAN.md`, `docs/PROGRESS.md`, and `pyproject.toml` (`0.45.0`).
+
+### 3. Acceptance Criteria
+- [ ] AC-1: `FeatureDriftMonitor` computes PSI and z-shift accurately against registered `FeatureBaseline`s.
+- [ ] AC-2: `EmbeddingStalenessReport` and `RetrainTriggerDecision` detect stale/drifted embeddings and respect cooldown windows.
+- [ ] AC-3: `RecommenderService` exposes drift governance methods and Prometheus exports drift/staleness metrics.
+- [ ] AC-4: FastAPI `/drift/*` endpoints validate payloads and manage baselines, observations, evaluation, and retrain acknowledgement.
+- [ ] AC-5: CLI commands `drift-status` and `drift-evaluate` execute cleanly in text and `--json` modes.
+- [ ] AC-6: Streamlit dashboard renders the `"Feature Drift"` tab cleanly without errors.
+- [ ] AC-7: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Exclusions
+- External orchestrator job submission (Airflow/Kubeflow) is deferred; trigger decisions and cooldown state are managed deterministically in-process with JSON snapshots.
+
+---
+
 # Milestone 0.44.0 Roadmap — Phase 181 & 182
 
 ## Phase 181 & 182: Automated Model Shadow Deployment, Canary Traffic Splitting, and Online A/B Guardrails (0.44.0)
