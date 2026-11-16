@@ -20,6 +20,10 @@ from music_recommender.dashboard import (
 class FakeDashboardService:
     def __init__(self) -> None:
         from music_recommender.canary import ShadowCanaryRouter
+        from music_recommender.feature_drift import (
+            DriftMonitorConfig,
+            FeatureDriftMonitor,
+        )
         from music_recommender.ratelimit import RateLimiterEngine
         from music_recommender.tracing import (
             AlertTraceCorrelator,
@@ -30,6 +34,9 @@ class FakeDashboardService:
         self.trace_correlator = AlertTraceCorrelator(self.tracer)
         self.rate_limiter = RateLimiterEngine(enabled=True)
         self.canary_router = ShadowCanaryRouter()
+        self.drift_monitor = FeatureDriftMonitor(
+            config=DriftMonitorConfig(min_samples=5)
+        )
         self.context_features: tuple[str, ...] = (
             "log_plays",
             "log_unique_artists",
@@ -448,6 +455,9 @@ class FakeDashboardService:
     def get_canary_status(self) -> dict[str, Any]:
         return self.canary_router.get_status()
 
+    def get_feature_drift_status(self) -> dict[str, Any]:
+        return self.drift_monitor.get_status()
+
     def browse_artists(
         self,
         *,
@@ -826,6 +836,7 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Distributed Traces",
         "Rate Limits & Quotas",
         "Shadow & Canary",
+        "Feature Drift",
     ]
     assert [metric.label for metric in app.metric] == [
         "Listeners",
@@ -844,6 +855,10 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Canary Weight",
         "Champion Requests",
         "Canary Requests",
+        "Monitored Features",
+        "Max PSI",
+        "Embedding Age (h)",
+        "Retrain Triggers",
     ]
 
 
@@ -1498,6 +1513,7 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
         "Distributed Traces",
         "Rate Limits & Quotas",
         "Shadow & Canary",
+        "Feature Drift",
     ]
 
 
@@ -2102,4 +2118,24 @@ def test_dashboard_canary_tab_rendering() -> None:
     assert not app.exception
     assert any("Model Shadow & Canary Deployment" in s.value for s in app.subheader)
     assert any("Shadow & Canary" in str(tab.label) for tab in app.tabs)
+    assert len(app.dataframe) >= 1
+
+
+def test_dashboard_drift_tab_rendering() -> None:
+    service = FakeDashboardService()
+    service.drift_monitor.register_baseline(
+        "log_plays", [1.0, 2.0, 3.0, 4.0, 5.0], bins=5
+    )
+    service.drift_monitor.record_observations("log_plays", [20.0] * 10)
+    service.drift_monitor.evaluate_drift()
+
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("Feature Drift & Embedding Staleness" in s.value for s in app.subheader)
+    assert any("Feature Drift" in str(tab.label) for tab in app.tabs)
     assert len(app.dataframe) >= 1
