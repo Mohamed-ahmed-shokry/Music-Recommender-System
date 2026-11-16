@@ -12,7 +12,7 @@
 - [x] Task 9: Add API integration tests for `/drift/*` in `tests/test_api.py`.
 - [x] Task 10: Implement CLI commands `drift-status` and `drift-evaluate` in `src/music_recommender/cli.py`.
 - [x] Task 11: Add CLI tests in `tests/test_cli.py`.
-- [ ] Task 12: Add `"Feature Drift"` tab to `src/music_recommender/dashboard.py` and test in `tests/test_dashboard.py`.
+- [x] Task 12: Add `"Feature Drift"` tab to `src/music_recommender/dashboard.py` and test in `tests/test_dashboard.py`.
 - [ ] Task 13: Update `README.md`, `CHANGELOG.md`, `PLAN.md`, and `docs/PROGRESS.md` for `0.45.0`.
 - [ ] Task 14: Bump version to `0.45.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
 - [ ] Task 15: Run full local CI-parity checks, push to remote, monitor Draft PR CI to 100% green.
@@ -25,7 +25,7 @@
 | AC-3: RecommenderService exposes drift governance methods and Prometheus exports drift/staleness metrics | `Passed` | `tests/test_service.py` |
 | AC-4: FastAPI /drift/* endpoints validate payloads and manage baselines, observations, evaluation, and retrain ack | `Passed` | `tests/test_api.py` |
 | AC-5: CLI commands drift-status and drift-evaluate execute cleanly in text and --json modes | `Passed` | `tests/test_cli.py` |
-| AC-6: Streamlit dashboard renders Feature Drift tab cleanly without errors | `Pending` | `tests/test_dashboard.py` |
+| AC-6: Streamlit dashboard renders Feature Drift tab cleanly without errors | `Passed` | `tests/test_dashboard.py` |
 | AC-7: All local CI-parity checks and remote CI workflow runs pass 100% | `Pending` | Local checks + GitHub Actions runs |
 
 ## 3. Autonomous Decisions Log
