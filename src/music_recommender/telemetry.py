@@ -681,6 +681,53 @@ def collect_service_metric_families(
             families.append(req_fam)
             families.append(err_fam)
 
+    # 7. Feature Store Drift & Embedding Staleness Metrics
+    drift_monitor = (
+        getattr(service, "drift_monitor", None) if service is not None else None
+    )
+    if drift_monitor is not None and hasattr(drift_monitor, "get_status"):
+        with contextlib.suppress(Exception):
+            d_status = drift_monitor.get_status()
+            d_labels = dict(custom_labels) if custom_labels else {}
+            emb = d_status.get("embedding", {})
+            last_eval = d_status.get("last_evaluation") or {}
+
+            psi_fam = MetricFamily(
+                name="music_recommender_feature_drift_psi_max",
+                help_text="Maximum PSI across monitored features.",
+                metric_type=MetricType.GAUGE,
+            )
+            psi_fam.add_sample(
+                value=float(last_eval.get("max_psi", 0.0)),
+                labels=d_labels,
+            )
+            families.append(psi_fam)
+
+            age_fam = MetricFamily(
+                name="music_recommender_embedding_age_hours",
+                help_text="Age of active model embeddings in hours.",
+                metric_type=MetricType.GAUGE,
+            )
+            age_fam.add_sample(
+                value=float(emb.get("age_hours", 0.0)),
+                labels=d_labels,
+            )
+            families.append(age_fam)
+
+            retrain_fam = MetricFamily(
+                name="music_recommender_retrain_recommended",
+                help_text="Whether automated retraining is recommended (1=yes, 0=no).",
+                metric_type=MetricType.GAUGE,
+            )
+            should_retrain = bool(
+                (last_eval.get("decision") or {}).get("should_retrain", False)
+            )
+            retrain_fam.add_sample(
+                value=1 if should_retrain else 0,
+                labels=d_labels,
+            )
+            families.append(retrain_fam)
+
     return families
 
 

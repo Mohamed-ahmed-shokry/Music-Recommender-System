@@ -130,6 +130,10 @@ from music_recommender.content import (
     listened_artist_ids as content_listened_artist_ids,
 )
 from music_recommender.data import load_interactions
+from music_recommender.feature_drift import (
+    FeatureDriftMonitor,
+    get_global_drift_monitor,
+)
 from music_recommender.ltr import rank_tracks_with_ltr, rank_with_ltr
 from music_recommender.ranking import (
     apply_popularity_penalty,
@@ -207,6 +211,7 @@ class RecommenderService:
         tracer: DistributedTracer | None = None,
         rate_limiter: RateLimiterEngine | None = None,
         canary_router: ShadowCanaryRouter | None = None,
+        drift_monitor: FeatureDriftMonitor | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -570,6 +575,10 @@ class RecommenderService:
             self.canary_router = canary_router
         else:
             self.canary_router = get_global_canary_router()
+        if drift_monitor is not None:
+            self.drift_monitor = drift_monitor
+        else:
+            self.drift_monitor = get_global_drift_monitor()
 
     def _register_default_remediation_handlers(self) -> None:
         """Register built-in self-healing remediation handlers and fallback rules."""
@@ -1632,6 +1641,44 @@ class RecommenderService:
         """Promote the canary candidate to 100% serving traffic."""
         policy = self.canary_router.promote()
         return {"promoted": True, "policy": policy.to_dict()}
+
+    def get_feature_drift_status(self) -> dict[str, Any]:
+        """Return feature drift baselines, observation counts, and staleness."""
+        return self.drift_monitor.get_status()
+
+    def register_feature_baseline(
+        self,
+        name: str,
+        values: Sequence[float],
+        *,
+        bins: int = 10,
+    ) -> dict[str, Any]:
+        """Register a reference baseline distribution for a feature."""
+        baseline = self.drift_monitor.register_baseline(name, values, bins=bins)
+        return baseline.to_dict()
+
+    def record_feature_observations(
+        self,
+        name: str,
+        values: Sequence[float],
+    ) -> dict[str, Any]:
+        """Record recent feature observations for drift monitoring."""
+        count = self.drift_monitor.record_observations(name, values)
+        return {"feature_name": name, "observation_count": count}
+
+    def evaluate_feature_drift(self) -> dict[str, Any]:
+        """Evaluate feature drift, embedding staleness, and retrain trigger."""
+        return self.drift_monitor.evaluate_drift()
+
+    def acknowledge_retrain(
+        self,
+        *,
+        clear_observations: bool = True,
+    ) -> dict[str, Any]:
+        """Acknowledge retraining completion and reset cooldown."""
+        return self.drift_monitor.acknowledge_retrain(
+            clear_observations=clear_observations
+        )
 
     def record_request(
         self,

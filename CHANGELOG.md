@@ -5,6 +5,19 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.0] - 2026-11-16
+
+### Added
+
+- **Feature Store Drift Monitoring & Embedding Staleness Detection (Phase 183):**
+  - Implemented `FeatureDriftMonitor` in `src/music_recommender/feature_drift.py` with `DriftSeverity`, `FeatureBaseline`, `DriftMonitorConfig`, `FeatureDriftReport`, `EmbeddingStalenessReport`, and `RetrainTriggerDecision`.
+  - Added Population Stability Index (PSI) and mean z-shift drift computation against registered feature baselines, embedding age & cosine retention staleness checks, and JSON state snapshot persistence (`export_state()`, `import_state()`, `save_state()`, `load_state()`).
+
+- **Automated Retraining Triggers, Telemetry & Operator Controls (Phase 184):**
+  - Integrated `FeatureDriftMonitor` into `RecommenderService` (`get_feature_drift_status()`, `register_feature_baseline()`, `record_feature_observations()`, `evaluate_feature_drift()`, `acknowledge_retrain()`) and Prometheus exposition (`music_recommender_feature_drift_psi_max`, `music_recommender_embedding_age_hours`, `music_recommender_retrain_recommended`).
+  - Added FastAPI routes `GET /drift/status`, `POST /drift/baseline`, `POST /drift/observe`, `POST /drift/evaluate`, and `POST /drift/acknowledge-retrain`.
+  - Added operator CLI commands `music-recommender drift-status` and `music-recommender drift-evaluate`, plus the `"Feature Drift"` Streamlit dashboard tab.
+
 ## [0.44.0] - 2026-11-15
 
 ### Added

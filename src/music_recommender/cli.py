@@ -6197,5 +6197,82 @@ def canary_configure_command(
         typer.echo(f"Guardrail Status: {evaluation.status}")
 
 
+def _get_drift_monitor_or_service() -> tuple[Any | None, Any]:
+    from music_recommender.feature_drift import get_global_drift_monitor
+
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable: %s", exc)
+
+    if service is not None:
+        return service, service.drift_monitor
+    return None, get_global_drift_monitor()
+
+
+@app.command("drift-status")
+def drift_status_command(
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON feature drift status."),
+    ] = False,
+) -> None:
+    """Display registered feature baselines, observation counts, and embedding age."""
+    _service, monitor = _get_drift_monitor_or_service()
+    status = monitor.get_status()
+    if as_json:
+        typer.echo(json.dumps(status, indent=2))
+        return
+
+    emb = status["embedding"]
+    typer.secho("=== Feature Drift & Embedding Status ===", bold=True)
+    typer.echo(f"Baselines:        {status['baseline_count']}")
+    typer.echo(
+        f"Embedding Age:    {emb['age_hours']:.1f}h / {emb['max_age_hours']:.1f}h "
+        f"(stale={emb['stale']})"
+    )
+    typer.echo(f"Retrain Triggers: {status['retrain_trigger_count']}")
+
+
+@app.command("drift-evaluate")
+def drift_evaluate_command(
+    acknowledge_retrain: Annotated[
+        bool,
+        typer.Option(
+            "--acknowledge-retrain",
+            help="Acknowledge retraining completion and start cooldown.",
+        ),
+    ] = False,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON evaluation output."),
+    ] = False,
+) -> None:
+    """Evaluate feature drift and embedding staleness or acknowledge retraining."""
+    _service, monitor = _get_drift_monitor_or_service()
+    if acknowledge_retrain:
+        ack = monitor.acknowledge_retrain()
+        if as_json:
+            typer.echo(json.dumps(ack, indent=2))
+            return
+        typer.echo(
+            f"Retraining acknowledged (triggers={ack['retrain_trigger_count']})."
+        )
+        return
+
+    result = monitor.evaluate_drift()
+    if as_json:
+        typer.echo(json.dumps(result, indent=2))
+        return
+
+    dec = result["decision"]
+    typer.secho("=== Feature Drift Evaluation ===", bold=True)
+    typer.echo(f"Severity:         {dec['severity']}")
+    typer.echo(f"Max PSI:          {result['max_psi']:.4f}")
+    typer.echo(f"Should Retrain:   {dec['should_retrain']}")
+    typer.echo(f"Cooldown Active:  {dec['cooldown_active']}")
+
+
 if __name__ == "__main__":
     app()  # pragma: no cover - CLI entry point invoked by `python -m`

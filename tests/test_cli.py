@@ -4551,3 +4551,52 @@ def test_canary_status_and_configure_cli(monkeypatch: pytest.MonkeyPatch) -> Non
         cli.app, ["canary-configure", "--rollback", "--promote"]
     )
     assert res_conflict.exit_code == 1
+
+
+def test_drift_status_and_evaluate_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from music_recommender.feature_drift import (
+        DriftMonitorConfig,
+        FeatureDriftMonitor,
+        set_global_drift_monitor,
+    )
+
+    monitor = FeatureDriftMonitor(config=DriftMonitorConfig(min_samples=5))
+    monitor.register_baseline("log_plays", [1.0, 2.0, 3.0, 4.0, 5.0], bins=5)
+    monitor.record_observations("log_plays", [25.0] * 10)
+    set_global_drift_monitor(monitor)
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(
+            lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError())
+        ),
+    )
+
+    runner = CliRunner()
+
+    # 1. drift-status human & --json
+    res_status = runner.invoke(cli.app, ["drift-status"])
+    assert res_status.exit_code == 0
+    assert "Feature Drift & Embedding Status" in res_status.output
+
+    res_status_json = runner.invoke(cli.app, ["drift-status", "--json"])
+    assert res_status_json.exit_code == 0
+    assert json.loads(res_status_json.output)["baseline_count"] == 1
+
+    # 2. drift-evaluate --json & human
+    res_eval_json = runner.invoke(cli.app, ["drift-evaluate", "--json"])
+    assert res_eval_json.exit_code == 0
+    assert json.loads(res_eval_json.output)["decision"]["should_retrain"] is True
+
+    res_eval = runner.invoke(cli.app, ["drift-evaluate"])
+    assert res_eval.exit_code == 0
+    assert "Feature Drift Evaluation" in res_eval.output
+
+    # 3. Acknowledge retrain
+    res_ack = runner.invoke(
+        cli.app, ["drift-evaluate", "--acknowledge-retrain", "--json"]
+    )
+    assert res_ack.exit_code == 0
+    assert json.loads(res_ack.output)["acknowledged"] is True

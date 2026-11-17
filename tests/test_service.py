@@ -2742,3 +2742,37 @@ def test_service_canary_and_telemetry_integration(tmp_path: Path) -> None:
     prom_res = service.promote_canary()
     assert prom_res["promoted"] is True
     assert prom_res["policy"]["canary_weight"] == 1.0
+
+
+def test_service_feature_drift_and_telemetry_integration(tmp_path: Path) -> None:
+    from music_recommender.feature_drift import (
+        DriftMonitorConfig,
+        FeatureDriftMonitor,
+    )
+    from music_recommender.telemetry import export_prometheus_metrics
+
+    service = create_service(tmp_path)
+    service.drift_monitor = FeatureDriftMonitor(
+        config=DriftMonitorConfig(min_samples=10)
+    )
+
+    base = service.register_feature_baseline(
+        "log_plays", [float(i % 5) for i in range(50)], bins=5
+    )
+    assert base["name"] == "log_plays"
+
+    obs = service.record_feature_observations("log_plays", [20.0] * 20)
+    assert obs["observation_count"] == 20
+
+    eval_res = service.evaluate_feature_drift()
+    assert eval_res["decision"]["should_retrain"] is True
+    assert eval_res["max_psi"] > 0.25
+
+    prom_text = export_prometheus_metrics(service)
+    assert "music_recommender_feature_drift_psi_max" in prom_text
+    assert "music_recommender_embedding_age_hours" in prom_text
+    assert "music_recommender_retrain_recommended 1" in prom_text
+
+    ack = service.acknowledge_retrain()
+    assert ack["acknowledged"] is True
+    assert service.get_feature_drift_status()["observation_counts"]["log_plays"] == 0

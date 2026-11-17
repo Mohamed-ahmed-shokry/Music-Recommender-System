@@ -1601,6 +1601,51 @@ def _render_canary_tab(service: RecommenderService) -> None:
         )
 
 
+def _render_drift_tab(service: RecommenderService) -> None:
+    """Render feature store drift, embedding staleness, and retrain triggers."""
+    st.subheader("Feature Drift & Embedding Staleness")
+    st.caption(
+        "Monitor Population Stability Index (PSI), embedding freshness, and "
+        "automated retraining trigger status."
+    )
+    if not hasattr(service, "get_feature_drift_status"):
+        st.info("Feature drift telemetry is unavailable for this service.")
+        return
+
+    status = service.get_feature_drift_status()
+    emb = status.get("embedding", {})
+    last_eval = status.get("last_evaluation") or {}
+    decision = last_eval.get("decision") or {}
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Monitored Features", int(status.get("baseline_count", 0)))
+    col2.metric("Max PSI", f"{float(last_eval.get('max_psi', 0.0)):.3f}")
+    col3.metric("Embedding Age (h)", f"{float(emb.get('age_hours', 0.0)):.1f}")
+    col4.metric("Retrain Triggers", int(status.get("retrain_trigger_count", 0)))
+
+    features = last_eval.get("features", [])
+    if features:
+        st.dataframe(
+            [
+                {
+                    "Feature": f.get("feature_name"),
+                    "PSI": f.get("psi"),
+                    "Z-Shift": f.get("mean_shift_z"),
+                    "Severity": f.get("severity"),
+                    "Samples": f.get("sample_count"),
+                }
+                for f in features
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+    else:
+        st.info("No feature drift evaluation recorded yet.")
+
+    if decision.get("should_retrain"):
+        st.warning("Retraining recommended due to feature drift or staleness.")
+
+
 def render_dashboard(service: RecommenderService) -> None:
     """Render the dashboard using an already loaded recommender service."""
     health = service.health()
@@ -1832,6 +1877,7 @@ def render_dashboard(service: RecommenderService) -> None:
             "Distributed Traces",
             "Rate Limits & Quotas",
             "Shadow & Canary",
+            "Feature Drift",
         ]
     )
     with tabs[0]:
@@ -1869,6 +1915,8 @@ def render_dashboard(service: RecommenderService) -> None:
         _render_ratelimit_tab(service)
     with tabs[10]:
         _render_canary_tab(service)
+    with tabs[11]:
+        _render_drift_tab(service)
 
 
 def main() -> None:
