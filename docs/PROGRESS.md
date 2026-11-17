@@ -6,8 +6,8 @@
 - [x] Task 3: Add unit tests for manifest checksums, health scoring, and routing decisions in `tests/test_replication.py`.
 - [x] Task 4: Implement `MultiRegionReplicator` and global accessors in `src/music_recommender/replication.py`.
 - [x] Task 5: Add unit tests for edge cache sync, geo-failover routing, and state persistence in `tests/test_replication.py`.
-- [ ] Task 6: Integrate `MultiRegionReplicator` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
-- [ ] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
+- [x] Task 6: Integrate `MultiRegionReplicator` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
+- [x] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
 - [ ] Task 8: Implement `/replication/*` endpoints in `api/main.py`.
 - [ ] Task 9: Add API integration tests for `/replication/*` in `tests/test_api.py`.
 - [ ] Task 10: Implement CLI commands `replication-status` and `replication-sync` in `src/music_recommender/cli.py`.
@@ -22,7 +22,7 @@
 | :--- | :---: | :--- |
 | AC-1: MultiRegionReplicator publishes SHA-256 ArtifactManifests and syncs regional edge caches accurately | `Passed` | `tests/test_replication.py` |
 | AC-2: Regional health scoring and geo-failover routing select healthy regions and avoid degraded/unhealthy nodes | `Passed` | `tests/test_replication.py` |
-| AC-3: RecommenderService exposes replication governance methods and Prometheus exports replication metrics | `Pending` | `tests/test_service.py` |
+| AC-3: RecommenderService exposes replication governance methods and Prometheus exports replication metrics | `Passed` | `tests/test_service.py` |
 | AC-4: FastAPI /replication/* endpoints validate payloads and manage regions, sync, and geo-routing | `Pending` | `tests/test_api.py` |
 | AC-5: CLI commands replication-status and replication-sync execute cleanly in text and --json modes | `Pending` | `tests/test_cli.py` |
 | AC-6: Streamlit dashboard renders Multi-Region & Edge tab cleanly without errors | `Pending` | `tests/test_dashboard.py` |
