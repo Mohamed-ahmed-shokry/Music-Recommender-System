@@ -2,10 +2,10 @@
 
 ## 1. Micro-Task Checklist
 - [x] Task 1: Define Phase 185 & 186 roadmap, update `PLAN.md`, and initialize `docs/PROGRESS.md`.
-- [ ] Task 2: Implement `RegionHealth`, `ArtifactManifest`, `RegionEndpoint`, and `GeoRoutingDecision` in `src/music_recommender/replication.py`.
-- [ ] Task 3: Add unit tests for manifest checksums, health scoring, and routing decisions in `tests/test_replication.py`.
-- [ ] Task 4: Implement `MultiRegionReplicator` and global accessors in `src/music_recommender/replication.py`.
-- [ ] Task 5: Add unit tests for edge cache sync, geo-failover routing, and state persistence in `tests/test_replication.py`.
+- [x] Task 2: Implement `RegionHealth`, `ArtifactManifest`, `RegionEndpoint`, and `GeoRoutingDecision` in `src/music_recommender/replication.py`.
+- [x] Task 3: Add unit tests for manifest checksums, health scoring, and routing decisions in `tests/test_replication.py`.
+- [x] Task 4: Implement `MultiRegionReplicator` and global accessors in `src/music_recommender/replication.py`.
+- [x] Task 5: Add unit tests for edge cache sync, geo-failover routing, and state persistence in `tests/test_replication.py`.
 - [ ] Task 6: Integrate `MultiRegionReplicator` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
 - [ ] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
 - [ ] Task 8: Implement `/replication/*` endpoints in `api/main.py`.
@@ -20,8 +20,8 @@
 ## 2. Acceptance Criteria Tracking
 | Criterion | Status | Verification Evidence |
 | :--- | :---: | :--- |
-| AC-1: MultiRegionReplicator publishes SHA-256 ArtifactManifests and syncs regional edge caches accurately | `Pending` | `tests/test_replication.py` |
-| AC-2: Regional health scoring and geo-failover routing select healthy regions and avoid degraded/unhealthy nodes | `Pending` | `tests/test_replication.py` |
+| AC-1: MultiRegionReplicator publishes SHA-256 ArtifactManifests and syncs regional edge caches accurately | `Passed` | `tests/test_replication.py` |
+| AC-2: Regional health scoring and geo-failover routing select healthy regions and avoid degraded/unhealthy nodes | `Passed` | `tests/test_replication.py` |
 | AC-3: RecommenderService exposes replication governance methods and Prometheus exports replication metrics | `Pending` | `tests/test_service.py` |
 | AC-4: FastAPI /replication/* endpoints validate payloads and manage regions, sync, and geo-routing | `Pending` | `tests/test_api.py` |
 | AC-5: CLI commands replication-status and replication-sync execute cleanly in text and --json modes | `Pending` | `tests/test_cli.py` |
