@@ -1,3 +1,34 @@
+# Milestone 0.46.0 Roadmap — Phase 185 & 186
+
+## Phase 185 & 186: Multi-Region Model Replication, Edge Artifact Caching, and Geo-Failover Routing (0.46.0)
+
+### 1. Objective
+Equip the recommendation platform with multi-region resilience, edge artifact caching, and geo-failover routing:
+1. A **Multi-Region Replicator & Edge Cache Engine** (`MultiRegionReplicator`, `RegionHealth`, `ArtifactManifest`, `RegionEndpoint`, `GeoRoutingDecision`) managing SHA-256 artifact manifests, edge cache synchronization, and regional health scoring (`HEALTHY`, `DEGRADED`, `UNHEALTHY`).
+2. **Geo-Failover Routing** selecting preferred healthy/synced regions and automatically failing over to the highest-scoring healthy region on degradation or outage, with JSON state snapshot persistence.
+3. Integration with `RecommenderService`, Prometheus telemetry (`telemetry.py`), FastAPI `/replication/*` routes, operator CLI (`replication-status`, `replication-sync`), and Streamlit dashboard (`Multi-Region & Edge`), releasing Milestone 0.46.0 with 100% green CI.
+
+### 2. Scope
+1. **Replication Engine (`src/music_recommender/replication.py`)**: `RegionHealth`, `ArtifactManifest`, `RegionEndpoint`, `GeoRoutingDecision`, `MultiRegionReplicator`.
+2. **Service & Telemetry (`src/music_recommender/service.py`, `telemetry.py`)**: Wire `self.replicator` and export `music_recommender_replication_regions_total`, `music_recommender_replication_regions_healthy`, `music_recommender_replication_regions_synced`.
+3. **FastAPI Endpoints (`api/main.py`)**: `GET /replication/status`, `POST /replication/regions`, `POST /replication/sync`, `POST /replication/route`.
+4. **CLI & Dashboard (`cli.py`, `dashboard.py`)**: `replication-status`, `replication-sync`, and `"Multi-Region & Edge"` Streamlit tab.
+5. **Tests, Docs & Release 0.46.0**: Tests across `tests/test_replication.py`, `tests/test_service.py`, `tests/test_api.py`, `tests/test_cli.py`, `tests/test_dashboard.py`, plus `README.md`, `CHANGELOG.md`, `PLAN.md`, `docs/PROGRESS.md`, and `pyproject.toml` (`0.46.0`).
+
+### 3. Acceptance Criteria
+- [ ] AC-1: `MultiRegionReplicator` publishes SHA-256 `ArtifactManifest`s and syncs regional edge caches accurately.
+- [ ] AC-2: Regional health scoring and geo-failover routing select healthy regions and avoid degraded/unhealthy nodes.
+- [ ] AC-3: `RecommenderService` exposes replication governance methods and Prometheus exports replication metrics.
+- [ ] AC-4: FastAPI `/replication/*` endpoints validate payloads and manage regions, sync, and geo-routing.
+- [ ] AC-5: CLI commands `replication-status` and `replication-sync` execute cleanly in text and `--json` modes.
+- [ ] AC-6: Streamlit dashboard renders the `"Multi-Region & Edge"` tab cleanly without errors.
+- [ ] AC-7: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Exclusions
+- External cloud object-store SDKs (S3/GCS) are deferred; manifest sync and edge cache verification run deterministically in-process with JSON state snapshots.
+
+---
+
 # Milestone 0.45.0 Roadmap — Phase 183 & 184
 
 ## Phase 183 & 184: Feature Store Drift Monitoring, Embedding Staleness Detection, and Automated Retraining Triggers (0.45.0)
