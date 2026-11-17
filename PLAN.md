@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.46.0) — active development (branch `phase/185-multi-region-replication`)
+## Current milestone (0.46.0) — ready for review (branch `phase/185-multi-region-replication`, PR #44)
 
 Multi-Region Model Replication, Edge Artifact Caching, and Geo-Failover Routing.
 The 0.45.0 release delivered feature store drift monitoring, embedding staleness detection, and automated retraining triggers.
@@ -11,8 +11,8 @@ This milestone equips the platform with multi-region model replication, edge art
 a Multi-Region Replicator (`MultiRegionReplicator`, `RegionHealth`, `ArtifactManifest`, `RegionEndpoint`, `GeoRoutingDecision`) supporting SHA-256 manifest verification, edge cache sync, regional health scoring, and deterministic geo-failover routing;
 integration with `RecommenderService`, Prometheus telemetry, FastAPI `/replication/*` routes, operator CLI (`replication-status`, `replication-sync`), and Streamlit dashboard (`Multi-Region & Edge`).
 
-- Phase 185 — Edge artifact manifest sync and regional health scoring (`replication.py`, in progress).
-- Phase 186 — Geo-failover routing policy, API/CLI/dashboard integration, clean CI.
+- Phase 185 — Edge artifact manifest sync and regional health scoring (`replication.py`, completed).
+- Phase 186 — Geo-failover routing policy, API/CLI/dashboard integration, clean CI (completed).
 
 ## Next milestone (0.47.0) — planned
 
