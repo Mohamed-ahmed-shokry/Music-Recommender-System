@@ -10,8 +10,8 @@
 - [x] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
 - [x] Task 8: Implement `/replication/*` endpoints in `api/main.py`.
 - [x] Task 9: Add API integration tests for `/replication/*` in `tests/test_api.py`.
-- [ ] Task 10: Implement CLI commands `replication-status` and `replication-sync` in `src/music_recommender/cli.py`.
-- [ ] Task 11: Add CLI tests in `tests/test_cli.py`.
+- [x] Task 10: Implement CLI commands `replication-status` and `replication-sync` in `src/music_recommender/cli.py`.
+- [x] Task 11: Add CLI tests in `tests/test_cli.py`.
 - [ ] Task 12: Add `"Multi-Region & Edge"` tab to `src/music_recommender/dashboard.py` and test in `tests/test_dashboard.py`.
 - [ ] Task 13: Update `README.md`, `CHANGELOG.md`, `PLAN.md`, and `docs/PROGRESS.md` for `0.46.0`.
 - [ ] Task 14: Bump version to `0.46.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
@@ -24,7 +24,7 @@
 | AC-2: Regional health scoring and geo-failover routing select healthy regions and avoid degraded/unhealthy nodes | `Passed` | `tests/test_replication.py` |
 | AC-3: RecommenderService exposes replication governance methods and Prometheus exports replication metrics | `Passed` | `tests/test_service.py` |
 | AC-4: FastAPI /replication/* endpoints validate payloads and manage regions, sync, and geo-routing | `Passed` | `tests/test_api.py` |
-| AC-5: CLI commands replication-status and replication-sync execute cleanly in text and --json modes | `Pending` | `tests/test_cli.py` |
+| AC-5: CLI commands replication-status and replication-sync execute cleanly in text and --json modes | `Passed` | `tests/test_cli.py` |
 | AC-6: Streamlit dashboard renders Multi-Region & Edge tab cleanly without errors | `Pending` | `tests/test_dashboard.py` |
 | AC-7: All local CI-parity checks and remote CI workflow runs pass 100% | `Pending` | Local checks + GitHub Actions runs |
 
