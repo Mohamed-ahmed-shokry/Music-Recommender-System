@@ -25,6 +25,7 @@ class FakeDashboardService:
             FeatureDriftMonitor,
         )
         from music_recommender.ratelimit import RateLimiterEngine
+        from music_recommender.replication import MultiRegionReplicator
         from music_recommender.tracing import (
             AlertTraceCorrelator,
             DistributedTracer,
@@ -37,6 +38,7 @@ class FakeDashboardService:
         self.drift_monitor = FeatureDriftMonitor(
             config=DriftMonitorConfig(min_samples=5)
         )
+        self.replicator = MultiRegionReplicator()
         self.context_features: tuple[str, ...] = (
             "log_plays",
             "log_unique_artists",
@@ -458,6 +460,9 @@ class FakeDashboardService:
     def get_feature_drift_status(self) -> dict[str, Any]:
         return self.drift_monitor.get_status()
 
+    def get_replication_status(self) -> dict[str, Any]:
+        return self.replicator.get_status()
+
     def browse_artists(
         self,
         *,
@@ -837,6 +842,7 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Rate Limits & Quotas",
         "Shadow & Canary",
         "Feature Drift",
+        "Multi-Region & Edge",
     ]
     assert [metric.label for metric in app.metric] == [
         "Listeners",
@@ -859,6 +865,10 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Max PSI",
         "Embedding Age (h)",
         "Retrain Triggers",
+        "Regions Total",
+        "Healthy Regions",
+        "Synced Edge Caches",
+        "Failover Events",
     ]
 
 
@@ -1514,6 +1524,7 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
         "Rate Limits & Quotas",
         "Shadow & Canary",
         "Feature Drift",
+        "Multi-Region & Edge",
     ]
 
 
@@ -2138,4 +2149,24 @@ def test_dashboard_drift_tab_rendering() -> None:
     assert not app.exception
     assert any("Feature Drift & Embedding Staleness" in s.value for s in app.subheader)
     assert any("Feature Drift" in str(tab.label) for tab in app.tabs)
+    assert len(app.dataframe) >= 1
+
+
+def test_dashboard_replication_tab_rendering() -> None:
+    service = FakeDashboardService()
+    service.replicator.publish_manifest("v2.0.0")
+    service.replicator.register_region("us-east-1", "https://us-east.example.com")
+    service.replicator.sync_all_regions()
+
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(
+        "Multi-Region Replication & Geo-Failover" in s.value for s in app.subheader
+    )
+    assert any("Multi-Region & Edge" in str(tab.label) for tab in app.tabs)
     assert len(app.dataframe) >= 1
