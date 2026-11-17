@@ -1646,6 +1646,45 @@ def _render_drift_tab(service: RecommenderService) -> None:
         st.warning("Retraining recommended due to feature drift or staleness.")
 
 
+def _render_replication_tab(service: RecommenderService) -> None:
+    """Render multi-region model replication, edge cache sync, and geo-failover."""
+    st.subheader("Multi-Region Replication & Geo-Failover")
+    st.caption(
+        "Monitor regional endpoint health, edge artifact cache sync status, and "
+        "geo-failover events."
+    )
+    if not hasattr(service, "get_replication_status"):
+        st.info("Multi-region replication telemetry is unavailable for this service.")
+        return
+
+    status = service.get_replication_status()
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Regions Total", int(status.get("regions_total", 0)))
+    col2.metric("Healthy Regions", int(status.get("regions_healthy", 0)))
+    col3.metric("Synced Edge Caches", int(status.get("regions_synced", 0)))
+    col4.metric("Failover Events", int(status.get("failover_events_total", 0)))
+
+    regions = status.get("regions", [])
+    if regions:
+        st.dataframe(
+            [
+                {
+                    "Region": r.get("region_id"),
+                    "Health": r.get("health"),
+                    "Latency (ms)": r.get("latency_ms"),
+                    "Synced": bool(r.get("synced", False)),
+                    "Version": r.get("cached_version") or "none",
+                    "Score": r.get("health_score"),
+                }
+                for r in regions
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+    else:
+        st.info("No regional serving endpoints registered yet.")
+
+
 def render_dashboard(service: RecommenderService) -> None:
     """Render the dashboard using an already loaded recommender service."""
     health = service.health()
@@ -1878,6 +1917,7 @@ def render_dashboard(service: RecommenderService) -> None:
             "Rate Limits & Quotas",
             "Shadow & Canary",
             "Feature Drift",
+            "Multi-Region & Edge",
         ]
     )
     with tabs[0]:
@@ -1917,6 +1957,8 @@ def render_dashboard(service: RecommenderService) -> None:
         _render_canary_tab(service)
     with tabs[11]:
         _render_drift_tab(service)
+    with tabs[12]:
+        _render_replication_tab(service)
 
 
 def main() -> None:
