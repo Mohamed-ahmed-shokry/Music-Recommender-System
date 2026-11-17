@@ -6274,5 +6274,93 @@ def drift_evaluate_command(
     typer.echo(f"Cooldown Active:  {dec['cooldown_active']}")
 
 
+def _get_replicator_or_service() -> tuple[Any | None, Any]:
+    from music_recommender.replication import get_global_replicator
+
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable: %s", exc)
+
+    if service is not None:
+        return service, service.replicator
+    return None, get_global_replicator()
+
+
+@app.command("replication-status")
+def replication_status_command(
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON multi-region replication status."),
+    ] = False,
+) -> None:
+    """Display active artifact manifest, regional health, and edge sync counts."""
+    _service, rep = _get_replicator_or_service()
+    status = rep.get_status()
+    if as_json:
+        typer.echo(json.dumps(status, indent=2))
+        return
+
+    manifest = status.get("active_manifest")
+    ver = manifest["model_version"] if manifest else "none"
+    typer.secho("=== Multi-Region Replication Status ===", bold=True)
+    typer.echo(f"Manifest Version: {ver}")
+    typer.echo(
+        f"Regions:          {status['regions_total']} total | "
+        f"{status['regions_healthy']} healthy | {status['regions_synced']} synced"
+    )
+    typer.echo(f"Failover Events:  {status['failover_events_total']}")
+    for r in status.get("regions", []):
+        typer.echo(
+            f"  - {r['region_id']} [{r['health']}] "
+            f"synced={r['synced']} score={r['health_score']}"
+        )
+
+
+@app.command("replication-sync")
+def replication_sync_command(
+    region: Annotated[
+        str | None,
+        typer.Option("--region", help="Sync a single region ID (default: all)."),
+    ] = None,
+    publish_version: Annotated[
+        str | None,
+        typer.Option("--publish-version", help="Publish a new manifest version first."),
+    ] = None,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON sync result."),
+    ] = False,
+) -> None:
+    """Publish optional model manifest and sync regional edge artifact caches."""
+    _service, rep = _get_replicator_or_service()
+    if publish_version is not None:
+        rep.publish_manifest(publish_version)
+
+    try:
+        if region is not None:
+            result = rep.sync_region(region).to_dict(rep._manifest)
+        else:
+            result = rep.sync_all_regions()
+    except (ValueError, KeyError) as exc:
+        typer.secho(f"Sync failed: {exc}", fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+    if as_json:
+        typer.echo(json.dumps(result, indent=2))
+        return
+
+    if region is not None:
+        typer.echo(
+            f"Synced region '{result['region_id']}' to {result['cached_version']}."
+        )
+    else:
+        typer.echo(
+            f"Synced {len(result['synced_regions'])} region(s) to "
+            f"{result['model_version']}."
+        )
+
+
 if __name__ == "__main__":
     app()  # pragma: no cover - CLI entry point invoked by `python -m`
