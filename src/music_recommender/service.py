@@ -149,6 +149,10 @@ from music_recommender.recommend import (
     get_similar_artists,
     recommend_artists_for_user,
 )
+from music_recommender.replication import (
+    MultiRegionReplicator,
+    get_global_replicator,
+)
 from music_recommender.tracing import (
     AlertTraceCorrelator,
     DistributedTracer,
@@ -212,6 +216,7 @@ class RecommenderService:
         rate_limiter: RateLimiterEngine | None = None,
         canary_router: ShadowCanaryRouter | None = None,
         drift_monitor: FeatureDriftMonitor | None = None,
+        replicator: MultiRegionReplicator | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -579,6 +584,10 @@ class RecommenderService:
             self.drift_monitor = drift_monitor
         else:
             self.drift_monitor = get_global_drift_monitor()
+        if replicator is not None:
+            self.replicator = replicator
+        else:
+            self.replicator = get_global_replicator()
 
     def _register_default_remediation_handlers(self) -> None:
         """Register built-in self-healing remediation handlers and fallback rules."""
@@ -1679,6 +1688,44 @@ class RecommenderService:
         return self.drift_monitor.acknowledge_retrain(
             clear_observations=clear_observations
         )
+
+    def get_replication_status(self) -> dict[str, Any]:
+        """Return multi-region replication manifest and regional edge status."""
+        return self.replicator.get_status()
+
+    def register_replication_region(
+        self,
+        region_id: str,
+        endpoint_url: str,
+        *,
+        priority: int = 1,
+        weight: float = 1.0,
+    ) -> dict[str, Any]:
+        """Register or update a regional serving endpoint."""
+        endpoint = self.replicator.register_region(
+            region_id, endpoint_url, priority=priority, weight=weight
+        )
+        return endpoint.to_dict(self.replicator._manifest)
+
+    def sync_replication_regions(
+        self,
+        *,
+        region_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Synchronize the active manifest across one or all regions."""
+        if region_id is not None:
+            endpoint = self.replicator.sync_region(region_id)
+            return endpoint.to_dict(self.replicator._manifest)
+        return self.replicator.sync_all_regions()
+
+    def route_geo_request(
+        self,
+        preferred_region: str | None = None,
+    ) -> dict[str, Any]:
+        """Route a request to the optimal healthy region with geo-failover."""
+        return self.replicator.route_request(
+            preferred_region=preferred_region
+        ).to_dict()
 
     def record_request(
         self,
