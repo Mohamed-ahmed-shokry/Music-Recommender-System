@@ -2477,3 +2477,111 @@ def acknowledge_retrain_endpoint(
     return get_global_drift_monitor().acknowledge_retrain(
         clear_observations=req.clear_observations
     )
+
+
+class RegionRegisterRequest(BaseModel):
+    """Payload for registering a regional serving endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    region_id: str = Field(..., min_length=1)
+    endpoint_url: str = Field(..., min_length=1)
+    priority: int = Field(default=1, ge=1)
+    weight: float = Field(default=1.0, gt=0.0)
+
+
+class ReplicationSyncRequest(BaseModel):
+    """Payload for syncing model artifacts across regional edge caches."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    region_id: str | None = None
+    model_version: str | None = None
+
+
+class GeoRouteRequest(BaseModel):
+    """Payload for requesting a geo-failover routing decision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    preferred_region: str | None = None
+
+
+@app.get("/replication/status")
+def get_replication_status_endpoint() -> dict[str, Any]:
+    """Return active manifest, regional edge cache status, and failover stats."""
+    if service is not None:
+        return service.get_replication_status()
+    from music_recommender.replication import get_global_replicator
+
+    return get_global_replicator().get_status()
+
+
+@app.post("/replication/regions")
+def register_replication_region_endpoint(
+    payload: RegionRegisterRequest,
+) -> dict[str, Any]:
+    """Register or update a regional serving endpoint."""
+    try:
+        if service is not None:
+            return service.register_replication_region(
+                payload.region_id,
+                payload.endpoint_url,
+                priority=payload.priority,
+                weight=payload.weight,
+            )
+        from music_recommender.replication import get_global_replicator
+
+        rep = get_global_replicator()
+        endpoint = rep.register_region(
+            payload.region_id,
+            payload.endpoint_url,
+            priority=payload.priority,
+            weight=payload.weight,
+        )
+        return endpoint.to_dict(rep._manifest)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/replication/sync")
+def sync_replication_endpoint(
+    payload: ReplicationSyncRequest | None = None,
+) -> dict[str, Any]:
+    """Publish optional model_version and sync regional edge caches."""
+    req = payload or ReplicationSyncRequest()
+    try:
+        if service is not None:
+            if req.model_version is not None:
+                service.replicator.publish_manifest(req.model_version)
+            return service.sync_replication_regions(region_id=req.region_id)
+        from music_recommender.replication import get_global_replicator
+
+        rep = get_global_replicator()
+        if req.model_version is not None:
+            rep.publish_manifest(req.model_version)
+        if req.region_id is not None:
+            return rep.sync_region(req.region_id).to_dict(rep._manifest)
+        return rep.sync_all_regions()
+    except (ValueError, KeyError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/replication/route")
+def route_geo_endpoint(
+    payload: GeoRouteRequest | None = None,
+) -> dict[str, Any]:
+    """Select optimal healthy serving region with automatic geo-failover."""
+    req = payload or GeoRouteRequest()
+    try:
+        if service is not None:
+            return service.route_geo_request(preferred_region=req.preferred_region)
+        from music_recommender.replication import get_global_replicator
+
+        return (
+            get_global_replicator()
+            .route_request(preferred_region=req.preferred_region)
+            .to_dict()
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
