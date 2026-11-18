@@ -10,8 +10,8 @@
 - [x] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
 - [x] Task 8: Implement `/explain/*` endpoints in `api/main.py`.
 - [x] Task 9: Add API integration tests for `/explain/*` in `tests/test_api.py`.
-- [ ] Task 10: Implement CLI commands `explain-graph` and `user-preferences` in `src/music_recommender/cli.py`.
-- [ ] Task 11: Add CLI tests in `tests/test_cli.py`.
+- [x] Task 10: Implement CLI commands `explain-graph` and `user-preferences` in `src/music_recommender/cli.py`.
+- [x] Task 11: Add CLI tests in `tests/test_cli.py`.
 - [ ] Task 12: Add `"Explainability & Controls"` tab to `src/music_recommender/dashboard.py` and test in `tests/test_dashboard.py`.
 - [ ] Task 13: Update `README.md`, `CHANGELOG.md`, `PLAN.md`, and `docs/PROGRESS.md` for `0.47.0`.
 - [ ] Task 14: Bump version to `0.47.0` in `pyproject.toml`, run `uv lock`, and `uv build`.
@@ -24,7 +24,7 @@
 | AC-2: UserPreferenceProfile and apply_preferences() enforce genre boosts/mutes, mood boosts, and artist blocks with JSON persistence | `Passed` | `tests/test_explainability.py` |
 | AC-3: RecommenderService exposes explainability/preference methods and Prometheus exports explainability metrics | `Passed` | `tests/test_service.py` |
 | AC-4: FastAPI /explain/* endpoints validate payloads and manage preferences, graphs, and counterfactuals | `Passed` | `tests/test_api.py` |
-| AC-5: CLI commands explain-graph and user-preferences execute cleanly in text and --json modes | `Pending` | `tests/test_cli.py` |
+| AC-5: CLI commands explain-graph and user-preferences execute cleanly in text and --json modes | `Passed` | `tests/test_cli.py` |
 | AC-6: Streamlit dashboard renders Explainability & Controls tab cleanly without errors | `Pending` | `tests/test_dashboard.py` |
 | AC-7: All local CI-parity checks and remote CI workflow runs pass 100% | `Pending` | Local checks + GitHub Actions runs |
 
