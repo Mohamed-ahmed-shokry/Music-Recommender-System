@@ -2,10 +2,10 @@
 
 ## 1. Micro-Task Checklist
 - [x] Task 1: Define Phase 187 & 188 roadmap, update `PLAN.md`, and initialize `docs/PROGRESS.md`.
-- [ ] Task 2: Implement `ExplanationNode`, `ExplanationEdge`, `CounterfactualSuggestion`, and `UserPreferenceProfile` in `src/music_recommender/explainability.py`.
-- [ ] Task 3: Add unit tests for graph primitives, counterfactuals, and preference profiles in `tests/test_explainability.py`.
-- [ ] Task 4: Implement `ExplainabilityEngine` and global accessors in `src/music_recommender/explainability.py`.
-- [ ] Task 5: Add unit tests for preference filtering/re-ranking, graph construction, counterfactual recourse, and state persistence in `tests/test_explainability.py`.
+- [x] Task 2: Implement `ExplanationNode`, `ExplanationEdge`, `CounterfactualSuggestion`, and `UserPreferenceProfile` in `src/music_recommender/explainability.py`.
+- [x] Task 3: Add unit tests for graph primitives, counterfactuals, and preference profiles in `tests/test_explainability.py`.
+- [x] Task 4: Implement `ExplainabilityEngine` and global accessors in `src/music_recommender/explainability.py`.
+- [x] Task 5: Add unit tests for preference filtering/re-ranking, graph construction, counterfactual recourse, and state persistence in `tests/test_explainability.py`.
 - [ ] Task 6: Integrate `ExplainabilityEngine` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
 - [ ] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
 - [ ] Task 8: Implement `/explain/*` endpoints in `api/main.py`.
@@ -20,8 +20,8 @@
 ## 2. Acceptance Criteria Tracking
 | Criterion | Status | Verification Evidence |
 | :--- | :---: | :--- |
-| AC-1: ExplainabilityEngine constructs valid user-to-factor-to-artist explanation graphs and counterfactual recourse suggestions | `Pending` | `tests/test_explainability.py` |
-| AC-2: UserPreferenceProfile and apply_preferences() enforce genre boosts/mutes, mood boosts, and artist blocks with JSON persistence | `Pending` | `tests/test_explainability.py` |
+| AC-1: ExplainabilityEngine constructs valid user-to-factor-to-artist explanation graphs and counterfactual recourse suggestions | `Passed` | `tests/test_explainability.py` |
+| AC-2: UserPreferenceProfile and apply_preferences() enforce genre boosts/mutes, mood boosts, and artist blocks with JSON persistence | `Passed` | `tests/test_explainability.py` |
 | AC-3: RecommenderService exposes explainability/preference methods and Prometheus exports explainability metrics | `Pending` | `tests/test_service.py` |
 | AC-4: FastAPI /explain/* endpoints validate payloads and manage preferences, graphs, and counterfactuals | `Pending` | `tests/test_api.py` |
 | AC-5: CLI commands explain-graph and user-preferences execute cleanly in text and --json modes | `Pending` | `tests/test_cli.py` |
