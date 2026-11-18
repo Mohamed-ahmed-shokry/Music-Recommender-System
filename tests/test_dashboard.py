@@ -20,6 +20,7 @@ from music_recommender.dashboard import (
 class FakeDashboardService:
     def __init__(self) -> None:
         from music_recommender.canary import ShadowCanaryRouter
+        from music_recommender.explainability import ExplainabilityEngine
         from music_recommender.feature_drift import (
             DriftMonitorConfig,
             FeatureDriftMonitor,
@@ -39,6 +40,7 @@ class FakeDashboardService:
             config=DriftMonitorConfig(min_samples=5)
         )
         self.replicator = MultiRegionReplicator()
+        self.explainability_engine = ExplainabilityEngine()
         self.context_features: tuple[str, ...] = (
             "log_plays",
             "log_unique_artists",
@@ -463,6 +465,25 @@ class FakeDashboardService:
     def get_replication_status(self) -> dict[str, Any]:
         return self.replicator.get_status()
 
+    def get_explainability_status(self) -> dict[str, Any]:
+        return self.explainability_engine.get_status()
+
+    def explain_recommendation_graph(
+        self,
+        user_id: str,
+        top_k: int = 5,
+    ) -> dict[str, Any]:
+        sample_recs = [
+            {
+                "artist_id": "artist_1",
+                "artist_name": "A",
+                "score": 0.95,
+                "genres": "pop",
+                "mood_tags": "bright",
+            }
+        ][:top_k]
+        return self.explainability_engine.build_explanation_graph(user_id, sample_recs)
+
     def browse_artists(
         self,
         *,
@@ -843,6 +864,7 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Shadow & Canary",
         "Feature Drift",
         "Multi-Region & Edge",
+        "Explainability & Controls",
     ]
     assert [metric.label for metric in app.metric] == [
         "Listeners",
@@ -869,6 +891,9 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Healthy Regions",
         "Synced Edge Caches",
         "Failover Events",
+        "Preference Profiles",
+        "Graphs Generated",
+        "Counterfactuals",
     ]
 
 
@@ -1525,6 +1550,7 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
         "Shadow & Canary",
         "Feature Drift",
         "Multi-Region & Edge",
+        "Explainability & Controls",
     ]
 
 
@@ -2169,4 +2195,25 @@ def test_dashboard_replication_tab_rendering() -> None:
         "Multi-Region Replication & Geo-Failover" in s.value for s in app.subheader
     )
     assert any("Multi-Region & Edge" in str(tab.label) for tab in app.tabs)
+    assert len(app.dataframe) >= 1
+
+
+def test_dashboard_explainability_tab_rendering() -> None:
+    service = FakeDashboardService()
+    service.explainability_engine.set_user_preferences(
+        "user_1", boosted_genres={"pop": 0.4}
+    )
+
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(
+        "Explainability Graph & User Preference Controls" in s.value
+        for s in app.subheader
+    )
+    assert any("Explainability & Controls" in str(tab.label) for tab in app.tabs)
     assert len(app.dataframe) >= 1
