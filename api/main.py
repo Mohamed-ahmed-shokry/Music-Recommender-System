@@ -2585,3 +2585,128 @@ def route_geo_endpoint(
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+class UserPreferenceUpdateRequest(BaseModel):
+    """Payload for updating user preference overrides."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    boosted_genres: dict[str, float] | None = None
+    muted_genres: list[str] | None = None
+    boosted_moods: dict[str, float] | None = None
+    blocked_artists: list[str] | None = None
+    content_weight_override: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class CounterfactualRequest(BaseModel):
+    """Payload for generating counterfactual recourse for a target artist."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str = Field(..., min_length=1)
+    artist_id: str = Field(..., min_length=1)
+    top_k: int = Field(default=5, ge=1, le=50)
+    top_cutoff_score: float = Field(default=1.0, ge=0.0)
+    genres: str | None = None
+    mood_tags: str | None = None
+    score: float = 0.0
+
+
+@app.get("/explain/preferences/{user_id}")
+def get_user_preferences_endpoint(user_id: str) -> dict[str, Any]:
+    """Return user preference override profile."""
+    try:
+        if service is not None:
+            return service.get_user_preferences(user_id)
+        from music_recommender.explainability import get_global_explainability_engine
+
+        return (
+            get_global_explainability_engine().get_user_preferences(user_id).to_dict()
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/explain/preferences/{user_id}")
+def update_user_preferences_endpoint(
+    user_id: str,
+    payload: UserPreferenceUpdateRequest,
+) -> dict[str, Any]:
+    """Create or update user preference overrides."""
+    try:
+        if service is not None:
+            return service.set_user_preferences(
+                user_id,
+                boosted_genres=payload.boosted_genres,
+                muted_genres=payload.muted_genres,
+                boosted_moods=payload.boosted_moods,
+                blocked_artists=payload.blocked_artists,
+                content_weight_override=payload.content_weight_override,
+            )
+        from music_recommender.explainability import get_global_explainability_engine
+
+        return (
+            get_global_explainability_engine()
+            .set_user_preferences(
+                user_id,
+                boosted_genres=payload.boosted_genres,
+                muted_genres=payload.muted_genres,
+                boosted_moods=payload.boosted_moods,
+                blocked_artists=payload.blocked_artists,
+                content_weight_override=payload.content_weight_override,
+            )
+            .to_dict()
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/explain/graph/{user_id}")
+def get_explanation_graph_endpoint(
+    user_id: str,
+    top_k: int = Query(default=5, ge=1, le=50),
+) -> dict[str, Any]:
+    """Return an interactive explanation graph for a user's recommendations."""
+    try:
+        if service is not None:
+            return service.explain_recommendation_graph(user_id, top_k=top_k)
+        from music_recommender.explainability import get_global_explainability_engine
+
+        return get_global_explainability_engine().build_explanation_graph(user_id, [])
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/explain/counterfactual")
+def generate_counterfactual_endpoint(
+    payload: CounterfactualRequest,
+) -> dict[str, Any]:
+    """Generate actionable counterfactual recourse suggestions for a target artist."""
+    try:
+        if service is not None:
+            return service.generate_counterfactual_recourse(
+                payload.user_id,
+                payload.artist_id,
+                top_k=payload.top_k,
+            )
+        from music_recommender.explainability import get_global_explainability_engine
+
+        suggestions = get_global_explainability_engine().generate_counterfactuals(
+            payload.user_id,
+            {
+                "artist_id": payload.artist_id,
+                "score": payload.score,
+                "genres": payload.genres,
+                "mood_tags": payload.mood_tags,
+            },
+            top_cutoff_score=payload.top_cutoff_score,
+        )
+        return {
+            "user_id": payload.user_id,
+            "artist_id": payload.artist_id,
+            "top_cutoff_score": payload.top_cutoff_score,
+            "suggestions": [s.to_dict() for s in suggestions],
+        }
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
