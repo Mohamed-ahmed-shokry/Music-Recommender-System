@@ -6362,5 +6362,126 @@ def replication_sync_command(
         )
 
 
+def _get_explainability_or_service() -> tuple[Any | None, Any]:
+    from music_recommender.explainability import get_global_explainability_engine
+
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable: %s", exc)
+
+    if service is not None:
+        return service, service.explainability_engine
+    return None, get_global_explainability_engine()
+
+
+@app.command("explain-graph")
+def explain_graph_command(
+    user_id: Annotated[
+        str,
+        typer.Argument(help="User ID to generate an explanation graph for."),
+    ],
+    top_k: Annotated[
+        int,
+        typer.Option("--top-k", "-k", min=1, max=50, help="Number of recs."),
+    ] = 5,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON explanation graph."),
+    ] = False,
+) -> None:
+    """Generate an interactive user-to-factor-to-artist explanation graph."""
+    svc, engine = _get_explainability_or_service()
+    if svc is not None:
+        graph = svc.explain_recommendation_graph(user_id, top_k=top_k)
+    else:
+        graph = engine.build_explanation_graph(user_id, [])
+
+    if as_json:
+        typer.echo(json.dumps(graph, indent=2))
+        return
+
+    typer.secho(f"=== Explanation Graph: {graph['user_id']} ===", bold=True)
+    typer.echo(f"Nodes: {graph['node_count']} | Edges: {graph['edge_count']}")
+    for edge in graph.get("edges", [])[:15]:
+        typer.echo(
+            f"  {edge['source']} --[{edge['relation']}:{edge['weight']}]--> "
+            f"{edge['target']}"
+        )
+
+
+@app.command("user-preferences")
+def user_preferences_command(
+    user_id: Annotated[
+        str,
+        typer.Argument(help="User ID to inspect or update preference overrides."),
+    ],
+    boost_genre: Annotated[
+        str | None,
+        typer.Option("--boost-genre", help="Genre to boost (e.g. pop:0.4 or pop)."),
+    ] = None,
+    mute_genre: Annotated[
+        str | None,
+        typer.Option("--mute-genre", help="Genre to mute."),
+    ] = None,
+    block_artist: Annotated[
+        str | None,
+        typer.Option("--block-artist", help="Artist ID to block."),
+    ] = None,
+    clear: Annotated[
+        bool,
+        typer.Option("--clear", help="Clear stored preference overrides."),
+    ] = False,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON preference profile."),
+    ] = False,
+) -> None:
+    """Inspect or manage user preference overrides (boosts, mutes, blocks)."""
+    _svc, engine = _get_explainability_or_service()
+
+    if clear:
+        engine.clear_user_preferences(user_id)
+    else:
+        current = engine.get_user_preferences(user_id)
+        boosted = dict(current.boosted_genres)
+        muted = set(current.muted_genres)
+        blocked = set(current.blocked_artists)
+        changed = False
+
+        if boost_genre is not None:
+            if ":" in boost_genre:
+                g_name, g_val = boost_genre.split(":", 1)
+                boosted[g_name.strip().lower()] = float(g_val)
+            else:
+                boosted[boost_genre.strip().lower()] = 0.35
+            changed = True
+        if mute_genre is not None:
+            muted.add(mute_genre.strip().lower())
+            changed = True
+        if block_artist is not None:
+            blocked.add(block_artist.strip())
+            changed = True
+
+        if changed:
+            engine.set_user_preferences(
+                user_id,
+                boosted_genres=boosted,
+                muted_genres=sorted(muted),
+                blocked_artists=sorted(blocked),
+            )
+
+    profile = engine.get_user_preferences(user_id).to_dict()
+    if as_json:
+        typer.echo(json.dumps(profile, indent=2))
+        return
+
+    typer.secho(f"=== User Preferences: {profile['user_id']} ===", bold=True)
+    typer.echo(f"Boosted Genres:   {profile['boosted_genres']}")
+    typer.echo(f"Muted Genres:     {profile['muted_genres']}")
+    typer.echo(f"Blocked Artists:  {profile['blocked_artists']}")
+
+
 if __name__ == "__main__":
     app()  # pragma: no cover - CLI entry point invoked by `python -m`
