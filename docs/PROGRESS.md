@@ -8,8 +8,8 @@
 - [x] Task 5: Add unit tests for preference filtering/re-ranking, graph construction, counterfactual recourse, and state persistence in `tests/test_explainability.py`.
 - [x] Task 6: Integrate `ExplainabilityEngine` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
 - [x] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
-- [ ] Task 8: Implement `/explain/*` endpoints in `api/main.py`.
-- [ ] Task 9: Add API integration tests for `/explain/*` in `tests/test_api.py`.
+- [x] Task 8: Implement `/explain/*` endpoints in `api/main.py`.
+- [x] Task 9: Add API integration tests for `/explain/*` in `tests/test_api.py`.
 - [ ] Task 10: Implement CLI commands `explain-graph` and `user-preferences` in `src/music_recommender/cli.py`.
 - [ ] Task 11: Add CLI tests in `tests/test_cli.py`.
 - [ ] Task 12: Add `"Explainability & Controls"` tab to `src/music_recommender/dashboard.py` and test in `tests/test_dashboard.py`.
@@ -23,7 +23,7 @@
 | AC-1: ExplainabilityEngine constructs valid user-to-factor-to-artist explanation graphs and counterfactual recourse suggestions | `Passed` | `tests/test_explainability.py` |
 | AC-2: UserPreferenceProfile and apply_preferences() enforce genre boosts/mutes, mood boosts, and artist blocks with JSON persistence | `Passed` | `tests/test_explainability.py` |
 | AC-3: RecommenderService exposes explainability/preference methods and Prometheus exports explainability metrics | `Passed` | `tests/test_service.py` |
-| AC-4: FastAPI /explain/* endpoints validate payloads and manage preferences, graphs, and counterfactuals | `Pending` | `tests/test_api.py` |
+| AC-4: FastAPI /explain/* endpoints validate payloads and manage preferences, graphs, and counterfactuals | `Passed` | `tests/test_api.py` |
 | AC-5: CLI commands explain-graph and user-preferences execute cleanly in text and --json modes | `Pending` | `tests/test_cli.py` |
 | AC-6: Streamlit dashboard renders Explainability & Controls tab cleanly without errors | `Pending` | `tests/test_dashboard.py` |
 | AC-7: All local CI-parity checks and remote CI workflow runs pass 100% | `Pending` | Local checks + GitHub Actions runs |
