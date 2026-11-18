@@ -3,7 +3,24 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.46.0) — ready for review (branch `phase/185-multi-region-replication`, PR #44)
+## Current milestone (0.47.0) — active development (branch `phase/187-explainability-recourse`)
+
+Interactive Explainability Graph, Counterfactual Recourse, and User Preference Controls.
+The 0.46.0 release delivered multi-region model replication, edge artifact caching, and geo-failover routing.
+This milestone equips the platform with interactive explainability graphs, counterfactual recourse, and user preference overrides:
+an Explainability & Recourse Engine (`ExplainabilityEngine`, `ExplanationNode`, `ExplanationEdge`, `CounterfactualSuggestion`, `UserPreferenceProfile`) generating user-to-factor-to-artist graphs, counterfactual recourse actions, and user preference filtering/re-ranking;
+integration with `RecommenderService`, Prometheus telemetry, FastAPI `/explain/*` routes, operator CLI (`explain-graph`, `user-preferences`), and Streamlit dashboard (`Explainability & Controls`).
+
+- Phase 187 — Counterfactual explanation & recourse engine (`explainability.py`, in progress).
+- Phase 188 — User preference override controls, API/CLI/dashboard integration, clean CI.
+
+## Next milestone (0.48.0) — planned
+
+Federated Privacy-Preserving Personalization, Differential Privacy Noise Budgets, and Consent Ledger.
+- Phase 189 — Differential privacy budget accountant and consent ledger.
+- Phase 190 — Privacy-preserving aggregation, API/CLI/dashboard integration, and CI release.
+
+## Previous milestone (0.46.0) — shipped (branch `phase/185-multi-region-replication`, PR #44)
 
 Multi-Region Model Replication, Edge Artifact Caching, and Geo-Failover Routing.
 The 0.45.0 release delivered feature store drift monitoring, embedding staleness detection, and automated retraining triggers.
@@ -13,12 +30,6 @@ integration with `RecommenderService`, Prometheus telemetry, FastAPI `/replicati
 
 - Phase 185 — Edge artifact manifest sync and regional health scoring (`replication.py`, completed).
 - Phase 186 — Geo-failover routing policy, API/CLI/dashboard integration, clean CI (completed).
-
-## Next milestone (0.47.0) — planned
-
-Interactive Explainability Graph, Counterfactual Recourse, and User Preference Controls.
-- Phase 187 — Counterfactual explanation & recourse engine.
-- Phase 188 — User preference override controls, API/CLI/dashboard integration, and CI release.
 
 ## Previous milestone (0.45.0) — shipped (branch `phase/183-feature-drift-monitoring`, PR #43)
 
