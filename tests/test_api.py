@@ -3706,3 +3706,72 @@ def test_replication_api_endpoints() -> None:
         assert route_res.json()["cache_hit"] is True
     finally:
         api_main.service = original_service
+
+
+def test_explainability_api_endpoints() -> None:
+    from music_recommender.explainability import (
+        ExplainabilityEngine,
+        set_global_explainability_engine,
+    )
+
+    original_service = api_main.service
+    engine = ExplainabilityEngine()
+    set_global_explainability_engine(engine)
+    api_main.service = None
+    try:
+        client = TestClient(api_main.app)
+
+        # 1. Update & get user preferences
+        upd = client.post(
+            "/explain/preferences/u_api",
+            json={
+                "boosted_genres": {"pop": 0.4},
+                "muted_genres": ["metal"],
+                "blocked_artists": ["a_bad"],
+                "content_weight_override": 0.5,
+            },
+        )
+        assert upd.status_code == 200
+        assert upd.json()["boosted_genres"] == {"pop": 0.4}
+
+        get_res = client.get("/explain/preferences/u_api")
+        assert get_res.status_code == 200
+        assert get_res.json()["blocked_artists"] == ["a_bad"]
+
+        # 2. Validation errors (422)
+        assert (
+            client.post(
+                "/explain/preferences/u_api",
+                json={"content_weight_override": 1.5},
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                "/explain/preferences/u_api",
+                json={"unknown_field": 1},
+            ).status_code
+            == 422
+        )
+
+        # 3. Explanation graph & counterfactual recourse
+        graph_res = client.get("/explain/graph/u_api?top_k=5")
+        assert graph_res.status_code == 200
+        assert graph_res.json()["user_id"] == "u_api"
+
+        cf_res = client.post(
+            "/explain/counterfactual",
+            json={
+                "user_id": "u_api",
+                "artist_id": "a_bad",
+                "genres": "metal",
+                "score": 0.2,
+                "top_cutoff_score": 1.0,
+            },
+        )
+        assert cf_res.status_code == 200
+        actions = {s["action"] for s in cf_res.json()["suggestions"]}
+        assert "unblock_artist" in actions
+        assert "unmute_genre" in actions
+    finally:
+        api_main.service = original_service
