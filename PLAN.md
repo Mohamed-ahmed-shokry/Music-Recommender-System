@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.47.0) — active development (branch `phase/187-explainability-recourse`)
+## Current milestone (0.47.0) — ready for review (branch `phase/187-explainability-recourse`, PR #45)
 
 Interactive Explainability Graph, Counterfactual Recourse, and User Preference Controls.
 The 0.46.0 release delivered multi-region model replication, edge artifact caching, and geo-failover routing.
@@ -11,8 +11,8 @@ This milestone equips the platform with interactive explainability graphs, count
 an Explainability & Recourse Engine (`ExplainabilityEngine`, `ExplanationNode`, `ExplanationEdge`, `CounterfactualSuggestion`, `UserPreferenceProfile`) generating user-to-factor-to-artist graphs, counterfactual recourse actions, and user preference filtering/re-ranking;
 integration with `RecommenderService`, Prometheus telemetry, FastAPI `/explain/*` routes, operator CLI (`explain-graph`, `user-preferences`), and Streamlit dashboard (`Explainability & Controls`).
 
-- Phase 187 — Counterfactual explanation & recourse engine (`explainability.py`, in progress).
-- Phase 188 — User preference override controls, API/CLI/dashboard integration, clean CI.
+- Phase 187 — Counterfactual explanation & recourse engine (`explainability.py`, completed).
+- Phase 188 — User preference override controls, API/CLI/dashboard integration, clean CI (completed).
 
 ## Next milestone (0.48.0) — planned
 
