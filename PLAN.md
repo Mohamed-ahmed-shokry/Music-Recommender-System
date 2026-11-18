@@ -3,7 +3,24 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.45.0) — ready for review (branch `phase/183-feature-drift-monitoring`, PR #43)
+## Current milestone (0.46.0) — ready for review (branch `phase/185-multi-region-replication`, PR #44)
+
+Multi-Region Model Replication, Edge Artifact Caching, and Geo-Failover Routing.
+The 0.45.0 release delivered feature store drift monitoring, embedding staleness detection, and automated retraining triggers.
+This milestone equips the platform with multi-region model replication, edge artifact caching, and geo-failover routing:
+a Multi-Region Replicator (`MultiRegionReplicator`, `RegionHealth`, `ArtifactManifest`, `RegionEndpoint`, `GeoRoutingDecision`) supporting SHA-256 manifest verification, edge cache sync, regional health scoring, and deterministic geo-failover routing;
+integration with `RecommenderService`, Prometheus telemetry, FastAPI `/replication/*` routes, operator CLI (`replication-status`, `replication-sync`), and Streamlit dashboard (`Multi-Region & Edge`).
+
+- Phase 185 — Edge artifact manifest sync and regional health scoring (`replication.py`, completed).
+- Phase 186 — Geo-failover routing policy, API/CLI/dashboard integration, clean CI (completed).
+
+## Next milestone (0.47.0) — planned
+
+Interactive Explainability Graph, Counterfactual Recourse, and User Preference Controls.
+- Phase 187 — Counterfactual explanation & recourse engine.
+- Phase 188 — User preference override controls, API/CLI/dashboard integration, and CI release.
+
+## Previous milestone (0.45.0) — shipped (branch `phase/183-feature-drift-monitoring`, PR #43)
 
 Feature Store Drift Monitoring, Embedding Staleness Detection, and Automated Retraining Triggers.
 The 0.44.0 release delivered automated model shadow deployment, canary traffic splitting, and online A/B guardrails.
@@ -13,12 +30,6 @@ integration with `RecommenderService`, Prometheus telemetry, FastAPI `/drift/*` 
 
 - Phase 183 — Feature distribution drift & embedding staleness detector (`feature_drift.py`, completed).
 - Phase 184 — Automated retraining trigger policy, API/CLI/dashboard integration, clean CI (completed).
-
-## Next milestone (0.46.0) — planned
-
-Multi-Region Model Replication, Edge Artifact Caching, and Geo-Failover Routing.
-- Phase 185 — Edge artifact manifest sync and regional health scoring.
-- Phase 186 — Geo-failover routing policy, API/CLI/dashboard integration, and CI release.
 
 ## Previous milestone (0.44.0) — shipped (branch `phase/181-shadow-canary-deployment`, PR #39 & #40)
 

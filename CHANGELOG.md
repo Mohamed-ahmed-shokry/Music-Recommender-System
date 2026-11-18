@@ -5,6 +5,19 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.0] - 2026-11-17
+
+### Added
+
+- **Multi-Region Model Replication & Edge Artifact Caching (Phase 185):**
+  - Implemented `MultiRegionReplicator` in `src/music_recommender/replication.py` with `RegionHealth`, `ArtifactManifest` (SHA-256 verification), `RegionEndpoint`, and `GeoRoutingDecision`.
+  - Added regional edge cache synchronization (`sync_region()`, `sync_all_regions()`), composite regional health scoring, and deterministic JSON state snapshot persistence (`export_state()`, `import_state()`, `save_state()`, `load_state()`).
+
+- **Geo-Failover Routing, Telemetry & Operator Controls (Phase 186):**
+  - Integrated `MultiRegionReplicator` into `RecommenderService` (`get_replication_status()`, `register_replication_region()`, `sync_replication_regions()`, `route_geo_request()`) and Prometheus exposition (`music_recommender_replication_regions_total`, `music_recommender_replication_regions_healthy`, `music_recommender_replication_regions_synced`).
+  - Added FastAPI routes `GET /replication/status`, `POST /replication/regions`, `POST /replication/sync`, and `POST /replication/route`.
+  - Added operator CLI commands `music-recommender replication-status` and `music-recommender replication-sync`, plus the `"Multi-Region & Edge"` Streamlit dashboard tab.
+
 ## [0.45.0] - 2026-11-16
 
 ### Added

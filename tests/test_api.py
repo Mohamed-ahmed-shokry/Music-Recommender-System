@@ -3628,3 +3628,81 @@ def test_drift_api_endpoints() -> None:
         assert ack_res.json()["acknowledged"] is True
     finally:
         api_main.service = original_service
+
+
+def test_replication_api_endpoints() -> None:
+    from music_recommender.replication import (
+        MultiRegionReplicator,
+        set_global_replicator,
+    )
+
+    original_service = api_main.service
+    rep = MultiRegionReplicator()
+    set_global_replicator(rep)
+    api_main.service = None
+    try:
+        client = TestClient(api_main.app)
+
+        # 1. Register two regions
+        r1 = client.post(
+            "/replication/regions",
+            json={
+                "region_id": "us-east-1",
+                "endpoint_url": "https://us-east.example.com",
+                "priority": 1,
+            },
+        )
+        assert r1.status_code == 200
+        assert r1.json()["region_id"] == "us-east-1"
+
+        r2 = client.post(
+            "/replication/regions",
+            json={
+                "region_id": "eu-west-1",
+                "endpoint_url": "https://eu-west.example.com",
+                "priority": 2,
+            },
+        )
+        assert r2.status_code == 200
+
+        # 2. Invalid URL / extra field rejected (422)
+        assert (
+            client.post(
+                "/replication/regions",
+                json={"region_id": "bad", "endpoint_url": "ftp://invalid"},
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                "/replication/regions",
+                json={
+                    "region_id": "bad",
+                    "endpoint_url": "https://x.com",
+                    "extra": 1,
+                },
+            ).status_code
+            == 422
+        )
+
+        # 3. Publish & sync, inspect status, and geo-route
+        sync_res = client.post(
+            "/replication/sync",
+            json={"model_version": "v2.5.0"},
+        )
+        assert sync_res.status_code == 200
+        assert len(sync_res.json()["synced_regions"]) == 2
+
+        status_res = client.get("/replication/status")
+        assert status_res.status_code == 200
+        assert status_res.json()["regions_synced"] == 2
+
+        route_res = client.post(
+            "/replication/route",
+            json={"preferred_region": "us-east-1"},
+        )
+        assert route_res.status_code == 200
+        assert route_res.json()["target_region"] == "us-east-1"
+        assert route_res.json()["cache_hit"] is True
+    finally:
+        api_main.service = original_service

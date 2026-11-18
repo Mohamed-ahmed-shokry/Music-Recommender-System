@@ -2776,3 +2776,32 @@ def test_service_feature_drift_and_telemetry_integration(tmp_path: Path) -> None
     ack = service.acknowledge_retrain()
     assert ack["acknowledged"] is True
     assert service.get_feature_drift_status()["observation_counts"]["log_plays"] == 0
+
+
+def test_service_replication_and_telemetry_integration(tmp_path: Path) -> None:
+    from music_recommender.replication import MultiRegionReplicator
+    from music_recommender.telemetry import export_prometheus_metrics
+
+    service = create_service(tmp_path)
+    service.replicator = MultiRegionReplicator()
+    service.replicator.publish_manifest("v2.0.0", size_bytes=1024)
+
+    reg1 = service.register_replication_region(
+        "us-east-1", "https://us-east.example.com", priority=1
+    )
+    assert reg1["region_id"] == "us-east-1"
+    service.register_replication_region(
+        "eu-west-1", "https://eu-west.example.com", priority=2
+    )
+
+    sync_res = service.sync_replication_regions()
+    assert len(sync_res["synced_regions"]) == 2
+
+    route_res = service.route_geo_request(preferred_region="us-east-1")
+    assert route_res["target_region"] == "us-east-1"
+    assert route_res["cache_hit"] is True
+
+    prom_text = export_prometheus_metrics(service)
+    assert "music_recommender_replication_regions_total 2" in prom_text
+    assert "music_recommender_replication_regions_healthy 2" in prom_text
+    assert "music_recommender_replication_regions_synced 2" in prom_text

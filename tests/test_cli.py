@@ -4600,3 +4600,50 @@ def test_drift_status_and_evaluate_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert res_ack.exit_code == 0
     assert json.loads(res_ack.output)["acknowledged"] is True
+
+
+def test_replication_status_and_sync_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from music_recommender.replication import (
+        MultiRegionReplicator,
+        set_global_replicator,
+    )
+
+    rep = MultiRegionReplicator()
+    rep.register_region("us-east-1", "https://us-east.example.com")
+    rep.register_region("eu-west-1", "https://eu-west.example.com")
+    set_global_replicator(rep)
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(
+            lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError())
+        ),
+    )
+
+    runner = CliRunner()
+
+    # 1. Publish and sync all via CLI
+    res_sync = runner.invoke(
+        cli.app,
+        ["replication-sync", "--publish-version", "v3.1.0", "--json"],
+    )
+    assert res_sync.exit_code == 0
+    sync_data = json.loads(res_sync.output)
+    assert sync_data["model_version"] == "v3.1.0"
+    assert len(sync_data["synced_regions"]) == 2
+
+    # 2. replication-status human & --json
+    res_status = runner.invoke(cli.app, ["replication-status"])
+    assert res_status.exit_code == 0
+    assert "Multi-Region Replication Status" in res_status.output
+    assert "us-east-1" in res_status.output
+
+    res_status_json = runner.invoke(cli.app, ["replication-status", "--json"])
+    assert res_status_json.exit_code == 0
+    assert json.loads(res_status_json.output)["regions_synced"] == 2
+
+    # 3. Unknown region fails with exit code 1
+    res_bad = runner.invoke(cli.app, ["replication-sync", "--region", "unknown-region"])
+    assert res_bad.exit_code == 1

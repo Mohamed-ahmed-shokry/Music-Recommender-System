@@ -728,6 +728,46 @@ def collect_service_metric_families(
             )
             families.append(retrain_fam)
 
+    # 8. Multi-Region Replication & Edge Cache Metrics
+    replicator = getattr(service, "replicator", None) if service is not None else None
+    if replicator is not None and hasattr(replicator, "get_status"):
+        with contextlib.suppress(Exception):
+            r_status = replicator.get_status()
+            r_labels = dict(custom_labels) if custom_labels else {}
+
+            tot_fam = MetricFamily(
+                name="music_recommender_replication_regions_total",
+                help_text="Total number of registered serving regions.",
+                metric_type=MetricType.GAUGE,
+            )
+            tot_fam.add_sample(
+                value=int(r_status.get("regions_total", 0)),
+                labels=r_labels,
+            )
+            families.append(tot_fam)
+
+            healthy_fam = MetricFamily(
+                name="music_recommender_replication_regions_healthy",
+                help_text="Number of healthy serving regions.",
+                metric_type=MetricType.GAUGE,
+            )
+            healthy_fam.add_sample(
+                value=int(r_status.get("regions_healthy", 0)),
+                labels=r_labels,
+            )
+            families.append(healthy_fam)
+
+            synced_fam = MetricFamily(
+                name="music_recommender_replication_regions_synced",
+                help_text="Number of regions with synced edge artifact caches.",
+                metric_type=MetricType.GAUGE,
+            )
+            synced_fam.add_sample(
+                value=int(r_status.get("regions_synced", 0)),
+                labels=r_labels,
+            )
+            families.append(synced_fam)
+
     return families
 
 

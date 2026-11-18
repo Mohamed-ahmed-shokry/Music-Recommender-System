@@ -1169,6 +1169,13 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
     uv run music-recommender drift-evaluate --acknowledge-retrain    # mark retraining complete & start cooldown
     ```
 
+16. **Multi-Region Model Replication, Edge Caching & Geo-Failover Routing** — SHA-256 artifact manifests, edge cache synchronization, regional health scoring, and automatic geo-failover routing:
+
+    ```bash
+    uv run music-recommender replication-status                      # inspect regional health & edge cache sync
+    uv run music-recommender replication-sync --publish-version v2   # publish manifest & sync all healthy regions
+    ```
+
 ## API Reference
 
 Train before starting the API:
@@ -1266,6 +1273,10 @@ uv run uvicorn api.main:app --reload
 | `POST` | `/drift/observe` | Record recent feature observations for drift monitoring |
 | `POST` | `/drift/evaluate` | Evaluate PSI/z-shift drift, embedding staleness, and retrain recommendation |
 | `POST` | `/drift/acknowledge-retrain` | Acknowledge retraining completion and start the cooldown window |
+| `GET` | `/replication/status` | Return active artifact manifest, regional health, and edge cache sync counts |
+| `POST` | `/replication/regions` | Register or update a regional serving endpoint |
+| `POST` | `/replication/sync` | Publish an optional manifest version and sync regional edge caches |
+| `POST` | `/replication/route` | Select optimal healthy serving region with automatic geo-failover |
 
 Example requests:
 
