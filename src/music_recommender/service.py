@@ -130,6 +130,10 @@ from music_recommender.content import (
     listened_artist_ids as content_listened_artist_ids,
 )
 from music_recommender.data import load_interactions
+from music_recommender.explainability import (
+    ExplainabilityEngine,
+    get_global_explainability_engine,
+)
 from music_recommender.feature_drift import (
     FeatureDriftMonitor,
     get_global_drift_monitor,
@@ -217,6 +221,7 @@ class RecommenderService:
         canary_router: ShadowCanaryRouter | None = None,
         drift_monitor: FeatureDriftMonitor | None = None,
         replicator: MultiRegionReplicator | None = None,
+        explainability_engine: ExplainabilityEngine | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -588,6 +593,10 @@ class RecommenderService:
             self.replicator = replicator
         else:
             self.replicator = get_global_replicator()
+        if explainability_engine is not None:
+            self.explainability_engine = explainability_engine
+        else:
+            self.explainability_engine = get_global_explainability_engine()
 
     def _register_default_remediation_handlers(self) -> None:
         """Register built-in self-healing remediation handlers and fallback rules."""
@@ -1726,6 +1735,73 @@ class RecommenderService:
         return self.replicator.route_request(
             preferred_region=preferred_region
         ).to_dict()
+
+    def get_explainability_status(self) -> dict[str, Any]:
+        """Return explainability graph and preference profile telemetry."""
+        return self.explainability_engine.get_status()
+
+    def get_user_preferences(self, user_id: str) -> dict[str, Any]:
+        """Return stored UserPreferenceProfile for a user."""
+        return self.explainability_engine.get_user_preferences(user_id).to_dict()
+
+    def set_user_preferences(
+        self,
+        user_id: str,
+        *,
+        boosted_genres: dict[str, float] | None = None,
+        muted_genres: Sequence[str] | None = None,
+        boosted_moods: dict[str, float] | None = None,
+        blocked_artists: Sequence[str] | None = None,
+        content_weight_override: float | None = None,
+    ) -> dict[str, Any]:
+        """Create or update user preference overrides."""
+        profile = self.explainability_engine.set_user_preferences(
+            user_id,
+            boosted_genres=boosted_genres,
+            muted_genres=muted_genres,
+            boosted_moods=boosted_moods,
+            blocked_artists=blocked_artists,
+            content_weight_override=content_weight_override,
+        )
+        return profile.to_dict()
+
+    def explain_recommendation_graph(
+        self,
+        user_id: str,
+        top_k: int = 5,
+    ) -> dict[str, Any]:
+        """Generate an explanation graph over a user's top recommendations."""
+        rec_res = self.recommend_user(user_id, top_k=top_k)
+        raw_items = rec_res.get("recommendations", [])
+        reranked = self.explainability_engine.apply_preferences(user_id, raw_items)
+        return self.explainability_engine.build_explanation_graph(user_id, reranked)
+
+    def generate_counterfactual_recourse(
+        self,
+        user_id: str,
+        artist_id: str,
+        top_k: int = 5,
+    ) -> dict[str, Any]:
+        """Generate counterfactual recourse actions for a target artist."""
+        rec_res = self.recommend_user(user_id, top_k=top_k)
+        recs = rec_res.get("recommendations", [])
+        cutoff = float(recs[-1]["score"]) if recs else 1.0
+        target_item: dict[str, Any] = {"artist_id": artist_id, "score": 0.0}
+        meta_df = self.artifact.content_artifacts.metadata
+        matched = meta_df[meta_df["artist_id"] == artist_id]
+        if not matched.empty:
+            row = matched.iloc[0]
+            target_item["genres"] = row.get("genres")
+            target_item["mood_tags"] = row.get("mood_tags")
+        suggestions = self.explainability_engine.generate_counterfactuals(
+            user_id, target_item, top_cutoff_score=cutoff
+        )
+        return {
+            "user_id": user_id,
+            "artist_id": artist_id,
+            "top_cutoff_score": round(cutoff, 4),
+            "suggestions": [s.to_dict() for s in suggestions],
+        }
 
     def record_request(
         self,
