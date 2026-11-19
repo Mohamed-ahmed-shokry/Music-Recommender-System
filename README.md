@@ -1176,6 +1176,13 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
     uv run music-recommender replication-sync --publish-version v2   # publish manifest & sync all healthy regions
     ```
 
+17. **Interactive Explainability Graph, Counterfactual Recourse & User Preference Controls** — 3-layer `user -> factor -> artist` explanation graphs, actionable counterfactual recourse, and user preference overrides (genre boosts/mutes, mood boosts, artist blocks):
+
+    ```bash
+    uv run music-recommender explain-graph user_1 --top-k 5          # generate user explanation graph
+    uv run music-recommender user-preferences user_1 --boost-genre jazz:0.5 --mute-genre metal
+    ```
+
 ## API Reference
 
 Train before starting the API:
@@ -1277,6 +1284,10 @@ uv run uvicorn api.main:app --reload
 | `POST` | `/replication/regions` | Register or update a regional serving endpoint |
 | `POST` | `/replication/sync` | Publish an optional manifest version and sync regional edge caches |
 | `POST` | `/replication/route` | Select optimal healthy serving region with automatic geo-failover |
+| `GET` | `/explain/preferences/{user_id}` | Return a user's preference override profile |
+| `POST` | `/explain/preferences/{user_id}` | Create or update genre boosts, mutes, mood boosts, and artist blocks |
+| `GET` | `/explain/graph/{user_id}?top_k=5` | Generate an interactive user-to-factor-to-artist explanation graph |
+| `POST` | `/explain/counterfactual` | Generate counterfactual recourse suggestions for a target artist |
 
 Example requests:
 

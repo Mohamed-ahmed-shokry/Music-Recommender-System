@@ -4647,3 +4647,68 @@ def test_replication_status_and_sync_cli(monkeypatch: pytest.MonkeyPatch) -> Non
     # 3. Unknown region fails with exit code 1
     res_bad = runner.invoke(cli.app, ["replication-sync", "--region", "unknown-region"])
     assert res_bad.exit_code == 1
+
+
+def test_explain_graph_and_user_preferences_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typer.testing import CliRunner
+
+    from music_recommender.explainability import (
+        ExplainabilityEngine,
+        set_global_explainability_engine,
+    )
+
+    engine = ExplainabilityEngine()
+    set_global_explainability_engine(engine)
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(
+            lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError())
+        ),
+    )
+
+    runner = CliRunner()
+
+    # 1. Update preferences via CLI
+    res_pref = runner.invoke(
+        cli.app,
+        [
+            "user-preferences",
+            "u_cli",
+            "--boost-genre",
+            "jazz:0.5",
+            "--mute-genre",
+            "metal",
+            "--block-artist",
+            "a_9",
+            "--json",
+        ],
+    )
+    assert res_pref.exit_code == 0
+    pref_data = json.loads(res_pref.output)
+    assert pref_data["boosted_genres"] == {"jazz": 0.5}
+    assert pref_data["muted_genres"] == ["metal"]
+    assert pref_data["blocked_artists"] == ["a_9"]
+
+    # 2. Human-readable user-preferences & clear
+    res_human = runner.invoke(cli.app, ["user-preferences", "u_cli"])
+    assert res_human.exit_code == 0
+    assert "User Preferences: u_cli" in res_human.output
+
+    # 3. explain-graph --json & human
+    res_graph_json = runner.invoke(cli.app, ["explain-graph", "u_cli", "--json"])
+    assert res_graph_json.exit_code == 0
+    assert json.loads(res_graph_json.output)["user_id"] == "u_cli"
+
+    res_graph = runner.invoke(cli.app, ["explain-graph", "u_cli"])
+    assert res_graph.exit_code == 0
+    assert "Explanation Graph: u_cli" in res_graph.output
+
+    # 4. Clear preferences
+    res_clear = runner.invoke(
+        cli.app, ["user-preferences", "u_cli", "--clear", "--json"]
+    )
+    assert res_clear.exit_code == 0
+    assert json.loads(res_clear.output)["boosted_genres"] == {}

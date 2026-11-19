@@ -1685,6 +1685,48 @@ def _render_replication_tab(service: RecommenderService) -> None:
         st.info("No regional serving endpoints registered yet.")
 
 
+def _render_explainability_tab(
+    service: RecommenderService,
+    user_ids: list[str],
+) -> None:
+    """Render interactive explainability graph and user preference overrides."""
+    st.subheader("Explainability Graph & User Preference Controls")
+    st.caption(
+        "Inspect user-to-factor-to-artist explanation paths and active user "
+        "preference override profiles."
+    )
+    if not hasattr(service, "get_explainability_status"):
+        st.info("Explainability telemetry is unavailable for this service.")
+        return
+
+    status = service.get_explainability_status()
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Preference Profiles", int(status.get("preference_profiles_count", 0)))
+    col2.metric("Graphs Generated", int(status.get("graphs_generated_total", 0)))
+    col3.metric(
+        "Counterfactuals", int(status.get("counterfactuals_generated_total", 0))
+    )
+
+    if user_ids and hasattr(service, "explain_recommendation_graph"):
+        selected_user = user_ids[0]
+        graph = service.explain_recommendation_graph(selected_user, top_k=5)
+        edges = graph.get("edges", [])
+        if edges:
+            st.dataframe(
+                [
+                    {
+                        "Source": e.get("source"),
+                        "Relation": e.get("relation"),
+                        "Target": e.get("target"),
+                        "Weight": e.get("weight"),
+                    }
+                    for e in edges
+                ],
+                width="stretch",
+                hide_index=True,
+            )
+
+
 def render_dashboard(service: RecommenderService) -> None:
     """Render the dashboard using an already loaded recommender service."""
     health = service.health()
@@ -1918,6 +1960,7 @@ def render_dashboard(service: RecommenderService) -> None:
             "Shadow & Canary",
             "Feature Drift",
             "Multi-Region & Edge",
+            "Explainability & Controls",
         ]
     )
     with tabs[0]:
@@ -1959,6 +2002,8 @@ def render_dashboard(service: RecommenderService) -> None:
         _render_drift_tab(service)
     with tabs[12]:
         _render_replication_tab(service)
+    with tabs[13]:
+        _render_explainability_tab(service, user_ids)
 
 
 def main() -> None:

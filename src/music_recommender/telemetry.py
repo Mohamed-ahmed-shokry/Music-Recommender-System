@@ -768,6 +768,37 @@ def collect_service_metric_families(
             )
             families.append(synced_fam)
 
+    # 9. Explainability & Preference Controls Metrics
+    explain_engine = (
+        getattr(service, "explainability_engine", None) if service is not None else None
+    )
+    if explain_engine is not None and hasattr(explain_engine, "get_status"):
+        with contextlib.suppress(Exception):
+            e_status = explain_engine.get_status()
+            e_labels = dict(custom_labels) if custom_labels else {}
+
+            prof_fam = MetricFamily(
+                name="music_recommender_explainability_preference_profiles",
+                help_text="Number of active user preference override profiles.",
+                metric_type=MetricType.GAUGE,
+            )
+            prof_fam.add_sample(
+                value=int(e_status.get("preference_profiles_count", 0)),
+                labels=e_labels,
+            )
+            families.append(prof_fam)
+
+            graph_fam = MetricFamily(
+                name="music_recommender_explainability_graphs_generated_total",
+                help_text="Total recommendation explanation graphs generated.",
+                metric_type=MetricType.COUNTER,
+            )
+            graph_fam.add_sample(
+                value=int(e_status.get("graphs_generated_total", 0)),
+                labels=e_labels,
+            )
+            families.append(graph_fam)
+
     return families
 
 

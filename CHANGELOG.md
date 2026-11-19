@@ -5,6 +5,19 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.0] - 2026-11-18
+
+### Added
+
+- **Interactive Explainability Graph & Counterfactual Recourse (Phase 187):**
+  - Implemented `ExplainabilityEngine` in `src/music_recommender/explainability.py` with `ExplanationNode`, `ExplanationEdge`, `CounterfactualSuggestion`, and `UserPreferenceProfile`.
+  - Added 3-layer `user -> genre/mood/factor -> artist` explanation graph construction (`build_explanation_graph()`), actionable counterfactual recourse generation (`generate_counterfactuals()`), and JSON state snapshot persistence (`export_state()`, `import_state()`, `save_state()`, `load_state()`).
+
+- **User Preference Controls, Telemetry & Operator Controls (Phase 188):**
+  - Integrated `ExplainabilityEngine` into `RecommenderService` (`get_explainability_status()`, `get_user_preferences()`, `set_user_preferences()`, `explain_recommendation_graph()`, `generate_counterfactual_recourse()`) and Prometheus exposition (`music_recommender_explainability_preference_profiles`, `music_recommender_explainability_graphs_generated_total`).
+  - Added FastAPI routes `GET /explain/preferences/{user_id}`, `POST /explain/preferences/{user_id}`, `GET /explain/graph/{user_id}`, and `POST /explain/counterfactual`.
+  - Added operator CLI commands `music-recommender explain-graph` and `music-recommender user-preferences`, plus the `"Explainability & Controls"` Streamlit dashboard tab.
+
 ## [0.46.0] - 2026-11-17
 
 ### Added

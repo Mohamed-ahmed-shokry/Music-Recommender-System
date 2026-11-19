@@ -2805,3 +2805,32 @@ def test_service_replication_and_telemetry_integration(tmp_path: Path) -> None:
     assert "music_recommender_replication_regions_total 2" in prom_text
     assert "music_recommender_replication_regions_healthy 2" in prom_text
     assert "music_recommender_replication_regions_synced 2" in prom_text
+
+
+def test_service_explainability_and_telemetry_integration(tmp_path: Path) -> None:
+    from music_recommender.explainability import ExplainabilityEngine
+    from music_recommender.telemetry import export_prometheus_metrics
+
+    service = create_service(tmp_path)
+    service.explainability_engine = ExplainabilityEngine()
+
+    pref = service.set_user_preferences(
+        "user_1",
+        boosted_genres={"pop": 0.4},
+        muted_genres=["metal"],
+    )
+    assert pref["user_id"] == "user_1"
+    assert service.get_user_preferences("user_1")["boosted_genres"] == {"pop": 0.4}
+
+    graph = service.explain_recommendation_graph("user_1", top_k=3)
+    assert graph["user_id"] == "user_1"
+    assert graph["node_count"] >= 2
+
+    first_artist = next(iter(service.artifact.artist_stats.keys()))
+    cf = service.generate_counterfactual_recourse("user_1", first_artist, top_k=3)
+    assert cf["artist_id"] == first_artist
+    assert len(cf["suggestions"]) >= 1
+
+    prom_text = export_prometheus_metrics(service)
+    assert "music_recommender_explainability_preference_profiles 1" in prom_text
+    assert "music_recommender_explainability_graphs_generated_total 1" in prom_text

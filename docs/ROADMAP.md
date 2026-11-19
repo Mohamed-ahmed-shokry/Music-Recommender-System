@@ -1,3 +1,34 @@
+# Milestone 0.47.0 Roadmap — Phase 187 & 188
+
+## Phase 187 & 188: Interactive Explainability Graph, Counterfactual Recourse, and User Preference Controls (0.47.0)
+
+### 1. Objective
+Equip the recommendation platform with transparent explainability graphs, counterfactual recourse suggestions, and user-controlled preference overrides:
+1. An **Explainability & Recourse Engine** (`ExplainabilityEngine`, `ExplanationNode`, `ExplanationEdge`, `CounterfactualSuggestion`, `UserPreferenceProfile`) generating structured user-to-factor-to-artist explanation graphs and actionable counterfactual recourse.
+2. **User Preference Controls** supporting genre boosts/mutes, mood boosts, artist blocks, and content-weight overrides with deterministic JSON state persistence.
+3. Integration with `RecommenderService`, Prometheus telemetry (`telemetry.py`), FastAPI `/explain/*` routes, operator CLI (`explain-graph`, `user-preferences`), and Streamlit dashboard (`Explainability & Controls`), releasing Milestone 0.47.0 with 100% green CI.
+
+### 2. Scope
+1. **Explainability Engine (`src/music_recommender/explainability.py`)**: `ExplanationNode`, `ExplanationEdge`, `CounterfactualSuggestion`, `UserPreferenceProfile`, `ExplainabilityEngine`.
+2. **Service & Telemetry (`src/music_recommender/service.py`, `telemetry.py`)**: Wire `self.explainability_engine` and export `music_recommender_explainability_preference_profiles`, `music_recommender_explainability_graphs_generated_total`.
+3. **FastAPI Endpoints (`api/main.py`)**: `GET /explain/preferences/{user_id}`, `POST /explain/preferences/{user_id}`, `GET /explain/graph/{user_id}`, `POST /explain/counterfactual`.
+4. **CLI & Dashboard (`cli.py`, `dashboard.py`)**: `explain-graph`, `user-preferences`, and `"Explainability & Controls"` Streamlit tab.
+5. **Tests, Docs & Release 0.47.0**: Tests across `tests/test_explainability.py`, `tests/test_service.py`, `tests/test_api.py`, `tests/test_cli.py`, `tests/test_dashboard.py`, plus `README.md`, `CHANGELOG.md`, `PLAN.md`, `docs/PROGRESS.md`, and `pyproject.toml` (`0.47.0`).
+
+### 3. Acceptance Criteria
+- [ ] AC-1: `ExplainabilityEngine` constructs valid user-to-factor-to-artist explanation graphs and counterfactual recourse suggestions.
+- [ ] AC-2: `UserPreferenceProfile` and `apply_preferences()` enforce genre boosts/mutes, mood boosts, and artist blocks with JSON persistence.
+- [ ] AC-3: `RecommenderService` exposes explainability/preference methods and Prometheus exports explainability metrics.
+- [ ] AC-4: FastAPI `/explain/*` endpoints validate payloads and manage preferences, graphs, and counterfactuals.
+- [ ] AC-5: CLI commands `explain-graph` and `user-preferences` execute cleanly in text and `--json` modes.
+- [ ] AC-6: Streamlit dashboard renders the `"Explainability & Controls"` tab cleanly without errors.
+- [ ] AC-7: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Exclusions
+- External graph databases (Neo4j) are deferred; explanation graphs and preference profiles run deterministically in-process with JSON state snapshots.
+
+---
+
 # Milestone 0.46.0 Roadmap — Phase 185 & 186
 
 ## Phase 185 & 186: Multi-Region Model Replication, Edge Artifact Caching, and Geo-Failover Routing (0.46.0)
