@@ -5,6 +5,20 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.0] - 2026-11-20
+
+### Added
+
+- **Federated Privacy-Preserving Personalization & Differential Privacy Budgets (Phase 189):**
+  - Implemented `FederatedPrivacyManager` in `src/music_recommender/privacy.py` with `ConsentScope`, `ConsentRecord`, `PrivacyBudgetConfig`, and `PrivacyBudgetState`.
+  - Added per-user epsilon/delta budget accounting, L2 norm clipping, Gaussian DP noise injection (`clip_and_add_dp_noise()`), and JSON state snapshot persistence (`export_state()`, `import_state()`, `save_state()`, `load_state()`).
+
+- **Consent-Gated Federated Aggregation, Telemetry & Operator Controls (Phase 190):**
+  - Added `aggregate_federated_updates()` gating participation on `FEDERATED_UPDATES` consent and remaining privacy budget.
+  - Integrated `FederatedPrivacyManager` into `RecommenderService` and Prometheus exposition (`music_recommender_privacy_consent_records`, `music_recommender_privacy_epsilon_spent_total`, `music_recommender_privacy_federated_rounds_total`).
+  - Added FastAPI routes `GET /privacy/status`, `POST /privacy/consent/{user_id}`, `GET /privacy/budget/{user_id}`, and `POST /privacy/federated/aggregate`.
+  - Added operator CLI commands `music-recommender privacy-status` and `music-recommender privacy-consent`, plus the `"Privacy & DP Budgets"` Streamlit dashboard tab.
+
 ## [0.47.0] - 2026-11-18
 
 ### Added

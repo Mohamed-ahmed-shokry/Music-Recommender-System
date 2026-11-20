@@ -1183,6 +1183,13 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
     uv run music-recommender user-preferences user_1 --boost-genre jazz:0.5 --mute-genre metal
     ```
 
+18. **Federated Privacy-Preserving Personalization, DP Noise Budgets & Consent Ledger** — Per-user epsilon/delta budget accounting, L2 clipping, Gaussian DP noise injection, and consent-gated federated update aggregation:
+
+    ```bash
+    uv run music-recommender privacy-status                          # inspect consent ledger & epsilon spent
+    uv run music-recommender privacy-consent user_1 --grant personalization,federated_updates
+    ```
+
 ## API Reference
 
 Train before starting the API:
@@ -1288,6 +1295,10 @@ uv run uvicorn api.main:app --reload
 | `POST` | `/explain/preferences/{user_id}` | Create or update genre boosts, mutes, mood boosts, and artist blocks |
 | `GET` | `/explain/graph/{user_id}?top_k=5` | Generate an interactive user-to-factor-to-artist explanation graph |
 | `POST` | `/explain/counterfactual` | Generate counterfactual recourse suggestions for a target artist |
+| `GET` | `/privacy/status` | Return federated privacy consent ledger and DP budget telemetry |
+| `POST` | `/privacy/consent/{user_id}` | Grant or replace privacy consent scopes for a user |
+| `GET` | `/privacy/budget/{user_id}` | Return differential privacy epsilon/delta budget state for a user |
+| `POST` | `/privacy/federated/aggregate` | Aggregate consented user updates with L2 clipping and DP noise |
 
 Example requests:
 

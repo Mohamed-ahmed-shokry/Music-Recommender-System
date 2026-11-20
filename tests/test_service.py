@@ -2834,3 +2834,35 @@ def test_service_explainability_and_telemetry_integration(tmp_path: Path) -> Non
     prom_text = export_prometheus_metrics(service)
     assert "music_recommender_explainability_preference_profiles 1" in prom_text
     assert "music_recommender_explainability_graphs_generated_total 1" in prom_text
+
+
+def test_service_privacy_and_telemetry_integration(tmp_path: Path) -> None:
+    from music_recommender.privacy import ConsentScope, FederatedPrivacyManager
+    from music_recommender.telemetry import export_prometheus_metrics
+
+    service = create_service(tmp_path)
+    service.privacy_manager = FederatedPrivacyManager()
+
+    rec = service.set_user_consent(
+        "user_1", [ConsentScope.PERSONALIZATION, ConsentScope.FEDERATED_UPDATES]
+    )
+    assert "federated_updates" in rec["granted_scopes"]
+
+    agg = service.aggregate_federated_updates(
+        [("user_1", [0.4, 0.3]), ("user_2", [0.9, 0.1])],
+        epsilon_per_user=0.5,
+        seed=12,
+    )
+    assert agg["accepted_users"] == ["user_1"]
+    assert agg["rejected_users"]["user_2"] == "missing_federated_updates_consent"
+
+    budget = service.get_user_privacy_budget("user_1")
+    assert budget["epsilon_spent"] == pytest.approx(0.5)
+
+    prom_text = export_prometheus_metrics(service)
+    assert "music_recommender_privacy_consent_records 1" in prom_text
+    assert "music_recommender_privacy_epsilon_spent_total 0.5" in prom_text
+    assert "music_recommender_privacy_federated_rounds_total 1" in prom_text
+
+    revoked = service.revoke_user_consent("user_1")
+    assert revoked["granted_scopes"] == []

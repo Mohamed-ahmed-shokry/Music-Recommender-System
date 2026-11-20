@@ -1,3 +1,34 @@
+# Milestone 0.48.0 Roadmap — Phase 189 & 190
+
+## Phase 189 & 190: Federated Privacy-Preserving Personalization, Differential Privacy Noise Budgets, and Consent Ledger (0.48.0)
+
+### 1. Objective
+Equip the recommendation platform with privacy-preserving federated personalization, differential privacy (DP) budget accounting, and an auditable user consent ledger:
+1. A **Differential Privacy & Consent Engine** (`FederatedPrivacyManager`, `ConsentScope`, `ConsentRecord`, `PrivacyBudgetConfig`, `PrivacyBudgetState`) enforcing per-user epsilon/delta budgets, L2 norm clipping, Gaussian DP noise injection, and consent-gated federated update aggregation.
+2. **Auditability & Persistence** tracking epsilon spent, federated aggregation rounds, and JSON state snapshot persistence.
+3. Integration with `RecommenderService`, Prometheus telemetry (`telemetry.py`), FastAPI `/privacy/*` routes, operator CLI (`privacy-status`, `privacy-consent`), and Streamlit dashboard (`Privacy & DP Budgets`), releasing Milestone 0.48.0 with 100% green CI.
+
+### 2. Scope
+1. **Privacy Engine (`src/music_recommender/privacy.py`)**: `ConsentScope`, `ConsentRecord`, `PrivacyBudgetConfig`, `PrivacyBudgetState`, `FederatedPrivacyManager`.
+2. **Service & Telemetry (`src/music_recommender/service.py`, `telemetry.py`)**: Wire `self.privacy_manager` and export `music_recommender_privacy_consent_records`, `music_recommender_privacy_epsilon_spent_total`, `music_recommender_privacy_federated_rounds_total`.
+3. **FastAPI Endpoints (`api/main.py`)**: `GET /privacy/status`, `POST /privacy/consent/{user_id}`, `GET /privacy/budget/{user_id}`, `POST /privacy/federated/aggregate`.
+4. **CLI & Dashboard (`cli.py`, `dashboard.py`)**: `privacy-status`, `privacy-consent`, and `"Privacy & DP Budgets"` Streamlit tab.
+5. **Tests, Docs & Release 0.48.0**: Tests across `tests/test_privacy.py`, `tests/test_service.py`, `tests/test_api.py`, `tests/test_cli.py`, `tests/test_dashboard.py`, plus `README.md`, `CHANGELOG.md`, `PLAN.md`, `docs/PROGRESS.md`, and `pyproject.toml` (`0.48.0`).
+
+### 3. Acceptance Criteria
+- [ ] AC-1: `FederatedPrivacyManager` enforces consent scopes, epsilon/delta budgets, L2 clipping, and Gaussian DP noise.
+- [ ] AC-2: `aggregate_federated_updates()` gates participation on consent and remaining budget with JSON state persistence.
+- [ ] AC-3: `RecommenderService` exposes privacy governance methods and Prometheus exports privacy metrics.
+- [ ] AC-4: FastAPI `/privacy/*` endpoints validate payloads and manage consent, budgets, and federated aggregation.
+- [ ] AC-5: CLI commands `privacy-status` and `privacy-consent` execute cleanly in text and `--json` modes.
+- [ ] AC-6: Streamlit dashboard renders the `"Privacy & DP Budgets"` tab cleanly without errors.
+- [ ] AC-7: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Exclusions
+- Cryptographic secure multi-party computation (MPC) transport is deferred; DP clipping, noise injection, and consent gating run deterministically in-process.
+
+---
+
 # Milestone 0.47.0 Roadmap — Phase 187 & 188
 
 ## Phase 187 & 188: Interactive Explainability Graph, Counterfactual Recourse, and User Preference Controls (0.47.0)

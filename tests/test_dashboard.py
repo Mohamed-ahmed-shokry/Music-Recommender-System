@@ -25,6 +25,7 @@ class FakeDashboardService:
             DriftMonitorConfig,
             FeatureDriftMonitor,
         )
+        from music_recommender.privacy import FederatedPrivacyManager
         from music_recommender.ratelimit import RateLimiterEngine
         from music_recommender.replication import MultiRegionReplicator
         from music_recommender.tracing import (
@@ -41,6 +42,7 @@ class FakeDashboardService:
         )
         self.replicator = MultiRegionReplicator()
         self.explainability_engine = ExplainabilityEngine()
+        self.privacy_manager = FederatedPrivacyManager()
         self.context_features: tuple[str, ...] = (
             "log_plays",
             "log_unique_artists",
@@ -484,6 +486,9 @@ class FakeDashboardService:
         ][:top_k]
         return self.explainability_engine.build_explanation_graph(user_id, sample_recs)
 
+    def get_privacy_status(self) -> dict[str, Any]:
+        return self.privacy_manager.get_status()
+
     def browse_artists(
         self,
         *,
@@ -865,6 +870,7 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Feature Drift",
         "Multi-Region & Edge",
         "Explainability & Controls",
+        "Privacy & DP Budgets",
     ]
     assert [metric.label for metric in app.metric] == [
         "Listeners",
@@ -894,6 +900,10 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Preference Profiles",
         "Graphs Generated",
         "Counterfactuals",
+        "Consent Records",
+        "Tracked Budgets",
+        "Total Epsilon Spent",
+        "Federated Rounds",
     ]
 
 
@@ -1551,6 +1561,7 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
         "Feature Drift",
         "Multi-Region & Edge",
         "Explainability & Controls",
+        "Privacy & DP Budgets",
     ]
 
 
@@ -2217,3 +2228,23 @@ def test_dashboard_explainability_tab_rendering() -> None:
     )
     assert any("Explainability & Controls" in str(tab.label) for tab in app.tabs)
     assert len(app.dataframe) >= 1
+
+
+def test_dashboard_privacy_tab_rendering() -> None:
+    from music_recommender.privacy import ConsentScope
+
+    service = FakeDashboardService()
+    service.privacy_manager.set_consent(
+        "user_1", [ConsentScope.PERSONALIZATION, ConsentScope.FEDERATED_UPDATES]
+    )
+    service.privacy_manager.consume_privacy_budget("user_1", epsilon=0.5)
+
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any("Federated Privacy & DP Noise Budgets" in s.value for s in app.subheader)
+    assert any("Privacy & DP Budgets" in str(tab.label) for tab in app.tabs)
