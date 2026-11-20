@@ -2,10 +2,10 @@
 
 ## 1. Micro-Task Checklist
 - [x] Task 1: Define Phase 189 & 190 roadmap, update `PLAN.md`, and initialize `docs/PROGRESS.md`.
-- [ ] Task 2: Implement `ConsentScope`, `ConsentRecord`, `PrivacyBudgetConfig`, and `PrivacyBudgetState` in `src/music_recommender/privacy.py`.
-- [ ] Task 3: Add unit tests for consent records and privacy budget config/state in `tests/test_privacy.py`.
-- [ ] Task 4: Implement `FederatedPrivacyManager` and global accessors in `src/music_recommender/privacy.py`.
-- [ ] Task 5: Add unit tests for DP clipping/noise, budget accounting, consent gating, federated aggregation, and state persistence in `tests/test_privacy.py`.
+- [x] Task 2: Implement `ConsentScope`, `ConsentRecord`, `PrivacyBudgetConfig`, and `PrivacyBudgetState` in `src/music_recommender/privacy.py`.
+- [x] Task 3: Add unit tests for consent records and privacy budget config/state in `tests/test_privacy.py`.
+- [x] Task 4: Implement `FederatedPrivacyManager` and global accessors in `src/music_recommender/privacy.py`.
+- [x] Task 5: Add unit tests for DP clipping/noise, budget accounting, consent gating, federated aggregation, and state persistence in `tests/test_privacy.py`.
 - [ ] Task 6: Integrate `FederatedPrivacyManager` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
 - [ ] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
 - [ ] Task 8: Implement `/privacy/*` endpoints in `api/main.py`.
@@ -20,8 +20,8 @@
 ## 2. Acceptance Criteria Tracking
 | Criterion | Status | Verification Evidence |
 | :--- | :---: | :--- |
-| AC-1: FederatedPrivacyManager enforces consent scopes, epsilon/delta budgets, L2 clipping, and Gaussian DP noise | `Pending` | `tests/test_privacy.py` |
-| AC-2: aggregate_federated_updates() gates participation on consent and remaining budget with JSON persistence | `Pending` | `tests/test_privacy.py` |
+| AC-1: FederatedPrivacyManager enforces consent scopes, epsilon/delta budgets, L2 clipping, and Gaussian DP noise | `Passed` | `tests/test_privacy.py` |
+| AC-2: aggregate_federated_updates() gates participation on consent and remaining budget with JSON persistence | `Passed` | `tests/test_privacy.py` |
 | AC-3: RecommenderService exposes privacy governance methods and Prometheus exports privacy metrics | `Pending` | `tests/test_service.py` |
 | AC-4: FastAPI /privacy/* endpoints validate payloads and manage consent, budgets, and federated aggregation | `Pending` | `tests/test_api.py` |
 | AC-5: CLI commands privacy-status and privacy-consent execute cleanly in text and --json modes | `Pending` | `tests/test_cli.py` |
