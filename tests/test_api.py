@@ -3775,3 +3775,67 @@ def test_explainability_api_endpoints() -> None:
         assert "unmute_genre" in actions
     finally:
         api_main.service = original_service
+
+
+def test_privacy_api_endpoints() -> None:
+    from music_recommender.privacy import (
+        FederatedPrivacyManager,
+        set_global_privacy_manager,
+    )
+
+    original_service = api_main.service
+    mgr = FederatedPrivacyManager()
+    set_global_privacy_manager(mgr)
+    api_main.service = None
+    try:
+        client = TestClient(api_main.app)
+
+        # 1. Grant consent
+        c_res = client.post(
+            "/privacy/consent/u_priv",
+            json={"scopes": ["personalization", "federated_updates"]},
+        )
+        assert c_res.status_code == 200
+        assert "federated_updates" in c_res.json()["granted_scopes"]
+
+        # 2. Invalid scope & extra field rejected (422)
+        assert (
+            client.post(
+                "/privacy/consent/u_priv",
+                json={"scopes": ["unknown_scope"]},
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                "/privacy/consent/u_priv",
+                json={"scopes": [], "extra": 1},
+            ).status_code
+            == 422
+        )
+
+        # 3. Federated aggregation & budget check
+        agg_res = client.post(
+            "/privacy/federated/aggregate",
+            json={
+                "updates": [
+                    {"user_id": "u_priv", "vector": [0.5, 0.5]},
+                    {"user_id": "u_unconsented", "vector": [0.2, 0.2]},
+                ],
+                "epsilon_per_user": 0.8,
+                "seed": 42,
+            },
+        )
+        assert agg_res.status_code == 200
+        assert agg_res.json()["accepted_users"] == ["u_priv"]
+        assert agg_res.json()["rejected_count"] == 1
+
+        b_res = client.get("/privacy/budget/u_priv")
+        assert b_res.status_code == 200
+        assert b_res.json()["epsilon_spent"] == 0.8
+
+        s_res = client.get("/privacy/status")
+        assert s_res.status_code == 200
+        assert s_res.json()["federated_rounds_total"] == 1
+    finally:
+        api_main.service = original_service
