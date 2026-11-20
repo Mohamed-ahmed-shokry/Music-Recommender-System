@@ -1727,6 +1727,33 @@ def _render_explainability_tab(
             )
 
 
+def _render_privacy_tab(service: RecommenderService) -> None:
+    """Render federated privacy consent ledger and DP noise budget metrics."""
+    st.subheader("Federated Privacy & DP Noise Budgets")
+    st.caption(
+        "Monitor user consent scopes, differential privacy epsilon expenditure, "
+        "and federated aggregation rounds."
+    )
+    if not hasattr(service, "get_privacy_status"):
+        st.info("Federated privacy telemetry is unavailable for this service.")
+        return
+
+    status = service.get_privacy_status()
+    cfg = status.get("config", {})
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Consent Records", int(status.get("consent_records_count", 0)))
+    col2.metric("Tracked Budgets", int(status.get("tracked_budgets_count", 0)))
+    col3.metric(
+        "Total Epsilon Spent", f"{float(status.get('total_epsilon_spent', 0.0)):.2f}"
+    )
+    col4.metric("Federated Rounds", int(status.get("federated_rounds_total", 0)))
+    st.caption(
+        f"DP Config: max_epsilon={cfg.get('max_epsilon', 10.0)} | "
+        f"clip_norm={cfg.get('clip_norm', 1.0)} | "
+        f"noise_multiplier={cfg.get('noise_multiplier', 1.1)}"
+    )
+
+
 def render_dashboard(service: RecommenderService) -> None:
     """Render the dashboard using an already loaded recommender service."""
     health = service.health()
@@ -1961,6 +1988,7 @@ def render_dashboard(service: RecommenderService) -> None:
             "Feature Drift",
             "Multi-Region & Edge",
             "Explainability & Controls",
+            "Privacy & DP Budgets",
         ]
     )
     with tabs[0]:
@@ -2004,6 +2032,8 @@ def render_dashboard(service: RecommenderService) -> None:
         _render_replication_tab(service)
     with tabs[13]:
         _render_explainability_tab(service, user_ids)
+    with tabs[14]:
+        _render_privacy_tab(service)
 
 
 def main() -> None:
