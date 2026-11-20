@@ -8,8 +8,8 @@
 - [x] Task 5: Add unit tests for DP clipping/noise, budget accounting, consent gating, federated aggregation, and state persistence in `tests/test_privacy.py`.
 - [x] Task 6: Integrate `FederatedPrivacyManager` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
 - [x] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
-- [ ] Task 8: Implement `/privacy/*` endpoints in `api/main.py`.
-- [ ] Task 9: Add API integration tests for `/privacy/*` in `tests/test_api.py`.
+- [x] Task 8: Implement `/privacy/*` endpoints in `api/main.py`.
+- [x] Task 9: Add API integration tests for `/privacy/*` in `tests/test_api.py`.
 - [ ] Task 10: Implement CLI commands `privacy-status` and `privacy-consent` in `src/music_recommender/cli.py`.
 - [ ] Task 11: Add CLI tests in `tests/test_cli.py`.
 - [ ] Task 12: Add `"Privacy & DP Budgets"` tab to `src/music_recommender/dashboard.py` and test in `tests/test_dashboard.py`.
@@ -23,7 +23,7 @@
 | AC-1: FederatedPrivacyManager enforces consent scopes, epsilon/delta budgets, L2 clipping, and Gaussian DP noise | `Passed` | `tests/test_privacy.py` |
 | AC-2: aggregate_federated_updates() gates participation on consent and remaining budget with JSON persistence | `Passed` | `tests/test_privacy.py` |
 | AC-3: RecommenderService exposes privacy governance methods and Prometheus exports privacy metrics | `Passed` | `tests/test_service.py` |
-| AC-4: FastAPI /privacy/* endpoints validate payloads and manage consent, budgets, and federated aggregation | `Pending` | `tests/test_api.py` |
+| AC-4: FastAPI /privacy/* endpoints validate payloads and manage consent, budgets, and federated aggregation | `Passed` | `tests/test_api.py` |
 | AC-5: CLI commands privacy-status and privacy-consent execute cleanly in text and --json modes | `Pending` | `tests/test_cli.py` |
 | AC-6: Streamlit dashboard renders Privacy & DP Budgets tab cleanly without errors | `Pending` | `tests/test_dashboard.py` |
 | AC-7: All local CI-parity checks and remote CI workflow runs pass 100% | `Pending` | Local checks + GitHub Actions runs |
