@@ -6483,5 +6483,103 @@ def user_preferences_command(
     typer.echo(f"Blocked Artists:  {profile['blocked_artists']}")
 
 
+def _get_privacy_or_service() -> tuple[Any | None, Any]:
+    from music_recommender.privacy import get_global_privacy_manager
+
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable: %s", exc)
+
+    if service is not None:
+        return service, service.privacy_manager
+    return None, get_global_privacy_manager()
+
+
+@app.command("privacy-status")
+def privacy_status_command(
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON privacy and DP budget status."),
+    ] = False,
+) -> None:
+    """Display consent ledger counts, DP noise config, and epsilon expenditure."""
+    _service, mgr = _get_privacy_or_service()
+    status = mgr.get_status()
+    if as_json:
+        typer.echo(json.dumps(status, indent=2))
+        return
+
+    cfg = status["config"]
+    typer.secho("=== Federated Privacy & DP Budget Status ===", bold=True)
+    typer.echo(f"Consent Records:  {status['consent_records_count']}")
+    typer.echo(f"Tracked Budgets:  {status['tracked_budgets_count']}")
+    typer.echo(f"Exhausted Users:  {status['exhausted_budgets_count']}")
+    typer.echo(
+        f"Epsilon Spent:    {status['total_epsilon_spent']:.4f} "
+        f"(max/user={cfg['max_epsilon']})"
+    )
+    typer.echo(f"Federated Rounds: {status['federated_rounds_total']}")
+
+
+@app.command("privacy-consent")
+def privacy_consent_command(
+    user_id: Annotated[
+        str,
+        typer.Argument(help="User ID to inspect or update consent scopes for."),
+    ],
+    grant: Annotated[
+        str | None,
+        typer.Option(
+            "--grant",
+            help=(
+                "Comma-separated consent scopes "
+                "(personalization,federated_updates,analytics)."
+            ),
+        ),
+    ] = None,
+    revoke: Annotated[
+        bool,
+        typer.Option("--revoke", help="Revoke all consent scopes for this user."),
+    ] = False,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON consent and budget payload."),
+    ] = False,
+) -> None:
+    """Inspect or manage a user's privacy consent scopes and DP budget."""
+    _service, mgr = _get_privacy_or_service()
+
+    if revoke and grant is not None:
+        typer.secho("Cannot pass both --grant and --revoke.", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    if revoke:
+        mgr.revoke_consent(user_id)
+    elif grant is not None:
+        scopes = [s.strip() for s in grant.split(",") if s.strip()]
+        try:
+            mgr.set_consent(user_id, scopes)
+        except ValueError as exc:
+            typer.secho(f"Invalid consent scope: {exc}", fg=typer.colors.RED)
+            raise typer.Exit(code=1) from exc
+
+    consent = mgr.get_consent(user_id).to_dict()
+    budget = mgr.get_budget(user_id).to_dict()
+    payload = {"consent": consent, "budget": budget}
+
+    if as_json:
+        typer.echo(json.dumps(payload, indent=2))
+        return
+
+    typer.secho(f"=== User Privacy: {user_id} ===", bold=True)
+    typer.echo(f"Granted Scopes:   {consent['granted_scopes']}")
+    typer.echo(
+        f"DP Budget:        {budget['epsilon_spent']}/{budget['max_epsilon']} "
+        f"(remaining={budget['remaining_epsilon']})"
+    )
+
+
 if __name__ == "__main__":
     app()  # pragma: no cover - CLI entry point invoked by `python -m`
