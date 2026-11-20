@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.48.0) — active development (branch `phase/189-federated-privacy`)
+## Current milestone (0.48.0) — ready for review (branch `phase/189-federated-privacy`, PR #46)
 
 Federated Privacy-Preserving Personalization, Differential Privacy Noise Budgets, and Consent Ledger.
 The 0.47.0 release delivered interactive explainability graphs, counterfactual recourse, and user preference controls.
@@ -11,8 +11,8 @@ This milestone equips the platform with privacy-preserving federated personaliza
 a Federated Privacy Engine (`FederatedPrivacyManager`, `ConsentScope`, `ConsentRecord`, `PrivacyBudgetConfig`, `PrivacyBudgetState`) supporting per-user epsilon/delta budgets, L2 clipping, Gaussian DP noise injection, and consent-gated federated update aggregation;
 integration with `RecommenderService`, Prometheus telemetry, FastAPI `/privacy/*` routes, operator CLI (`privacy-status`, `privacy-consent`), and Streamlit dashboard (`Privacy & DP Budgets`).
 
-- Phase 189 — Differential privacy budget accountant and consent ledger (`privacy.py`, in progress).
-- Phase 190 — Privacy-preserving aggregation, API/CLI/dashboard integration, clean CI.
+- Phase 189 — Differential privacy budget accountant and consent ledger (`privacy.py`, completed).
+- Phase 190 — Privacy-preserving aggregation, API/CLI/dashboard integration, clean CI (completed).
 
 ## Next milestone (0.49.0) — planned
 
