@@ -799,6 +799,48 @@ def collect_service_metric_families(
             )
             families.append(graph_fam)
 
+    # 10. Federated Privacy & DP Budget Metrics
+    privacy_mgr = (
+        getattr(service, "privacy_manager", None) if service is not None else None
+    )
+    if privacy_mgr is not None and hasattr(privacy_mgr, "get_status"):
+        with contextlib.suppress(Exception):
+            p_status = privacy_mgr.get_status()
+            p_labels = dict(custom_labels) if custom_labels else {}
+
+            consent_fam = MetricFamily(
+                name="music_recommender_privacy_consent_records",
+                help_text="Total user consent records in the privacy ledger.",
+                metric_type=MetricType.GAUGE,
+            )
+            consent_fam.add_sample(
+                value=int(p_status.get("consent_records_count", 0)),
+                labels=p_labels,
+            )
+            families.append(consent_fam)
+
+            eps_fam = MetricFamily(
+                name="music_recommender_privacy_epsilon_spent_total",
+                help_text="Cumulative differential privacy epsilon spent.",
+                metric_type=MetricType.COUNTER,
+            )
+            eps_fam.add_sample(
+                value=float(p_status.get("total_epsilon_spent", 0.0)),
+                labels=p_labels,
+            )
+            families.append(eps_fam)
+
+            rounds_fam = MetricFamily(
+                name="music_recommender_privacy_federated_rounds_total",
+                help_text="Total federated DP aggregation rounds executed.",
+                metric_type=MetricType.COUNTER,
+            )
+            rounds_fam.add_sample(
+                value=int(p_status.get("federated_rounds_total", 0)),
+                labels=p_labels,
+            )
+            families.append(rounds_fam)
+
     return families
 
 

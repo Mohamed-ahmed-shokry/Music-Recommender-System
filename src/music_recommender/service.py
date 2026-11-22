@@ -139,6 +139,11 @@ from music_recommender.feature_drift import (
     get_global_drift_monitor,
 )
 from music_recommender.ltr import rank_tracks_with_ltr, rank_with_ltr
+from music_recommender.privacy import (
+    ConsentScope,
+    FederatedPrivacyManager,
+    get_global_privacy_manager,
+)
 from music_recommender.ranking import (
     apply_popularity_penalty,
     rerank_with_diversity,
@@ -222,6 +227,7 @@ class RecommenderService:
         drift_monitor: FeatureDriftMonitor | None = None,
         replicator: MultiRegionReplicator | None = None,
         explainability_engine: ExplainabilityEngine | None = None,
+        privacy_manager: FederatedPrivacyManager | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -597,6 +603,10 @@ class RecommenderService:
             self.explainability_engine = explainability_engine
         else:
             self.explainability_engine = get_global_explainability_engine()
+        if privacy_manager is not None:
+            self.privacy_manager = privacy_manager
+        else:
+            self.privacy_manager = get_global_privacy_manager()
 
     def _register_default_remediation_handlers(self) -> None:
         """Register built-in self-healing remediation handlers and fallback rules."""
@@ -1802,6 +1812,38 @@ class RecommenderService:
             "top_cutoff_score": round(cutoff, 4),
             "suggestions": [s.to_dict() for s in suggestions],
         }
+
+    def get_privacy_status(self) -> dict[str, Any]:
+        """Return federated privacy consent ledger and DP budget telemetry."""
+        return self.privacy_manager.get_status()
+
+    def set_user_consent(
+        self,
+        user_id: str,
+        scopes: Sequence[ConsentScope | str],
+    ) -> dict[str, Any]:
+        """Grant consent scopes for a user."""
+        return self.privacy_manager.set_consent(user_id, scopes).to_dict()
+
+    def revoke_user_consent(self, user_id: str) -> dict[str, Any]:
+        """Revoke all consent scopes for a user."""
+        return self.privacy_manager.revoke_consent(user_id).to_dict()
+
+    def get_user_privacy_budget(self, user_id: str) -> dict[str, Any]:
+        """Return differential privacy budget state for a user."""
+        return self.privacy_manager.get_budget(user_id).to_dict()
+
+    def aggregate_federated_updates(
+        self,
+        updates: Sequence[tuple[str, Sequence[float]]],
+        *,
+        epsilon_per_user: float = 0.5,
+        seed: int | None = None,
+    ) -> dict[str, Any]:
+        """Aggregate consented user updates with L2 clipping and DP noise."""
+        return self.privacy_manager.aggregate_federated_updates(
+            updates, epsilon_per_user=epsilon_per_user, seed=seed
+        )
 
     def record_request(
         self,

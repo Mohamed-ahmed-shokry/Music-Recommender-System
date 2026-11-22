@@ -2710,3 +2710,95 @@ def generate_counterfactual_endpoint(
         }
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+class ConsentUpdateRequest(BaseModel):
+    """Payload for updating a user's privacy consent scopes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scopes: list[str] = Field(default_factory=list)
+
+
+class FederatedUserUpdate(BaseModel):
+    """Single user gradient/embedding update for DP federated aggregation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str = Field(..., min_length=1)
+    vector: list[float] = Field(..., min_length=1)
+
+
+class FederatedAggregateRequest(BaseModel):
+    """Payload for running a consent-gated DP federated aggregation round."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    updates: list[FederatedUserUpdate] = Field(..., min_length=1)
+    epsilon_per_user: float = Field(default=0.5, gt=0.0)
+    seed: int | None = None
+
+
+@app.get("/privacy/status")
+def get_privacy_status_endpoint() -> dict[str, Any]:
+    """Return federated privacy consent ledger and DP budget telemetry."""
+    if service is not None:
+        return service.get_privacy_status()
+    from music_recommender.privacy import get_global_privacy_manager
+
+    return get_global_privacy_manager().get_status()
+
+
+@app.post("/privacy/consent/{user_id}")
+def update_user_consent_endpoint(
+    user_id: str,
+    payload: ConsentUpdateRequest,
+) -> dict[str, Any]:
+    """Grant or replace consent scopes for a user."""
+    try:
+        if service is not None:
+            return service.set_user_consent(user_id, payload.scopes)
+        from music_recommender.privacy import get_global_privacy_manager
+
+        return (
+            get_global_privacy_manager().set_consent(user_id, payload.scopes).to_dict()
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/privacy/budget/{user_id}")
+def get_user_privacy_budget_endpoint(user_id: str) -> dict[str, Any]:
+    """Return differential privacy epsilon/delta budget state for a user."""
+    try:
+        if service is not None:
+            return service.get_user_privacy_budget(user_id)
+        from music_recommender.privacy import get_global_privacy_manager
+
+        return get_global_privacy_manager().get_budget(user_id).to_dict()
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/privacy/federated/aggregate")
+def aggregate_federated_endpoint(
+    payload: FederatedAggregateRequest,
+) -> dict[str, Any]:
+    """Aggregate consented user updates with L2 clipping and DP noise."""
+    pairs = [(u.user_id, u.vector) for u in payload.updates]
+    try:
+        if service is not None:
+            return service.aggregate_federated_updates(
+                pairs,
+                epsilon_per_user=payload.epsilon_per_user,
+                seed=payload.seed,
+            )
+        from music_recommender.privacy import get_global_privacy_manager
+
+        return get_global_privacy_manager().aggregate_federated_updates(
+            pairs,
+            epsilon_per_user=payload.epsilon_per_user,
+            seed=payload.seed,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error

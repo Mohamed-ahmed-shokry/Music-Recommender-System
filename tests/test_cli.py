@@ -4712,3 +4712,62 @@ def test_explain_graph_and_user_preferences_cli(
     )
     assert res_clear.exit_code == 0
     assert json.loads(res_clear.output)["boosted_genres"] == {}
+
+
+def test_privacy_status_and_consent_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from music_recommender.privacy import (
+        FederatedPrivacyManager,
+        set_global_privacy_manager,
+    )
+
+    mgr = FederatedPrivacyManager()
+    set_global_privacy_manager(mgr)
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(
+            lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError())
+        ),
+    )
+
+    runner = CliRunner()
+
+    # 1. Grant consent via CLI
+    res_grant = runner.invoke(
+        cli.app,
+        [
+            "privacy-consent",
+            "u_priv_cli",
+            "--grant",
+            "personalization,federated_updates",
+            "--json",
+        ],
+    )
+    assert res_grant.exit_code == 0
+    payload = json.loads(res_grant.output)
+    assert payload["consent"]["granted_scopes"] == [
+        "federated_updates",
+        "personalization",
+    ]
+
+    # 2. privacy-status human & --json
+    res_status = runner.invoke(cli.app, ["privacy-status"])
+    assert res_status.exit_code == 0
+    assert "Federated Privacy & DP Budget Status" in res_status.output
+
+    res_status_json = runner.invoke(cli.app, ["privacy-status", "--json"])
+    assert res_status_json.exit_code == 0
+    assert json.loads(res_status_json.output)["consent_records_count"] == 1
+
+    # 3. Revoke & conflict check
+    res_rev = runner.invoke(cli.app, ["privacy-consent", "u_priv_cli", "--revoke"])
+    assert res_rev.exit_code == 0
+    assert "User Privacy: u_priv_cli" in res_rev.output
+
+    res_conflict = runner.invoke(
+        cli.app,
+        ["privacy-consent", "u_priv_cli", "--grant", "analytics", "--revoke"],
+    )
+    assert res_conflict.exit_code == 1

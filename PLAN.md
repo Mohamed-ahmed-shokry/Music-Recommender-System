@@ -3,7 +3,24 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.47.0) — ready for review (branch `phase/187-explainability-recourse`, PR #45)
+## Current milestone (0.48.0) — ready for review (branch `phase/189-federated-privacy`, PR #46)
+
+Federated Privacy-Preserving Personalization, Differential Privacy Noise Budgets, and Consent Ledger.
+The 0.47.0 release delivered interactive explainability graphs, counterfactual recourse, and user preference controls.
+This milestone equips the platform with privacy-preserving federated personalization, DP budget accounting, and user consent governance:
+a Federated Privacy Engine (`FederatedPrivacyManager`, `ConsentScope`, `ConsentRecord`, `PrivacyBudgetConfig`, `PrivacyBudgetState`) supporting per-user epsilon/delta budgets, L2 clipping, Gaussian DP noise injection, and consent-gated federated update aggregation;
+integration with `RecommenderService`, Prometheus telemetry, FastAPI `/privacy/*` routes, operator CLI (`privacy-status`, `privacy-consent`), and Streamlit dashboard (`Privacy & DP Budgets`).
+
+- Phase 189 — Differential privacy budget accountant and consent ledger (`privacy.py`, completed).
+- Phase 190 — Privacy-preserving aggregation, API/CLI/dashboard integration, clean CI (completed).
+
+## Next milestone (0.49.0) — planned
+
+Automated Incident Postmortem Generator, Root-Cause Runbooks, and SLA Reporting.
+- Phase 191 — Structured postmortem synthesis & root-cause runbook matcher.
+- Phase 192 — SLA compliance reporting, API/CLI/dashboard integration, and CI release.
+
+## Previous milestone (0.47.0) — shipped (branch `phase/187-explainability-recourse`, PR #45)
 
 Interactive Explainability Graph, Counterfactual Recourse, and User Preference Controls.
 The 0.46.0 release delivered multi-region model replication, edge artifact caching, and geo-failover routing.
@@ -13,12 +30,6 @@ integration with `RecommenderService`, Prometheus telemetry, FastAPI `/explain/*
 
 - Phase 187 — Counterfactual explanation & recourse engine (`explainability.py`, completed).
 - Phase 188 — User preference override controls, API/CLI/dashboard integration, clean CI (completed).
-
-## Next milestone (0.48.0) — planned
-
-Federated Privacy-Preserving Personalization, Differential Privacy Noise Budgets, and Consent Ledger.
-- Phase 189 — Differential privacy budget accountant and consent ledger.
-- Phase 190 — Privacy-preserving aggregation, API/CLI/dashboard integration, and CI release.
 
 ## Previous milestone (0.46.0) — shipped (branch `phase/185-multi-region-replication`, PR #44)
 
