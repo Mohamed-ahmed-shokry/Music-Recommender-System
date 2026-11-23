@@ -1,3 +1,34 @@
+# Milestone 0.49.0 Roadmap — Phase 191 & 192
+
+## Phase 191 & 192: Automated Incident Postmortem Generator, Root-Cause Runbooks, and SLA Reporting (0.49.0)
+
+### 1. Objective
+Equip the recommendation platform with automated incident postmortem synthesis, root-cause runbook matching, and SLA/error-budget compliance reporting:
+1. An **Incident Postmortem & SLA Engine** (`PostmortemEngine`, `IncidentSeverity`, `SLATarget`, `RunbookEntry`, `PostmortemActionItem`, `IncidentPostmortem`, `SLAComplianceReport`) supporting automated runbook matching by incident symptoms/tags, structured postmortem generation (timeline, root cause, matched runbooks, action items, Markdown export), and rolling SLA availability / error-budget burn accounting.
+2. **Auditability & Persistence** tracking generated postmortems, downtime events, runbook registry entries, and JSON state snapshot persistence.
+3. Integration with `RecommenderService`, Prometheus telemetry (`telemetry.py`), FastAPI `/postmortem/*` routes, operator CLI (`postmortem-generate`, `sla-report`), and Streamlit dashboard (`Postmortems & SLA`), releasing Milestone 0.49.0 with 100% green CI.
+
+### 2. Scope
+1. **Postmortem Engine (`src/music_recommender/postmortem.py`)**: `IncidentSeverity`, `SLATarget`, `RunbookEntry`, `PostmortemActionItem`, `IncidentPostmortem`, `SLAComplianceReport`, `PostmortemEngine`.
+2. **Service & Telemetry (`src/music_recommender/service.py`, `telemetry.py`)**: Wire `self.postmortem_engine` and export `music_recommender_postmortems_generated_total`, `music_recommender_sla_availability_pct`, `music_recommender_sla_error_budget_remaining_pct`.
+3. **FastAPI Endpoints (`api/main.py`)**: `GET /postmortem/status`, `POST /postmortem/generate`, `GET /postmortem/sla`, `GET /postmortem/runbooks`.
+4. **CLI & Dashboard (`cli.py`, `dashboard.py`)**: `postmortem-generate`, `sla-report`, and `"Postmortems & SLA"` Streamlit tab.
+5. **Tests, Docs & Release 0.49.0**: Tests across `tests/test_postmortem.py`, `tests/test_service.py`, `tests/test_api.py`, `tests/test_cli.py`, `tests/test_dashboard.py`, plus `README.md`, `CHANGELOG.md`, `PLAN.md`, `docs/PROGRESS.md`, and `pyproject.toml` (`0.49.0`).
+
+### 3. Acceptance Criteria
+- [ ] AC-1: `PostmortemEngine` matches root-cause runbooks by symptoms/tags and generates structured postmortems with Markdown export.
+- [ ] AC-2: `PostmortemEngine` tracks downtime events, computes SLA compliance / error-budget burn, and supports JSON state persistence.
+- [ ] AC-3: `RecommenderService` exposes postmortem/SLA methods and Prometheus exports postmortem and SLA metrics.
+- [ ] AC-4: FastAPI `/postmortem/*` endpoints validate payloads and serve postmortem generation, SLA reports, and runbook matching.
+- [ ] AC-5: CLI commands `postmortem-generate` and `sla-report` execute cleanly in text and `--json` modes.
+- [ ] AC-6: Streamlit dashboard renders the `"Postmortems & SLA"` tab cleanly without errors.
+- [ ] AC-7: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Exclusions
+- External PagerDuty/Jira ticket webhooks are deferred; postmortem generation, runbook matching, and SLA reporting execute deterministically in-process.
+
+---
+
 # Milestone 0.48.0 Roadmap — Phase 189 & 190
 
 ## Phase 189 & 190: Federated Privacy-Preserving Personalization, Differential Privacy Noise Budgets, and Consent Ledger (0.48.0)

@@ -3,7 +3,24 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.48.0) — ready for review (branch `phase/189-federated-privacy`, PR #46)
+## Current milestone (0.49.0) — in progress (branch `phase/191-incident-postmortems`)
+
+Automated Incident Postmortem Generator, Root-Cause Runbooks, and SLA Reporting.
+The 0.48.0 release delivered federated privacy-preserving personalization, differential privacy noise budgets, and a consent ledger.
+This milestone equips the platform with automated incident postmortem synthesis, root-cause runbook matching, and SLA/error-budget compliance reporting:
+a Postmortem & SLA Engine (`PostmortemEngine`, `IncidentSeverity`, `SLATarget`, `RunbookEntry`, `PostmortemActionItem`, `IncidentPostmortem`, `SLAComplianceReport`) generating structured postmortems with Markdown export, symptom-based runbook matching, and rolling SLA error-budget burn accounting;
+integration with `RecommenderService`, Prometheus telemetry, FastAPI `/postmortem/*` routes, operator CLI (`postmortem-generate`, `sla-report`), and Streamlit dashboard (`Postmortems & SLA`).
+
+- Phase 191 — Structured postmortem synthesis & root-cause runbook matcher (`postmortem.py`, in progress).
+- Phase 192 — SLA compliance reporting, API/CLI/dashboard integration, and CI release (pending).
+
+## Next milestone (0.50.0) — planned
+
+Cross-Platform Cold-Start Metadata Transfer Learning and Semantic Artist Onboarding.
+- Phase 193 — Metadata feature transfer & cold-start embedding alignment.
+- Phase 194 — Onboarding pipeline, API/CLI/dashboard integration, and CI release.
+
+## Previous milestone (0.48.0) — shipped (branch `phase/189-federated-privacy`, PR #46)
 
 Federated Privacy-Preserving Personalization, Differential Privacy Noise Budgets, and Consent Ledger.
 The 0.47.0 release delivered interactive explainability graphs, counterfactual recourse, and user preference controls.
@@ -13,12 +30,6 @@ integration with `RecommenderService`, Prometheus telemetry, FastAPI `/privacy/*
 
 - Phase 189 — Differential privacy budget accountant and consent ledger (`privacy.py`, completed).
 - Phase 190 — Privacy-preserving aggregation, API/CLI/dashboard integration, clean CI (completed).
-
-## Next milestone (0.49.0) — planned
-
-Automated Incident Postmortem Generator, Root-Cause Runbooks, and SLA Reporting.
-- Phase 191 — Structured postmortem synthesis & root-cause runbook matcher.
-- Phase 192 — SLA compliance reporting, API/CLI/dashboard integration, and CI release.
 
 ## Previous milestone (0.47.0) — shipped (branch `phase/187-explainability-recourse`, PR #45)
 
