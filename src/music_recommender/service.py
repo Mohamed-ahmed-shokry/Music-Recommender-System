@@ -139,6 +139,11 @@ from music_recommender.feature_drift import (
     get_global_drift_monitor,
 )
 from music_recommender.ltr import rank_tracks_with_ltr, rank_with_ltr
+from music_recommender.postmortem import (
+    IncidentSeverity,
+    PostmortemEngine,
+    get_global_postmortem_engine,
+)
 from music_recommender.privacy import (
     ConsentScope,
     FederatedPrivacyManager,
@@ -228,6 +233,7 @@ class RecommenderService:
         replicator: MultiRegionReplicator | None = None,
         explainability_engine: ExplainabilityEngine | None = None,
         privacy_manager: FederatedPrivacyManager | None = None,
+        postmortem_engine: PostmortemEngine | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -607,6 +613,10 @@ class RecommenderService:
             self.privacy_manager = privacy_manager
         else:
             self.privacy_manager = get_global_privacy_manager()
+        if postmortem_engine is not None:
+            self.postmortem_engine = postmortem_engine
+        else:
+            self.postmortem_engine = get_global_postmortem_engine()
 
     def _register_default_remediation_handlers(self) -> None:
         """Register built-in self-healing remediation handlers and fallback rules."""
@@ -1844,6 +1854,49 @@ class RecommenderService:
         return self.privacy_manager.aggregate_federated_updates(
             updates, epsilon_per_user=epsilon_per_user, seed=seed
         )
+
+    def get_postmortem_status(self) -> dict[str, Any]:
+        """Return incident postmortem engine status and current SLA summary."""
+        return self.postmortem_engine.get_status()
+
+    def generate_incident_postmortem(
+        self,
+        incident_id: str,
+        title: str,
+        severity: IncidentSeverity | str,
+        duration_minutes: float,
+        symptoms: Sequence[str],
+        *,
+        root_cause_summary: str | None = None,
+        timeline: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Generate a structured incident postmortem and match root-cause runbooks."""
+        pm = self.postmortem_engine.generate_postmortem(
+            incident_id=incident_id,
+            title=title,
+            severity=severity,
+            duration_minutes=duration_minutes,
+            symptoms=list(symptoms),
+            root_cause_summary=root_cause_summary,
+            timeline=list(timeline) if timeline is not None else None,
+        )
+        return pm.to_dict()
+
+    def get_sla_compliance_report(self) -> dict[str, Any]:
+        """Return rolling SLA compliance and error-budget burn report."""
+        return self.postmortem_engine.compute_sla_report().to_dict()
+
+    def match_incident_runbooks(
+        self,
+        symptoms: Sequence[str],
+        *,
+        top_k: int = 3,
+    ) -> list[dict[str, Any]]:
+        """Match root-cause remediation runbooks for the given symptoms."""
+        return [
+            rb.to_dict()
+            for rb in self.postmortem_engine.match_runbooks(list(symptoms), top_k=top_k)
+        ]
 
     def record_request(
         self,
