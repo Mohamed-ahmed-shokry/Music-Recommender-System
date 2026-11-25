@@ -2866,3 +2866,37 @@ def test_service_privacy_and_telemetry_integration(tmp_path: Path) -> None:
 
     revoked = service.revoke_user_consent("user_1")
     assert revoked["granted_scopes"] == []
+
+
+def test_service_postmortem_and_telemetry_integration(tmp_path: Path) -> None:
+    from music_recommender.postmortem import IncidentSeverity, PostmortemEngine
+    from music_recommender.telemetry import export_prometheus_metrics
+
+    service = create_service(tmp_path)
+    service.postmortem_engine = PostmortemEngine()
+
+    runbooks = service.match_incident_runbooks(["latency", "p99"])
+    assert runbooks
+    assert runbooks[0]["runbook_id"] == "rb-latency-spike"
+
+    pm = service.generate_incident_postmortem(
+        incident_id="inc-svc-01",
+        title="Serving Latency Regression",
+        severity=IncidentSeverity.SEV2,
+        duration_minutes=10.0,
+        symptoms=["latency", "p99"],
+    )
+    assert pm["incident_id"] == "inc-svc-01"
+    assert "rb-latency-spike" in pm["matched_runbook_ids"]
+
+    sla = service.get_sla_compliance_report()
+    assert sla["total_downtime_minutes"] == pytest.approx(10.0)
+    assert sla["sla_breached"] is False
+
+    status = service.get_postmortem_status()
+    assert status["postmortem_count"] == 1
+
+    prom_text = export_prometheus_metrics(service)
+    assert "music_recommender_postmortems_generated_total 1" in prom_text
+    assert "music_recommender_sla_availability_pct" in prom_text
+    assert "music_recommender_sla_error_budget_remaining_pct" in prom_text
