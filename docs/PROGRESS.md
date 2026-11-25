@@ -6,8 +6,8 @@
 - [x] Task 3: Add unit tests for postmortem/SLA models in `tests/test_postmortem.py`.
 - [x] Task 4: Implement `PostmortemEngine` and global accessors in `src/music_recommender/postmortem.py`.
 - [x] Task 5: Add unit tests for runbook matching, postmortem generation, SLA compliance, and state persistence in `tests/test_postmortem.py`.
-- [ ] Task 6: Integrate `PostmortemEngine` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
-- [ ] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
+- [x] Task 6: Integrate `PostmortemEngine` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
+- [x] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
 - [ ] Task 8: Implement `/postmortem/*` endpoints in `api/main.py`.
 - [ ] Task 9: Add API integration tests for `/postmortem/*` in `tests/test_api.py`.
 - [ ] Task 10: Implement CLI commands `postmortem-generate` and `sla-report` in `src/music_recommender/cli.py`.
@@ -22,7 +22,7 @@
 | :--- | :---: | :--- |
 | AC-1: PostmortemEngine matches root-cause runbooks and generates structured postmortems with Markdown export | `Passed` | `tests/test_postmortem.py` |
 | AC-2: PostmortemEngine tracks downtime events, computes SLA compliance/error-budget burn, and supports JSON persistence | `Passed` | `tests/test_postmortem.py` |
-| AC-3: RecommenderService exposes postmortem/SLA methods and Prometheus exports postmortem and SLA metrics | `Pending` | `tests/test_service.py` |
+| AC-3: RecommenderService exposes postmortem/SLA methods and Prometheus exports postmortem and SLA metrics | `Passed` | `tests/test_service.py` |
 | AC-4: FastAPI /postmortem/* endpoints validate payloads and serve postmortems, SLA reports, and runbook matching | `Pending` | `tests/test_api.py` |
 | AC-5: CLI commands postmortem-generate and sla-report execute cleanly in text and --json modes | `Pending` | `tests/test_cli.py` |
 | AC-6: Streamlit dashboard renders Postmortems & SLA tab cleanly without errors | `Pending` | `tests/test_dashboard.py` |
