@@ -841,6 +841,49 @@ def collect_service_metric_families(
             )
             families.append(rounds_fam)
 
+    # 11. Incident Postmortem & SLA Compliance Metrics
+    postmortem_eng = (
+        getattr(service, "postmortem_engine", None) if service is not None else None
+    )
+    if postmortem_eng is not None and hasattr(postmortem_eng, "get_status"):
+        with contextlib.suppress(Exception):
+            pm_status = postmortem_eng.get_status()
+            pm_labels = dict(custom_labels) if custom_labels else {}
+            sla_report = pm_status.get("sla_report", {})
+
+            pm_count_fam = MetricFamily(
+                name="music_recommender_postmortems_generated_total",
+                help_text="Total automated incident postmortems generated.",
+                metric_type=MetricType.COUNTER,
+            )
+            pm_count_fam.add_sample(
+                value=int(pm_status.get("postmortem_count", 0)),
+                labels=pm_labels,
+            )
+            families.append(pm_count_fam)
+
+            sla_avail_fam = MetricFamily(
+                name="music_recommender_sla_availability_pct",
+                help_text="Achieved rolling SLA availability percentage.",
+                metric_type=MetricType.GAUGE,
+            )
+            sla_avail_fam.add_sample(
+                value=float(sla_report.get("achieved_availability_pct", 100.0)),
+                labels=pm_labels,
+            )
+            families.append(sla_avail_fam)
+
+            sla_budget_fam = MetricFamily(
+                name="music_recommender_sla_error_budget_remaining_pct",
+                help_text="Remaining rolling SLA error budget percentage.",
+                metric_type=MetricType.GAUGE,
+            )
+            sla_budget_fam.add_sample(
+                value=float(sla_report.get("error_budget_remaining_pct", 100.0)),
+                labels=pm_labels,
+            )
+            families.append(sla_budget_fam)
+
     return families
 
 
