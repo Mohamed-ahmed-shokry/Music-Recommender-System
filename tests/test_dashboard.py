@@ -25,6 +25,7 @@ class FakeDashboardService:
             DriftMonitorConfig,
             FeatureDriftMonitor,
         )
+        from music_recommender.postmortem import PostmortemEngine
         from music_recommender.privacy import FederatedPrivacyManager
         from music_recommender.ratelimit import RateLimiterEngine
         from music_recommender.replication import MultiRegionReplicator
@@ -43,6 +44,7 @@ class FakeDashboardService:
         self.replicator = MultiRegionReplicator()
         self.explainability_engine = ExplainabilityEngine()
         self.privacy_manager = FederatedPrivacyManager()
+        self.postmortem_engine = PostmortemEngine()
         self.context_features: tuple[str, ...] = (
             "log_plays",
             "log_unique_artists",
@@ -489,6 +491,9 @@ class FakeDashboardService:
     def get_privacy_status(self) -> dict[str, Any]:
         return self.privacy_manager.get_status()
 
+    def get_postmortem_status(self) -> dict[str, Any]:
+        return self.postmortem_engine.get_status()
+
     def browse_artists(
         self,
         *,
@@ -871,6 +876,7 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Multi-Region & Edge",
         "Explainability & Controls",
         "Privacy & DP Budgets",
+        "Postmortems & SLA",
     ]
     assert [metric.label for metric in app.metric] == [
         "Listeners",
@@ -904,6 +910,10 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Tracked Budgets",
         "Total Epsilon Spent",
         "Federated Rounds",
+        "Postmortems Generated",
+        "Runbooks Registered",
+        "SLA Availability",
+        "Error Budget Rem",
     ]
 
 
@@ -1562,6 +1572,7 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
         "Multi-Region & Edge",
         "Explainability & Controls",
         "Privacy & DP Budgets",
+        "Postmortems & SLA",
     ]
 
 
@@ -2248,3 +2259,28 @@ def test_dashboard_privacy_tab_rendering() -> None:
     assert not app.exception
     assert any("Federated Privacy & DP Noise Budgets" in s.value for s in app.subheader)
     assert any("Privacy & DP Budgets" in str(tab.label) for tab in app.tabs)
+
+
+def test_dashboard_postmortem_tab_rendering() -> None:
+    from music_recommender.postmortem import IncidentSeverity
+
+    service = FakeDashboardService()
+    service.postmortem_engine.generate_postmortem(
+        incident_id="inc-dash-01",
+        title="Dashboard Latency Spike",
+        severity=IncidentSeverity.SEV2,
+        duration_minutes=5.0,
+        symptoms=["latency", "p99"],
+    )
+
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(
+        "Incident Postmortems & SLA Compliance" in s.value for s in app.subheader
+    )
+    assert any("Postmortems & SLA" in str(tab.label) for tab in app.tabs)
