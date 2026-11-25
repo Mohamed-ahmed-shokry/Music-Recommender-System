@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.49.0) — in progress (branch `phase/191-incident-postmortems`)
+## Current milestone (0.49.0) — ready for review (branch `phase/191-incident-postmortems`, PR #48)
 
 Automated Incident Postmortem Generator, Root-Cause Runbooks, and SLA Reporting.
 The 0.48.0 release delivered federated privacy-preserving personalization, differential privacy noise budgets, and a consent ledger.
@@ -11,8 +11,8 @@ This milestone equips the platform with automated incident postmortem synthesis,
 a Postmortem & SLA Engine (`PostmortemEngine`, `IncidentSeverity`, `SLATarget`, `RunbookEntry`, `PostmortemActionItem`, `IncidentPostmortem`, `SLAComplianceReport`) generating structured postmortems with Markdown export, symptom-based runbook matching, and rolling SLA error-budget burn accounting;
 integration with `RecommenderService`, Prometheus telemetry, FastAPI `/postmortem/*` routes, operator CLI (`postmortem-generate`, `sla-report`), and Streamlit dashboard (`Postmortems & SLA`).
 
-- Phase 191 — Structured postmortem synthesis & root-cause runbook matcher (`postmortem.py`, in progress).
-- Phase 192 — SLA compliance reporting, API/CLI/dashboard integration, and CI release (pending).
+- Phase 191 — Structured postmortem synthesis & root-cause runbook matcher (`postmortem.py`, completed).
+- Phase 192 — SLA compliance reporting, API/CLI/dashboard integration, and CI release (completed).
 
 ## Next milestone (0.50.0) — planned
 
