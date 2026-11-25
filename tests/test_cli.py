@@ -4771,3 +4771,82 @@ def test_privacy_status_and_consent_cli(monkeypatch: pytest.MonkeyPatch) -> None
         ["privacy-consent", "u_priv_cli", "--grant", "analytics", "--revoke"],
     )
     assert res_conflict.exit_code == 1
+
+
+def test_postmortem_and_sla_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from music_recommender.postmortem import (
+        PostmortemEngine,
+        set_global_postmortem_engine,
+    )
+
+    engine = PostmortemEngine()
+    set_global_postmortem_engine(engine)
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(
+            lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError())
+        ),
+    )
+
+    runner = CliRunner()
+
+    # 1. Generate postmortem in JSON and Markdown modes
+    res_json = runner.invoke(
+        cli.app,
+        [
+            "postmortem-generate",
+            "inc-cli-01",
+            "--title",
+            "CLI Latency Incident",
+            "--severity",
+            "sev2",
+            "--duration",
+            "15",
+            "--symptoms",
+            "latency,p99",
+            "--json",
+        ],
+    )
+    assert res_json.exit_code == 0
+    payload = json.loads(res_json.output)
+    assert payload["incident_id"] == "inc-cli-01"
+    assert "rb-latency-spike" in payload["matched_runbook_ids"]
+
+    res_md = runner.invoke(
+        cli.app,
+        [
+            "postmortem-generate",
+            "inc-cli-02",
+            "--title",
+            "Drift Alert",
+            "--severity",
+            "sev3",
+            "--duration",
+            "5",
+            "--symptoms",
+            "drift,stale",
+        ],
+    )
+    assert res_md.exit_code == 0
+    assert "# Incident Postmortem: Drift Alert (inc-cli-02)" in res_md.output
+
+    # 2. Invalid severity returns exit code 1
+    res_bad = runner.invoke(
+        cli.app,
+        ["postmortem-generate", "inc-bad", "--severity", "invalid"],
+    )
+    assert res_bad.exit_code == 1
+
+    # 3. sla-report text & --json
+    res_sla = runner.invoke(cli.app, ["sla-report"])
+    assert res_sla.exit_code == 0
+    assert "Rolling SLA Compliance Report" in res_sla.output
+
+    res_sla_json = runner.invoke(cli.app, ["sla-report", "--json"])
+    assert res_sla_json.exit_code == 0
+    sla_data = json.loads(res_sla_json.output)
+    assert sla_data["total_downtime_minutes"] == pytest.approx(20.0)
+    assert sla_data["incident_count"] == 2
