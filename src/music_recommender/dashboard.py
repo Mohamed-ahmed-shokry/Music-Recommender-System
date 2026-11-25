@@ -1754,6 +1754,38 @@ def _render_privacy_tab(service: RecommenderService) -> None:
     )
 
 
+def _render_postmortem_tab(service: RecommenderService) -> None:
+    """Render automated incident postmortem and rolling SLA compliance metrics."""
+    st.subheader("Incident Postmortems & SLA Compliance")
+    st.caption(
+        "Monitor rolling SLA availability, error-budget remaining, root-cause "
+        "runbook coverage, and generated incident postmortems."
+    )
+    if not hasattr(service, "get_postmortem_status"):
+        st.info("Incident postmortem telemetry is unavailable for this service.")
+        return
+
+    status = service.get_postmortem_status()
+    sla = status.get("sla_report", {})
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Postmortems Generated", int(status.get("postmortem_count", 0)))
+    col2.metric("Runbooks Registered", int(status.get("runbook_count", 0)))
+    col3.metric(
+        "SLA Availability",
+        f"{float(sla.get('achieved_availability_pct', 100.0)):.3f}%",
+    )
+    col4.metric(
+        "Error Budget Rem",
+        f"{float(sla.get('error_budget_remaining_pct', 100.0)):.1f}%",
+    )
+    st.caption(
+        f"SLA Target: {sla.get('target_availability_pct', 99.9)}% over "
+        f"{sla.get('window_days', 30)}d | "
+        f"Downtime: {float(sla.get('total_downtime_minutes', 0.0)):.2f}m | "
+        f"Breached: {bool(sla.get('sla_breached', False))}"
+    )
+
+
 def render_dashboard(service: RecommenderService) -> None:
     """Render the dashboard using an already loaded recommender service."""
     health = service.health()
@@ -1989,6 +2021,7 @@ def render_dashboard(service: RecommenderService) -> None:
             "Multi-Region & Edge",
             "Explainability & Controls",
             "Privacy & DP Budgets",
+            "Postmortems & SLA",
         ]
     )
     with tabs[0]:
@@ -2034,6 +2067,8 @@ def render_dashboard(service: RecommenderService) -> None:
         _render_explainability_tab(service, user_ids)
     with tabs[14]:
         _render_privacy_tab(service)
+    with tabs[15]:
+        _render_postmortem_tab(service)
 
 
 def main() -> None:
