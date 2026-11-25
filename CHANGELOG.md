@@ -5,6 +5,20 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.0] - 2026-11-26
+
+### Added
+
+- **Automated Incident Postmortem Generator & Root-Cause Runbook Matcher (Phase 191):**
+  - Implemented `PostmortemEngine` in `src/music_recommender/postmortem.py` with `IncidentSeverity`, `SLATarget`, `RunbookEntry`, `PostmortemActionItem`, `IncidentPostmortem`, and `SLAComplianceReport`.
+  - Added built-in root-cause runbooks, symptom/tag runbook matching (`match_runbooks()`), structured postmortem synthesis with Markdown export (`to_markdown()`), and JSON state snapshot persistence (`export_state()`, `import_state()`, `save_state()`, `load_state()`).
+
+- **Rolling SLA Compliance Reporting, Telemetry & Operator Controls (Phase 192):**
+  - Added rolling SLA availability and error-budget burn accounting (`compute_sla_report()`, `record_downtime_event()`).
+  - Integrated `PostmortemEngine` into `RecommenderService` and Prometheus exposition (`music_recommender_postmortems_generated_total`, `music_recommender_sla_availability_pct`, `music_recommender_sla_error_budget_remaining_pct`).
+  - Added FastAPI routes `GET /postmortem/status`, `POST /postmortem/generate`, `GET /postmortem/sla`, and `GET /postmortem/runbooks`.
+  - Added operator CLI commands `music-recommender postmortem-generate` and `music-recommender sla-report`, plus the `"Postmortems & SLA"` Streamlit dashboard tab.
+
 ## [0.48.0] - 2026-11-20
 
 ### Added
