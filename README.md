@@ -1190,6 +1190,13 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
     uv run music-recommender privacy-consent user_1 --grant personalization,federated_updates
     ```
 
+19. **Automated Incident Postmortems, Root-Cause Runbooks & SLA Reporting** — Structured incident postmortem generation with Markdown export, symptom-to-runbook matching, and rolling SLA error-budget burn reporting:
+
+    ```bash
+    uv run music-recommender postmortem-generate inc-001 --title "Latency Spike" --severity sev2 --duration 12 --symptoms latency,p99
+    uv run music-recommender sla-report                              # inspect rolling SLA & error-budget burn
+    ```
+
 ## API Reference
 
 Train before starting the API:
@@ -1299,6 +1306,10 @@ uv run uvicorn api.main:app --reload
 | `POST` | `/privacy/consent/{user_id}` | Grant or replace privacy consent scopes for a user |
 | `GET` | `/privacy/budget/{user_id}` | Return differential privacy epsilon/delta budget state for a user |
 | `POST` | `/privacy/federated/aggregate` | Aggregate consented user updates with L2 clipping and DP noise |
+| `GET` | `/postmortem/status` | Return incident postmortem engine status and SLA compliance summary |
+| `POST` | `/postmortem/generate` | Generate a structured incident postmortem and match root-cause runbooks |
+| `GET` | `/postmortem/sla` | Return rolling SLA compliance and error-budget burn report |
+| `GET` | `/postmortem/runbooks` | List root-cause runbooks or match runbooks by comma-separated symptoms |
 
 Example requests:
 

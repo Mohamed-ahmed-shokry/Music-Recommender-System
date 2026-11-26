@@ -3839,3 +3839,82 @@ def test_privacy_api_endpoints() -> None:
         assert s_res.json()["federated_rounds_total"] == 1
     finally:
         api_main.service = original_service
+
+
+def test_postmortem_api_endpoints() -> None:
+    from music_recommender.postmortem import (
+        PostmortemEngine,
+        set_global_postmortem_engine,
+    )
+
+    original_service = api_main.service
+    engine = PostmortemEngine()
+    set_global_postmortem_engine(engine)
+    api_main.service = None
+    try:
+        client = TestClient(api_main.app)
+
+        # 1. List and match runbooks
+        all_rb = client.get("/postmortem/runbooks")
+        assert all_rb.status_code == 200
+        assert all_rb.json()["count"] >= 5
+
+        matched_rb = client.get("/postmortem/runbooks?symptoms=latency,p99")
+        assert matched_rb.status_code == 200
+        assert matched_rb.json()["runbooks"][0]["runbook_id"] == "rb-latency-spike"
+
+        # 2. Generate postmortem
+        gen_res = client.post(
+            "/postmortem/generate",
+            json={
+                "incident_id": "inc-api-01",
+                "title": "API Latency Incident",
+                "severity": "sev2",
+                "duration_minutes": 12.0,
+                "symptoms": ["latency", "p99"],
+            },
+        )
+        assert gen_res.status_code == 200
+        body = gen_res.json()
+        assert body["incident_id"] == "inc-api-01"
+        assert "rb-latency-spike" in body["matched_runbook_ids"]
+        assert "# Incident Postmortem:" in body["markdown"]
+
+        # 3. Validation errors (invalid severity, extra field)
+        assert (
+            client.post(
+                "/postmortem/generate",
+                json={
+                    "incident_id": "inc-bad",
+                    "title": "Bad",
+                    "severity": "sev99",
+                    "duration_minutes": 1.0,
+                },
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                "/postmortem/generate",
+                json={
+                    "incident_id": "inc-extra",
+                    "title": "Extra",
+                    "severity": "sev3",
+                    "duration_minutes": 1.0,
+                    "unexpected": True,
+                },
+            ).status_code
+            == 422
+        )
+
+        # 4. SLA report & status
+        sla_res = client.get("/postmortem/sla")
+        assert sla_res.status_code == 200
+        assert sla_res.json()["total_downtime_minutes"] == 12.0
+        assert sla_res.json()["sla_breached"] is False
+
+        status_res = client.get("/postmortem/status")
+        assert status_res.status_code == 200
+        assert status_res.json()["postmortem_count"] == 1
+    finally:
+        api_main.service = original_service

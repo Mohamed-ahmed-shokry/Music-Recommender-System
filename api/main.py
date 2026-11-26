@@ -2802,3 +2802,106 @@ def aggregate_federated_endpoint(
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+class PostmortemGenerateRequest(BaseModel):
+    """Payload for generating a structured incident postmortem."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    incident_id: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1)
+    severity: str = Field(default="sev2", min_length=1)
+    duration_minutes: float = Field(..., ge=0.0)
+    symptoms: list[str] = Field(default_factory=list)
+    root_cause_summary: str | None = None
+    timeline: list[str] | None = None
+
+
+@app.get("/postmortem/status")
+def get_postmortem_status_endpoint() -> dict[str, Any]:
+    """Return incident postmortem engine status and SLA compliance summary."""
+    if service is not None:
+        return service.get_postmortem_status()
+    from music_recommender.postmortem import get_global_postmortem_engine
+
+    return get_global_postmortem_engine().get_status()
+
+
+@app.post("/postmortem/generate")
+def generate_postmortem_endpoint(
+    payload: PostmortemGenerateRequest,
+) -> dict[str, Any]:
+    """Generate a structured incident postmortem and match root-cause runbooks."""
+    try:
+        if service is not None:
+            return service.generate_incident_postmortem(
+                incident_id=payload.incident_id,
+                title=payload.title,
+                severity=payload.severity,
+                duration_minutes=payload.duration_minutes,
+                symptoms=payload.symptoms,
+                root_cause_summary=payload.root_cause_summary,
+                timeline=payload.timeline,
+            )
+        from music_recommender.postmortem import get_global_postmortem_engine
+
+        return (
+            get_global_postmortem_engine()
+            .generate_postmortem(
+                incident_id=payload.incident_id,
+                title=payload.title,
+                severity=payload.severity,
+                duration_minutes=payload.duration_minutes,
+                symptoms=payload.symptoms,
+                root_cause_summary=payload.root_cause_summary,
+                timeline=payload.timeline,
+            )
+            .to_dict()
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/postmortem/sla")
+def get_postmortem_sla_endpoint() -> dict[str, Any]:
+    """Return rolling SLA compliance and error-budget burn report."""
+    if service is not None:
+        return service.get_sla_compliance_report()
+    from music_recommender.postmortem import get_global_postmortem_engine
+
+    return get_global_postmortem_engine().compute_sla_report().to_dict()
+
+
+@app.get("/postmortem/runbooks")
+def get_postmortem_runbooks_endpoint(
+    symptoms: str | None = Query(default=None),
+    top_k: int = Query(default=3, ge=1, le=20),
+) -> dict[str, Any]:
+    """List root-cause runbooks or match runbooks by comma-separated symptoms."""
+    symptom_list = (
+        [s.strip() for s in symptoms.split(",") if s.strip()] if symptoms else []
+    )
+    if symptom_list:
+        if service is not None:
+            matched = service.match_incident_runbooks(symptom_list, top_k=top_k)
+        else:
+            from music_recommender.postmortem import get_global_postmortem_engine
+
+            matched = [
+                rb.to_dict()
+                for rb in get_global_postmortem_engine().match_runbooks(
+                    symptom_list, top_k=top_k
+                )
+            ]
+        return {"symptoms": symptom_list, "runbooks": matched, "count": len(matched)}
+
+    from music_recommender.postmortem import get_global_postmortem_engine
+
+    engine = (
+        service.postmortem_engine
+        if service is not None
+        else get_global_postmortem_engine()
+    )
+    all_runbooks = [rb.to_dict() for rb in engine.list_runbooks()]
+    return {"symptoms": [], "runbooks": all_runbooks, "count": len(all_runbooks)}

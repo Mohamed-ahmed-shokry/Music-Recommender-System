@@ -6581,5 +6581,99 @@ def privacy_consent_command(
     )
 
 
+def _get_postmortem_or_service() -> tuple[Any | None, Any]:
+    from music_recommender.postmortem import get_global_postmortem_engine
+
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable: %s", exc)
+
+    if service is not None:
+        return service, service.postmortem_engine
+    return None, get_global_postmortem_engine()
+
+
+@app.command("postmortem-generate")
+def postmortem_generate_command(
+    incident_id: Annotated[
+        str,
+        typer.Argument(help="Unique incident identifier (e.g. inc-2026-01)."),
+    ],
+    title: Annotated[
+        str,
+        typer.Option("--title", help="Human-readable incident title."),
+    ] = "Production Incident",
+    severity: Annotated[
+        str,
+        typer.Option("--severity", help="Incident severity (sev1, sev2, sev3, sev4)."),
+    ] = "sev2",
+    duration: Annotated[
+        float,
+        typer.Option("--duration", help="Total incident duration in minutes."),
+    ] = 10.0,
+    symptoms: Annotated[
+        str,
+        typer.Option("--symptoms", help="Comma-separated symptom tags."),
+    ] = "latency,p99",
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON postmortem payload."),
+    ] = False,
+) -> None:
+    """Generate a structured incident postmortem and match root-cause runbooks."""
+    _service, engine = _get_postmortem_or_service()
+    symptom_list = [s.strip() for s in symptoms.split(",") if s.strip()]
+    try:
+        pm = engine.generate_postmortem(
+            incident_id=incident_id,
+            title=title,
+            severity=severity,
+            duration_minutes=duration,
+            symptoms=symptom_list,
+        )
+    except ValueError as exc:
+        typer.secho(f"Invalid postmortem parameters: {exc}", fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+    if as_json:
+        typer.echo(json.dumps(pm.to_dict(), indent=2))
+        return
+
+    typer.echo(pm.to_markdown())
+
+
+@app.command("sla-report")
+def sla_report_command(
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON SLA compliance report."),
+    ] = False,
+) -> None:
+    """Display rolling SLA availability and error-budget burn status."""
+    _service, engine = _get_postmortem_or_service()
+    report = engine.compute_sla_report().to_dict()
+    if as_json:
+        typer.echo(json.dumps(report, indent=2))
+        return
+
+    typer.secho("=== Rolling SLA Compliance Report ===", bold=True)
+    typer.echo(f"Service:          {report['service_name']}")
+    typer.echo(
+        f"Availability:     {report['achieved_availability_pct']:.4f}% "
+        f"(target={report['target_availability_pct']}%)"
+    )
+    typer.echo(
+        f"Downtime:         {report['total_downtime_minutes']:.2f}m / "
+        f"{report['allowed_downtime_minutes']:.2f}m allowed"
+    )
+    typer.echo(
+        f"Error Budget Rem: {report['error_budget_remaining_pct']:.2f}% "
+        f"(breached={report['sla_breached']})"
+    )
+    typer.echo(f"Incidents:        {report['incident_count']}")
+
+
 if __name__ == "__main__":
     app()  # pragma: no cover - CLI entry point invoked by `python -m`
