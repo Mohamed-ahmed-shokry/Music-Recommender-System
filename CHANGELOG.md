@@ -5,6 +5,19 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.0] - 2026-11-28
+
+### Added
+
+- **Cross-Platform Cold-Start Metadata Transfer Learning (Phase 193):**
+  - Implemented `ColdStartTransferEngine` in `src/music_recommender/cold_start_transfer.py` with `OnboardingStatus`, `ExternalArtistProfile`, `AnchorArtist`, `TransferNeighbor`, and `OnboardedArtistRecord`.
+  - Added weighted semantic metadata similarity projection into the collaborative embedding space, deterministic SHA-256 fallback embeddings for novel genres, `sync_from_artifact()` anchor syncing, and JSON state snapshot persistence.
+
+- **Semantic Artist Onboarding Pipeline, Telemetry & Operator Controls (Phase 194):**
+  - Integrated `ColdStartTransferEngine` into `RecommenderService` and Prometheus exposition (`music_recommender_cold_start_anchors_registered`, `music_recommender_cold_start_artists_onboarded_total`, `music_recommender_cold_start_mean_confidence`).
+  - Added FastAPI routes `GET /onboarding/status`, `POST /onboarding/artists`, `GET /onboarding/artists`, and `GET /onboarding/artists/{artist_id}`.
+  - Added operator CLI commands `music-recommender onboarding-status` and `music-recommender onboard-artist`, plus the `"Cold-Start Onboarding"` Streamlit dashboard tab.
+
 ## [0.49.0] - 2026-11-26
 
 ### Added
