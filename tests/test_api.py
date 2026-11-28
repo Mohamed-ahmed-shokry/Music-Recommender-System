@@ -3918,3 +3918,76 @@ def test_postmortem_api_endpoints() -> None:
         assert status_res.json()["postmortem_count"] == 1
     finally:
         api_main.service = original_service
+
+
+def test_onboarding_api_endpoints() -> None:
+    from music_recommender.cold_start_transfer import (
+        AnchorArtist,
+        ColdStartTransferEngine,
+        set_global_transfer_engine,
+    )
+
+    original_service = api_main.service
+    engine = ColdStartTransferEngine(default_embedding_dim=4)
+    engine.register_anchor(
+        AnchorArtist(
+            artist_id="anchor_synth",
+            artist_name="Synth Anchor",
+            embedding=(1.0, 0.0, 0.0, 0.0),
+            genres=("synthwave", "electronic"),
+            mood_tags=("energetic",),
+            country="SE",
+        )
+    )
+    set_global_transfer_engine(engine)
+    api_main.service = None
+    try:
+        client = TestClient(api_main.app)
+
+        # 1. Onboard external artist
+        res_onb = client.post(
+            "/onboarding/artists",
+            json={
+                "artist_id": "ext_api_01",
+                "artist_name": "Nordic Pulse",
+                "source_platform": "spotify",
+                "genres": ["synthwave", "electronic"],
+                "mood_tags": ["energetic"],
+                "country": "SE",
+                "external_popularity": 0.75,
+            },
+        )
+        assert res_onb.status_code == 200
+        body = res_onb.json()
+        assert body["status"] == "active"
+        assert body["nearest_anchors"][0]["anchor_artist_id"] == "anchor_synth"
+
+        # 2. Extra field rejected (422) & unknown artist (404)
+        assert (
+            client.post(
+                "/onboarding/artists",
+                json={
+                    "artist_id": "ext_bad",
+                    "artist_name": "Bad",
+                    "unexpected": 1,
+                },
+            ).status_code
+            == 422
+        )
+        assert client.get("/onboarding/artists/does_not_exist").status_code == 404
+
+        # 3. Get single, list all, and status
+        res_get = client.get("/onboarding/artists/ext_api_01")
+        assert res_get.status_code == 200
+        assert res_get.json()["profile"]["artist_name"] == "Nordic Pulse"
+
+        res_list = client.get("/onboarding/artists")
+        assert res_list.status_code == 200
+        assert res_list.json()["count"] == 1
+
+        res_status = client.get("/onboarding/status")
+        assert res_status.status_code == 200
+        assert res_status.json()["onboarded_count"] == 1
+        assert res_status.json()["anchors_registered"] == 1
+    finally:
+        api_main.service = original_service
