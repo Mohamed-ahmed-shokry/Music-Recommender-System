@@ -20,6 +20,7 @@ from music_recommender.dashboard import (
 class FakeDashboardService:
     def __init__(self) -> None:
         from music_recommender.canary import ShadowCanaryRouter
+        from music_recommender.cold_start_transfer import ColdStartTransferEngine
         from music_recommender.explainability import ExplainabilityEngine
         from music_recommender.feature_drift import (
             DriftMonitorConfig,
@@ -45,6 +46,7 @@ class FakeDashboardService:
         self.explainability_engine = ExplainabilityEngine()
         self.privacy_manager = FederatedPrivacyManager()
         self.postmortem_engine = PostmortemEngine()
+        self.transfer_engine = ColdStartTransferEngine()
         self.context_features: tuple[str, ...] = (
             "log_plays",
             "log_unique_artists",
@@ -494,6 +496,9 @@ class FakeDashboardService:
     def get_postmortem_status(self) -> dict[str, Any]:
         return self.postmortem_engine.get_status()
 
+    def get_cold_start_transfer_status(self) -> dict[str, Any]:
+        return self.transfer_engine.get_status()
+
     def browse_artists(
         self,
         *,
@@ -877,6 +882,7 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Explainability & Controls",
         "Privacy & DP Budgets",
         "Postmortems & SLA",
+        "Cold-Start Onboarding",
     ]
     assert [metric.label for metric in app.metric] == [
         "Listeners",
@@ -914,6 +920,10 @@ def test_dashboard_renders_all_product_workflows() -> None:
         "Runbooks Registered",
         "SLA Availability",
         "Error Budget Rem",
+        "Catalog Anchors",
+        "Onboarded Artists",
+        "Active Onboarded",
+        "Mean Confidence",
     ]
 
 
@@ -1573,6 +1583,7 @@ def test_dashboard_entrypoint_renders_with_valid_artifact(
         "Explainability & Controls",
         "Privacy & DP Budgets",
         "Postmortems & SLA",
+        "Cold-Start Onboarding",
     ]
 
 
@@ -2284,3 +2295,40 @@ def test_dashboard_postmortem_tab_rendering() -> None:
         "Incident Postmortems & SLA Compliance" in s.value for s in app.subheader
     )
     assert any("Postmortems & SLA" in str(tab.label) for tab in app.tabs)
+
+
+def test_dashboard_onboarding_tab_rendering() -> None:
+    from music_recommender.cold_start_transfer import (
+        AnchorArtist,
+        ExternalArtistProfile,
+    )
+
+    service = FakeDashboardService()
+    service.transfer_engine.register_anchor(
+        AnchorArtist(
+            artist_id="anchor_d",
+            artist_name="Anchor D",
+            embedding=(1.0, 0.0),
+            genres=("pop",),
+        )
+    )
+    service.transfer_engine.onboard_artist(
+        ExternalArtistProfile(
+            artist_id="ext_d",
+            artist_name="Dash Newcomer",
+            genres=("pop",),
+        )
+    )
+
+    app = AppTest.from_function(
+        dashboard_script,
+        args=(service,),
+        default_timeout=10,
+    ).run()
+
+    assert not app.exception
+    assert any(
+        "Cold-Start Metadata Transfer & Artist Onboarding" in s.value
+        for s in app.subheader
+    )
+    assert any("Cold-Start Onboarding" in str(tab.label) for tab in app.tabs)
