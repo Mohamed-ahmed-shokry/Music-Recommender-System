@@ -3,7 +3,7 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.50.0) — in progress (branch `phase/193-cold-start-onboarding`)
+## Current milestone (0.50.0) — ready for review (branch `phase/193-cold-start-onboarding`, PR #50)
 
 Cross-Platform Cold-Start Metadata Transfer Learning and Semantic Artist Onboarding.
 The 0.49.0 release delivered automated incident postmortem synthesis, root-cause runbooks, and SLA reporting.
@@ -11,8 +11,8 @@ This milestone equips the platform with zero-interaction artist onboarding via c
 a Cold-Start Transfer Engine (`ColdStartTransferEngine`, `OnboardingStatus`, `ExternalArtistProfile`, `TransferNeighbor`, `OnboardedArtistRecord`) aligning external artist metadata (genres, moods, country, era) to catalog anchor embeddings with transfer confidence scoring and JSON persistence;
 integration with `RecommenderService`, Prometheus telemetry, FastAPI `/onboarding/*` routes, operator CLI (`onboarding-status`, `onboard-artist`), and Streamlit dashboard (`Cold-Start Onboarding`).
 
-- Phase 193 — Metadata feature transfer & cold-start embedding alignment (`cold_start_transfer.py`, in progress).
-- Phase 194 — Onboarding pipeline, API/CLI/dashboard integration, and CI release (pending).
+- Phase 193 — Metadata feature transfer & cold-start embedding alignment (`cold_start_transfer.py`, completed).
+- Phase 194 — Onboarding pipeline, API/CLI/dashboard integration, and CI release (completed).
 
 ## Next milestone (0.51.0) — planned
 
