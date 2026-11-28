@@ -3,7 +3,24 @@
 This plan tracks completed phases, the current phase, and next steps.
 It is updated incrementally as phases land.
 
-## Current milestone (0.49.0) — ready for review (branch `phase/191-incident-postmortems`, PR #48)
+## Current milestone (0.50.0) — in progress (branch `phase/193-cold-start-onboarding`)
+
+Cross-Platform Cold-Start Metadata Transfer Learning and Semantic Artist Onboarding.
+The 0.49.0 release delivered automated incident postmortem synthesis, root-cause runbooks, and SLA reporting.
+This milestone equips the platform with zero-interaction artist onboarding via cross-platform metadata transfer learning:
+a Cold-Start Transfer Engine (`ColdStartTransferEngine`, `OnboardingStatus`, `ExternalArtistProfile`, `TransferNeighbor`, `OnboardedArtistRecord`) aligning external artist metadata (genres, moods, country, era) to catalog anchor embeddings with transfer confidence scoring and JSON persistence;
+integration with `RecommenderService`, Prometheus telemetry, FastAPI `/onboarding/*` routes, operator CLI (`onboarding-status`, `onboard-artist`), and Streamlit dashboard (`Cold-Start Onboarding`).
+
+- Phase 193 — Metadata feature transfer & cold-start embedding alignment (`cold_start_transfer.py`, in progress).
+- Phase 194 — Onboarding pipeline, API/CLI/dashboard integration, and CI release (pending).
+
+## Next milestone (0.51.0) — planned
+
+Real-Time Listening Session Mood Trajectory & Adaptive Playlist Sequencing.
+- Phase 195 — Session mood trajectory modeling & smoothness scoring.
+- Phase 196 — Adaptive playlist sequencing, API/CLI/dashboard integration, and CI release.
+
+## Previous milestone (0.49.0) — shipped (branch `phase/191-incident-postmortems`, PR #48 & PR #49)
 
 Automated Incident Postmortem Generator, Root-Cause Runbooks, and SLA Reporting.
 The 0.48.0 release delivered federated privacy-preserving personalization, differential privacy noise budgets, and a consent ledger.
@@ -13,12 +30,6 @@ integration with `RecommenderService`, Prometheus telemetry, FastAPI `/postmorte
 
 - Phase 191 — Structured postmortem synthesis & root-cause runbook matcher (`postmortem.py`, completed).
 - Phase 192 — SLA compliance reporting, API/CLI/dashboard integration, and CI release (completed).
-
-## Next milestone (0.50.0) — planned
-
-Cross-Platform Cold-Start Metadata Transfer Learning and Semantic Artist Onboarding.
-- Phase 193 — Metadata feature transfer & cold-start embedding alignment.
-- Phase 194 — Onboarding pipeline, API/CLI/dashboard integration, and CI release.
 
 ## Previous milestone (0.48.0) — shipped (branch `phase/189-federated-privacy`, PR #46)
 
