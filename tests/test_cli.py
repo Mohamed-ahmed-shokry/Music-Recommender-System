@@ -4850,3 +4850,86 @@ def test_postmortem_and_sla_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     sla_data = json.loads(res_sla_json.output)
     assert sla_data["total_downtime_minutes"] == pytest.approx(20.0)
     assert sla_data["incident_count"] == 2
+
+
+def test_onboarding_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from music_recommender.cold_start_transfer import (
+        AnchorArtist,
+        ColdStartTransferEngine,
+        set_global_transfer_engine,
+    )
+
+    engine = ColdStartTransferEngine(default_embedding_dim=4)
+    engine.register_anchor(
+        AnchorArtist(
+            artist_id="anchor_cli_1",
+            artist_name="Indie Hero",
+            embedding=(0.0, 1.0, 0.0, 0.0),
+            genres=("indie", "rock"),
+            mood_tags=("chill",),
+            country="UK",
+        )
+    )
+    set_global_transfer_engine(engine)
+    monkeypatch.setattr(
+        cli.RecommenderService,
+        "from_artifacts",
+        staticmethod(
+            lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError())
+        ),
+    )
+
+    runner = CliRunner()
+
+    # 1. Onboard artist in JSON and text modes
+    res_json = runner.invoke(
+        cli.app,
+        [
+            "onboard-artist",
+            "ext_cli_1",
+            "--name",
+            "Bristol Echo",
+            "--platform",
+            "bandcamp",
+            "--genres",
+            "indie,rock",
+            "--moods",
+            "chill",
+            "--country",
+            "UK",
+            "--popularity",
+            "0.5",
+            "--json",
+        ],
+    )
+    assert res_json.exit_code == 0
+    payload = json.loads(res_json.output)
+    assert payload["status"] == "active"
+    assert payload["nearest_anchors"][0]["anchor_artist_id"] == "anchor_cli_1"
+
+    res_text = runner.invoke(
+        cli.app,
+        ["onboard-artist", "ext_cli_2", "--name", "Echo Two", "--genres", "indie"],
+    )
+    assert res_text.exit_code == 0
+    assert "Onboarded Artist: Echo Two (ext_cli_2)" in res_text.output
+
+    # 2. Invalid popularity returns exit code 1
+    res_bad = runner.invoke(
+        cli.app,
+        ["onboard-artist", "ext_bad", "--popularity", "2.0"],
+    )
+    assert res_bad.exit_code == 1
+
+    # 3. onboarding-status text & --json
+    res_status = runner.invoke(cli.app, ["onboarding-status"])
+    assert res_status.exit_code == 0
+    assert "Cold-Start Metadata Transfer Status" in res_status.output
+
+    res_status_json = runner.invoke(cli.app, ["onboarding-status", "--json"])
+    assert res_status_json.exit_code == 0
+    data = json.loads(res_status_json.output)
+    assert data["onboarded_count"] == 2
+    assert data["anchors_registered"] == 1

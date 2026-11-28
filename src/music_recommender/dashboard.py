@@ -1786,6 +1786,29 @@ def _render_postmortem_tab(service: RecommenderService) -> None:
     )
 
 
+def _render_onboarding_tab(service: RecommenderService) -> None:
+    """Render cross-platform cold-start metadata transfer & onboarding metrics."""
+    st.subheader("Cold-Start Metadata Transfer & Artist Onboarding")
+    st.caption(
+        "Monitor catalog anchor coverage, zero-interaction artist projections, "
+        "and cross-platform transfer confidence scores."
+    )
+    if not hasattr(service, "get_cold_start_transfer_status"):
+        st.info("Cold-start onboarding telemetry is unavailable for this service.")
+        return
+
+    status = service.get_cold_start_transfer_status()
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Catalog Anchors", int(status.get("anchors_registered", 0)))
+    col2.metric("Onboarded Artists", int(status.get("onboarded_count", 0)))
+    col3.metric("Active Onboarded", int(status.get("active_onboarded_count", 0)))
+    col4.metric("Mean Confidence", f"{float(status.get('mean_confidence', 0.0)):.3f}")
+    st.caption(
+        f"Embedding Dim: {status.get('embedding_dim', 8)} | "
+        f"Total Onboardings: {status.get('onboarding_total', 0)}"
+    )
+
+
 def render_dashboard(service: RecommenderService) -> None:
     """Render the dashboard using an already loaded recommender service."""
     health = service.health()
@@ -2022,6 +2045,7 @@ def render_dashboard(service: RecommenderService) -> None:
             "Explainability & Controls",
             "Privacy & DP Budgets",
             "Postmortems & SLA",
+            "Cold-Start Onboarding",
         ]
     )
     with tabs[0]:
@@ -2069,6 +2093,8 @@ def render_dashboard(service: RecommenderService) -> None:
         _render_privacy_tab(service)
     with tabs[15]:
         _render_postmortem_tab(service)
+    with tabs[16]:
+        _render_onboarding_tab(service)
 
 
 def main() -> None:

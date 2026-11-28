@@ -1197,6 +1197,13 @@ Threshold alerts over the metrics above are declared once in `music_recommender.
     uv run music-recommender sla-report                              # inspect rolling SLA & error-budget burn
     ```
 
+20. **Cross-Platform Cold-Start Metadata Transfer & Semantic Artist Onboarding** — Project zero-interaction external artists into the collaborative embedding space using weighted metadata similarity to catalog anchors:
+
+    ```bash
+    uv run music-recommender onboarding-status                       # inspect catalog anchors & onboarding confidence
+    uv run music-recommender onboard-artist ext_001 --name "Nova Synth" --platform spotify --genres synthwave,electronic --moods energetic
+    ```
+
 ## API Reference
 
 Train before starting the API:
@@ -1310,6 +1317,10 @@ uv run uvicorn api.main:app --reload
 | `POST` | `/postmortem/generate` | Generate a structured incident postmortem and match root-cause runbooks |
 | `GET` | `/postmortem/sla` | Return rolling SLA compliance and error-budget burn report |
 | `GET` | `/postmortem/runbooks` | List root-cause runbooks or match runbooks by comma-separated symptoms |
+| `GET` | `/onboarding/status` | Return cold-start metadata transfer and onboarding telemetry |
+| `POST` | `/onboarding/artists` | Project and onboard a zero-interaction external artist |
+| `GET` | `/onboarding/artists` | List all onboarded cold-start artists |
+| `GET` | `/onboarding/artists/{artist_id}` | Retrieve a specific onboarded cold-start artist record |
 
 Example requests:
 

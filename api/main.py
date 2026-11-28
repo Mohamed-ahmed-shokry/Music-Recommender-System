@@ -2905,3 +2905,104 @@ def get_postmortem_runbooks_endpoint(
     )
     all_runbooks = [rb.to_dict() for rb in engine.list_runbooks()]
     return {"symptoms": [], "runbooks": all_runbooks, "count": len(all_runbooks)}
+
+
+class OnboardArtistRequest(BaseModel):
+    """Payload for onboarding a cold-start external artist via metadata transfer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    artist_id: str = Field(..., min_length=1)
+    artist_name: str = Field(..., min_length=1)
+    source_platform: str = Field(default="spotify", min_length=1)
+    genres: list[str] = Field(default_factory=list)
+    mood_tags: list[str] = Field(default_factory=list)
+    country: str = ""
+    era: str = ""
+    external_popularity: float = Field(default=0.0, ge=0.0, le=1.0)
+    top_k_anchors: int = Field(default=5, ge=1, le=20)
+    min_confidence: float = Field(default=0.25, ge=0.0, le=1.0)
+
+
+@app.get("/onboarding/status")
+def get_onboarding_status_endpoint() -> dict[str, Any]:
+    """Return cold-start metadata transfer and onboarding telemetry."""
+    if service is not None:
+        return service.get_cold_start_transfer_status()
+    from music_recommender.cold_start_transfer import get_global_transfer_engine
+
+    return get_global_transfer_engine().get_status()
+
+
+@app.post("/onboarding/artists")
+def onboard_artist_endpoint(payload: OnboardArtistRequest) -> dict[str, Any]:
+    """Project and onboard a zero-interaction external artist."""
+    try:
+        if service is not None:
+            return service.onboard_cold_start_artist(
+                artist_id=payload.artist_id,
+                artist_name=payload.artist_name,
+                source_platform=payload.source_platform,
+                genres=payload.genres,
+                mood_tags=payload.mood_tags,
+                country=payload.country,
+                era=payload.era,
+                external_popularity=payload.external_popularity,
+                top_k_anchors=payload.top_k_anchors,
+                min_confidence=payload.min_confidence,
+            )
+        from music_recommender.cold_start_transfer import (
+            ExternalArtistProfile,
+            get_global_transfer_engine,
+        )
+
+        profile = ExternalArtistProfile(
+            artist_id=payload.artist_id,
+            artist_name=payload.artist_name,
+            source_platform=payload.source_platform,
+            genres=tuple(payload.genres),
+            mood_tags=tuple(payload.mood_tags),
+            country=payload.country,
+            era=payload.era,
+            external_popularity=payload.external_popularity,
+        )
+        return (
+            get_global_transfer_engine()
+            .onboard_artist(
+                profile,
+                top_k_anchors=payload.top_k_anchors,
+                min_confidence=payload.min_confidence,
+            )
+            .to_dict()
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/onboarding/artists")
+def list_onboarded_artists_endpoint() -> dict[str, Any]:
+    """List all onboarded cold-start artists."""
+    if service is not None:
+        artists = service.list_onboarded_artists()
+    else:
+        from music_recommender.cold_start_transfer import get_global_transfer_engine
+
+        artists = [r.to_dict() for r in get_global_transfer_engine().list_onboarded()]
+    return {"artists": artists, "count": len(artists)}
+
+
+@app.get("/onboarding/artists/{artist_id}")
+def get_onboarded_artist_endpoint(artist_id: str) -> dict[str, Any]:
+    """Retrieve a specific onboarded cold-start artist record."""
+    if service is not None:
+        record = service.get_onboarded_artist(artist_id)
+    else:
+        from music_recommender.cold_start_transfer import get_global_transfer_engine
+
+        rec = get_global_transfer_engine().get_onboarded(artist_id)
+        record = rec.to_dict() if rec is not None else None
+    if record is None:
+        raise HTTPException(
+            status_code=404, detail=f"Onboarded artist '{artist_id}' not found."
+        )
+    return record

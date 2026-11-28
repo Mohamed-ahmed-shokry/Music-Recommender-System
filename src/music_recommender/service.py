@@ -78,6 +78,11 @@ from music_recommender.canary import (
     ShadowCanaryRouter,
     get_global_canary_router,
 )
+from music_recommender.cold_start_transfer import (
+    ColdStartTransferEngine,
+    ExternalArtistProfile,
+    get_global_transfer_engine,
+)
 from music_recommender.config import (
     ALERT_STORAGE_DIR_ENV_VAR,
     ALERT_WEBHOOK_URL_ENV_VAR,
@@ -234,6 +239,7 @@ class RecommenderService:
         explainability_engine: ExplainabilityEngine | None = None,
         privacy_manager: FederatedPrivacyManager | None = None,
         postmortem_engine: PostmortemEngine | None = None,
+        transfer_engine: ColdStartTransferEngine | None = None,
     ) -> None:
         self.artifact = artifact
         self.cold_start_policy = cold_start_policy
@@ -617,6 +623,12 @@ class RecommenderService:
             self.postmortem_engine = postmortem_engine
         else:
             self.postmortem_engine = get_global_postmortem_engine()
+        if transfer_engine is not None:
+            self.transfer_engine = transfer_engine
+        else:
+            self.transfer_engine = get_global_transfer_engine()
+        if self.transfer_engine.anchor_count == 0 and self.artifact is not None:
+            self.transfer_engine.sync_from_artifact(self.artifact)
 
     def _register_default_remediation_handlers(self) -> None:
         """Register built-in self-healing remediation handlers and fallback rules."""
@@ -1897,6 +1909,50 @@ class RecommenderService:
             rb.to_dict()
             for rb in self.postmortem_engine.match_runbooks(list(symptoms), top_k=top_k)
         ]
+
+    def get_cold_start_transfer_status(self) -> dict[str, Any]:
+        """Return cold-start metadata transfer and onboarding telemetry."""
+        return self.transfer_engine.get_status()
+
+    def onboard_cold_start_artist(
+        self,
+        artist_id: str,
+        artist_name: str,
+        *,
+        source_platform: str = "spotify",
+        genres: Sequence[str] = (),
+        mood_tags: Sequence[str] = (),
+        country: str = "",
+        era: str = "",
+        external_popularity: float = 0.0,
+        top_k_anchors: int = 5,
+        min_confidence: float = 0.25,
+    ) -> dict[str, Any]:
+        """Project and onboard a zero-interaction artist via metadata transfer."""
+        profile = ExternalArtistProfile(
+            artist_id=artist_id,
+            artist_name=artist_name,
+            source_platform=source_platform,
+            genres=tuple(genres),
+            mood_tags=tuple(mood_tags),
+            country=country,
+            era=era,
+            external_popularity=external_popularity,
+        )
+        return self.transfer_engine.onboard_artist(
+            profile,
+            top_k_anchors=top_k_anchors,
+            min_confidence=min_confidence,
+        ).to_dict()
+
+    def get_onboarded_artist(self, artist_id: str) -> dict[str, Any] | None:
+        """Retrieve an onboarded cold-start artist record if present."""
+        record = self.transfer_engine.get_onboarded(artist_id)
+        return record.to_dict() if record is not None else None
+
+    def list_onboarded_artists(self) -> list[dict[str, Any]]:
+        """Return all onboarded cold-start artist records."""
+        return [r.to_dict() for r in self.transfer_engine.list_onboarded()]
 
     def record_request(
         self,

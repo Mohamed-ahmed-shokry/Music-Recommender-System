@@ -1,3 +1,34 @@
+# Milestone 0.50.0 Roadmap — Phase 193 & 194
+
+## Phase 193 & 194: Cross-Platform Cold-Start Metadata Transfer Learning and Semantic Artist Onboarding (0.50.0)
+
+### 1. Objective
+Equip the recommendation platform with cross-platform cold-start metadata transfer learning and semantic artist onboarding:
+1. A **Cold-Start Transfer & Onboarding Engine** (`ColdStartTransferEngine`, `OnboardingStatus`, `ExternalArtistProfile`, `TransferNeighbor`, `OnboardedArtistRecord`) projecting zero-interaction external artists into the collaborative embedding space using weighted metadata similarity (genres, moods, country, era) to catalog anchors.
+2. **Auditability & Persistence** tracking registered catalog anchors, onboarded artist records, transfer confidence scores, and JSON state snapshot persistence.
+3. Integration with `RecommenderService`, Prometheus telemetry (`telemetry.py`), FastAPI `/onboarding/*` routes, operator CLI (`onboarding-status`, `onboard-artist`), and Streamlit dashboard (`Cold-Start Onboarding`), releasing Milestone 0.50.0 with 100% green CI.
+
+### 2. Scope
+1. **Cold-Start Transfer Engine (`src/music_recommender/cold_start_transfer.py`)**: `OnboardingStatus`, `ExternalArtistProfile`, `TransferNeighbor`, `OnboardedArtistRecord`, `ColdStartTransferEngine`.
+2. **Service & Telemetry (`src/music_recommender/service.py`, `telemetry.py`)**: Wire `self.transfer_engine` and export `music_recommender_cold_start_anchors_registered`, `music_recommender_cold_start_artists_onboarded_total`, `music_recommender_cold_start_mean_confidence`.
+3. **FastAPI Endpoints (`api/main.py`)**: `GET /onboarding/status`, `POST /onboarding/artists`, `GET /onboarding/artists`, `GET /onboarding/artists/{artist_id}`.
+4. **CLI & Dashboard (`cli.py`, `dashboard.py`)**: `onboarding-status`, `onboard-artist`, and `"Cold-Start Onboarding"` Streamlit tab.
+5. **Tests, Docs & Release 0.50.0**: Tests across `tests/test_cold_start_transfer.py`, `tests/test_service.py`, `tests/test_api.py`, `tests/test_cli.py`, `tests/test_dashboard.py`, plus `README.md`, `CHANGELOG.md`, `PLAN.md`, `docs/PROGRESS.md`, and `pyproject.toml` (`0.50.0`).
+
+### 3. Acceptance Criteria
+- [ ] AC-1: `ColdStartTransferEngine` projects external artist metadata into normalized anchor-aligned embeddings with nearest-anchor neighbors and confidence scores.
+- [ ] AC-2: `ColdStartTransferEngine` syncs catalog anchors from `RecommenderArtifact`, tracks onboarding status, and supports JSON state persistence.
+- [ ] AC-3: `RecommenderService` exposes cold-start onboarding methods and Prometheus exports cold-start onboarding metrics.
+- [ ] AC-4: FastAPI `/onboarding/*` endpoints validate payloads and manage artist onboarding and status inspection.
+- [ ] AC-5: CLI commands `onboarding-status` and `onboard-artist` execute cleanly in text and `--json` modes.
+- [ ] AC-6: Streamlit dashboard renders the `"Cold-Start Onboarding"` tab cleanly without errors.
+- [ ] AC-7: All local CI-parity checks and remote CI workflow runs pass 100%.
+
+### 4. Exclusions
+- Live external Spotify/Apple Music OAuth ingestion is deferred; cross-platform metadata transfer and semantic alignment execute deterministically in-process.
+
+---
+
 # Milestone 0.49.0 Roadmap — Phase 191 & 192
 
 ## Phase 191 & 192: Automated Incident Postmortem Generator, Root-Cause Runbooks, and SLA Reporting (0.49.0)

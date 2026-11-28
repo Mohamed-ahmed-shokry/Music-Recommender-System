@@ -884,6 +884,48 @@ def collect_service_metric_families(
             )
             families.append(sla_budget_fam)
 
+    # 12. Cold-Start Metadata Transfer & Onboarding Metrics
+    transfer_eng = (
+        getattr(service, "transfer_engine", None) if service is not None else None
+    )
+    if transfer_eng is not None and hasattr(transfer_eng, "get_status"):
+        with contextlib.suppress(Exception):
+            tr_status = transfer_eng.get_status()
+            tr_labels = dict(custom_labels) if custom_labels else {}
+
+            anchors_fam = MetricFamily(
+                name="music_recommender_cold_start_anchors_registered",
+                help_text="Total catalog anchor artists registered for transfer.",
+                metric_type=MetricType.GAUGE,
+            )
+            anchors_fam.add_sample(
+                value=int(tr_status.get("anchors_registered", 0)),
+                labels=tr_labels,
+            )
+            families.append(anchors_fam)
+
+            onb_fam = MetricFamily(
+                name="music_recommender_cold_start_artists_onboarded_total",
+                help_text="Total cold-start artists onboarded via metadata transfer.",
+                metric_type=MetricType.COUNTER,
+            )
+            onb_fam.add_sample(
+                value=int(tr_status.get("onboarding_total", 0)),
+                labels=tr_labels,
+            )
+            families.append(onb_fam)
+
+            conf_fam = MetricFamily(
+                name="music_recommender_cold_start_mean_confidence",
+                help_text="Mean transfer confidence across onboarded artists.",
+                metric_type=MetricType.GAUGE,
+            )
+            conf_fam.add_sample(
+                value=float(tr_status.get("mean_confidence", 0.0)),
+                labels=tr_labels,
+            )
+            families.append(conf_fam)
+
     return families
 
 

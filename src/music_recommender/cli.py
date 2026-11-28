@@ -6675,5 +6675,116 @@ def sla_report_command(
     typer.echo(f"Incidents:        {report['incident_count']}")
 
 
+def _get_transfer_engine_or_service() -> tuple[Any | None, Any]:
+    from music_recommender.cold_start_transfer import get_global_transfer_engine
+
+    service: RecommenderService | None = None
+    try:
+        service = RecommenderService.from_artifacts()
+    except Exception as exc:
+        logger.debug("RecommenderService unavailable: %s", exc)
+
+    if service is not None:
+        return service, service.transfer_engine
+    return None, get_global_transfer_engine()
+
+
+@app.command("onboarding-status")
+def onboarding_status_command(
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON cold-start onboarding status."),
+    ] = False,
+) -> None:
+    """Display catalog anchor count and cold-start artist onboarding metrics."""
+    _service, engine = _get_transfer_engine_or_service()
+    status = engine.get_status()
+    if as_json:
+        typer.echo(json.dumps(status, indent=2))
+        return
+
+    typer.secho("=== Cold-Start Metadata Transfer Status ===", bold=True)
+    typer.echo(f"Catalog Anchors:   {status['anchors_registered']}")
+    typer.echo(f"Embedding Dim:     {status['embedding_dim']}")
+    typer.echo(
+        f"Onboarded Artists: {status['onboarded_count']} "
+        f"(active={status['active_onboarded_count']})"
+    )
+    typer.echo(f"Mean Confidence:   {status['mean_confidence']:.4f}")
+
+
+@app.command("onboard-artist")
+def onboard_artist_command(
+    artist_id: Annotated[
+        str,
+        typer.Argument(help="External artist ID to onboard."),
+    ],
+    name: Annotated[
+        str,
+        typer.Option("--name", help="Artist display name."),
+    ] = "New Artist",
+    platform: Annotated[
+        str,
+        typer.Option("--platform", help="Source platform (spotify, bandcamp, etc.)."),
+    ] = "spotify",
+    genres: Annotated[
+        str,
+        typer.Option("--genres", help="Comma-separated genre tags."),
+    ] = "pop",
+    moods: Annotated[
+        str,
+        typer.Option("--moods", help="Comma-separated mood tags."),
+    ] = "",
+    country: Annotated[
+        str,
+        typer.Option("--country", help="Artist country code."),
+    ] = "",
+    era: Annotated[
+        str,
+        typer.Option("--era", help="Artist era tag (e.g. 2020s)."),
+    ] = "",
+    popularity: Annotated[
+        float,
+        typer.Option("--popularity", help="External popularity score in [0, 1]."),
+    ] = 0.0,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Emit raw JSON onboarded artist record."),
+    ] = False,
+) -> None:
+    """Project and onboard a zero-interaction external artist via metadata transfer."""
+    from music_recommender.cold_start_transfer import ExternalArtistProfile
+
+    _service, engine = _get_transfer_engine_or_service()
+    genre_tuple = tuple(g.strip() for g in genres.split(",") if g.strip())
+    mood_tuple = tuple(m.strip() for m in moods.split(",") if m.strip())
+    try:
+        profile = ExternalArtistProfile(
+            artist_id=artist_id,
+            artist_name=name,
+            source_platform=platform,
+            genres=genre_tuple,
+            mood_tags=mood_tuple,
+            country=country,
+            era=era,
+            external_popularity=popularity,
+        )
+        record = engine.onboard_artist(profile).to_dict()
+    except ValueError as exc:
+        typer.secho(f"Invalid onboarding profile: {exc}", fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+    if as_json:
+        typer.echo(json.dumps(record, indent=2))
+        return
+
+    typer.secho(f"=== Onboarded Artist: {name} ({artist_id}) ===", bold=True)
+    typer.echo(f"Status:          {record['status']}")
+    typer.echo(f"Confidence:      {record['confidence_score']:.4f}")
+    typer.echo(f"Embedding Dim:   {record['embedding_dim']}")
+    anchors = [n["anchor_artist_id"] for n in record["nearest_anchors"]]
+    typer.echo(f"Nearest Anchors: {anchors}")
+
+
 if __name__ == "__main__":
     app()  # pragma: no cover - CLI entry point invoked by `python -m`
