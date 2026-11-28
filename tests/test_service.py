@@ -2900,3 +2900,35 @@ def test_service_postmortem_and_telemetry_integration(tmp_path: Path) -> None:
     assert "music_recommender_postmortems_generated_total 1" in prom_text
     assert "music_recommender_sla_availability_pct" in prom_text
     assert "music_recommender_sla_error_budget_remaining_pct" in prom_text
+
+
+def test_service_cold_start_transfer_and_telemetry_integration(tmp_path: Path) -> None:
+    from music_recommender.cold_start_transfer import ColdStartTransferEngine
+    from music_recommender.telemetry import export_prometheus_metrics
+
+    service = create_service(tmp_path)
+    service.transfer_engine = ColdStartTransferEngine()
+    synced = service.transfer_engine.sync_from_artifact(service.artifact)
+    assert synced > 0
+
+    record = service.onboard_cold_start_artist(
+        artist_id="ext_svc_01",
+        artist_name="Service Transfer Artist",
+        source_platform="spotify",
+        genres=["pop", "rock"],
+        mood_tags=["energetic"],
+        external_popularity=0.6,
+    )
+    assert record["profile"]["artist_id"] == "ext_svc_01"
+    assert record["embedding_dim"] > 0
+    assert service.get_onboarded_artist("ext_svc_01") is not None
+    assert len(service.list_onboarded_artists()) == 1
+
+    status = service.get_cold_start_transfer_status()
+    assert status["anchors_registered"] == synced
+    assert status["onboarded_count"] == 1
+
+    prom_text = export_prometheus_metrics(service)
+    assert f"music_recommender_cold_start_anchors_registered {synced}" in prom_text
+    assert "music_recommender_cold_start_artists_onboarded_total 1" in prom_text
+    assert "music_recommender_cold_start_mean_confidence" in prom_text
