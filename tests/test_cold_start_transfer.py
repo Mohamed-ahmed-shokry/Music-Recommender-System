@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import math
+from pathlib import Path
+from types import SimpleNamespace
+
+import pandas as pd
 import pytest
 
 from music_recommender.cold_start_transfer import (
     AnchorArtist,
+    ColdStartTransferEngine,
     ExternalArtistProfile,
     OnboardedArtistRecord,
     OnboardingStatus,
     TransferNeighbor,
+    get_global_transfer_engine,
+    set_global_transfer_engine,
 )
 
 
@@ -75,3 +83,118 @@ def test_anchor_and_onboarded_record_roundtrip() -> None:
     assert restored.status == OnboardingStatus.ACTIVE
     assert restored.nearest_anchors[0].anchor_artist_id == "artist_1"
     assert restored.to_dict()["embedding_dim"] == 2
+
+
+def test_transfer_engine_projection_and_onboarding() -> None:
+    engine = ColdStartTransferEngine(default_embedding_dim=4)
+    engine.register_anchor(
+        AnchorArtist(
+            artist_id="a_pop",
+            artist_name="Pop Star",
+            embedding=(1.0, 0.0, 0.0, 0.0),
+            genres=("pop", "dance"),
+            mood_tags=("bright", "energetic"),
+            country="US",
+            era="2020s",
+        )
+    )
+    engine.register_anchor(
+        AnchorArtist(
+            artist_id="a_rock",
+            artist_name="Rock Band",
+            embedding=(0.0, 1.0, 0.0, 0.0),
+            genres=("rock", "indie"),
+            mood_tags=("moody",),
+            country="UK",
+            era="2010s",
+        )
+    )
+
+    profile = ExternalArtistProfile(
+        artist_id="ext_pop_1",
+        artist_name="New Pop Duo",
+        source_platform="spotify",
+        genres=("pop", "dance"),
+        mood_tags=("bright",),
+        country="US",
+        era="2020s",
+        external_popularity=0.8,
+    )
+    record = engine.onboard_artist(profile)
+    assert record.status == OnboardingStatus.ACTIVE
+    assert record.nearest_anchors[0].anchor_artist_id == "a_pop"
+    assert record.confidence_score > 0.5
+    norm = math.sqrt(sum(v * v for v in record.projected_embedding))
+    assert norm == pytest.approx(1.0, rel=1e-4)
+    assert engine.get_onboarded("ext_pop_1") == record
+
+    # Novel unmatched genre falls back to deterministic hash vector & PENDING
+    novel = ExternalArtistProfile(
+        artist_id="ext_novel",
+        artist_name="Microtonal Choir",
+        genres=("microtonal",),
+    )
+    novel_rec = engine.onboard_artist(novel, min_confidence=0.25)
+    assert novel_rec.status == OnboardingStatus.PENDING
+    assert novel_rec.nearest_anchors == ()
+    assert len(novel_rec.projected_embedding) == 4
+
+
+def test_transfer_engine_artifact_sync_and_persistence(tmp_path: Path) -> None:
+    artifact = SimpleNamespace(
+        model=SimpleNamespace(item_factors=[[0.8, 0.6], [0.0, 1.0]]),
+        mappings={
+            "artist_id_to_index": {"art_1": 0, "art_2": 1},
+            "artist_id_to_name": {"art_1": "Synth Alpha", "art_2": "Jazz Beta"},
+        },
+        content_artifacts=SimpleNamespace(
+            metadata=pd.DataFrame(
+                {
+                    "artist_id": ["art_1", "art_2"],
+                    "artist_name": ["Synth Alpha", "Jazz Beta"],
+                    "genres": ["synthwave;electronic", "jazz;ambient"],
+                    "mood_tags": ["energetic", "calm"],
+                    "country": ["SE", "JP"],
+                    "era": ["2020s", "2010s"],
+                }
+            )
+        ),
+    )
+
+    engine = ColdStartTransferEngine()
+    synced = engine.sync_from_artifact(artifact)
+    assert synced == 2
+    assert engine.anchor_count == 2
+
+    rec = engine.onboard_artist(
+        ExternalArtistProfile(
+            artist_id="ext_jazz",
+            artist_name="Tokyo Quartet",
+            source_platform="bandcamp",
+            genres=("jazz",),
+            mood_tags=("calm",),
+            country="JP",
+        )
+    )
+    assert rec.nearest_anchors[0].anchor_artist_id == "art_2"
+
+    state_file = tmp_path / "transfer_state.json"
+    engine.save_state(state_file)
+
+    restored = ColdStartTransferEngine()
+    restored.load_state(state_file)
+    assert restored.anchor_count == 2
+    assert restored.get_onboarded("ext_jazz") is not None
+    status = restored.get_status()
+    assert status["onboarded_count"] == 1
+    assert status["active_onboarded_count"] == 1
+
+
+def test_global_transfer_engine_accessor() -> None:
+    original = get_global_transfer_engine()
+    custom = ColdStartTransferEngine()
+    try:
+        set_global_transfer_engine(custom)
+        assert get_global_transfer_engine() is custom
+    finally:
+        set_global_transfer_engine(original)
