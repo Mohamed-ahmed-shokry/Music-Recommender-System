@@ -2,10 +2,10 @@
 
 ## 1. Micro-Task Checklist
 - [x] Task 1: Define Phase 193 & 194 roadmap, update `PLAN.md`, and initialize `docs/PROGRESS.md`.
-- [ ] Task 2: Implement `OnboardingStatus`, `ExternalArtistProfile`, `TransferNeighbor`, and `OnboardedArtistRecord` in `src/music_recommender/cold_start_transfer.py`.
-- [ ] Task 3: Add unit tests for cold-start onboarding models in `tests/test_cold_start_transfer.py`.
-- [ ] Task 4: Implement `ColdStartTransferEngine` and global accessors in `src/music_recommender/cold_start_transfer.py`.
-- [ ] Task 5: Add unit tests for metadata transfer projection, artifact anchor syncing, and JSON persistence in `tests/test_cold_start_transfer.py`.
+- [x] Task 2: Implement `OnboardingStatus`, `ExternalArtistProfile`, `TransferNeighbor`, and `OnboardedArtistRecord` in `src/music_recommender/cold_start_transfer.py`.
+- [x] Task 3: Add unit tests for cold-start onboarding models in `tests/test_cold_start_transfer.py`.
+- [x] Task 4: Implement `ColdStartTransferEngine` and global accessors in `src/music_recommender/cold_start_transfer.py`.
+- [x] Task 5: Add unit tests for metadata transfer projection, artifact anchor syncing, and JSON persistence in `tests/test_cold_start_transfer.py`.
 - [ ] Task 6: Integrate `ColdStartTransferEngine` into `RecommenderService` (`src/music_recommender/service.py`) and Prometheus metrics (`src/music_recommender/telemetry.py`).
 - [ ] Task 7: Add service and telemetry integration tests in `tests/test_service.py`.
 - [ ] Task 8: Implement `/onboarding/*` endpoints in `api/main.py`.
@@ -20,8 +20,8 @@
 ## 2. Acceptance Criteria Tracking
 | Criterion | Status | Verification Evidence |
 | :--- | :---: | :--- |
-| AC-1: ColdStartTransferEngine projects external artist metadata into normalized anchor-aligned embeddings with confidence scores | `Pending` | `tests/test_cold_start_transfer.py` |
-| AC-2: ColdStartTransferEngine syncs catalog anchors from RecommenderArtifact and supports JSON state persistence | `Pending` | `tests/test_cold_start_transfer.py` |
+| AC-1: ColdStartTransferEngine projects external artist metadata into normalized anchor-aligned embeddings with confidence scores | `Passed` | `tests/test_cold_start_transfer.py` |
+| AC-2: ColdStartTransferEngine syncs catalog anchors from RecommenderArtifact and supports JSON state persistence | `Passed` | `tests/test_cold_start_transfer.py` |
 | AC-3: RecommenderService exposes cold-start onboarding methods and Prometheus exports cold-start onboarding metrics | `Pending` | `tests/test_service.py` |
 | AC-4: FastAPI /onboarding/* endpoints validate payloads and manage artist onboarding and status inspection | `Pending` | `tests/test_api.py` |
 | AC-5: CLI commands onboarding-status and onboard-artist execute cleanly in text and --json modes | `Pending` | `tests/test_cli.py` |
